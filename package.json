@@ -1,0 +1,17 @@
+{
+  "name": "opencode-hive",
+  "version": "0.1.0",
+  "description": "HIVE — Evolutional agent structure for OpenCode. Collective intelligence that spawns, merges, splits, mutates, and dissolves capabilities as needed.",
+  "main": "index.js",
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./tui": "./tui.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lohnn/evolutional_agent_structure.git"
+  },
+  "keywords": ["opencode", "plugin", "agents", "hive"],
+  "license": "MIT"
+}
