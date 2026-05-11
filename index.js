@@ -189,6 +189,7 @@ const PLUGIN_ROOT = path.dirname(new URL(import.meta.url).pathname);
 const AGENTS_DIR = path.join(PLUGIN_ROOT, "agents");
 const COMMANDS_DIR = path.join(PLUGIN_ROOT, "commands");
 const TEMPLATES_DIR = path.join(PLUGIN_ROOT, "templates");
+const RULES_DIR = path.join(PLUGIN_ROOT, "rules");
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Bootstrap: ensure project has capabilities/dissolved dirs and _template.md
@@ -250,6 +251,13 @@ export const HivePlugin = async function (ctx) {
             template: cmd.body.trim(),
             ...(fm.agent && { agent: fm.agent }),
           };
+        }
+
+        // Inject HIVE delegation rules as instructions
+        config.instructions = config.instructions || [];
+        const delegationRule = path.join(RULES_DIR, "delegation.md");
+        if (!config.instructions.includes(delegationRule)) {
+          config.instructions.push(delegationRule);
         }
       } catch (err) {
         fs.writeFileSync(
