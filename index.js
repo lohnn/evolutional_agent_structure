@@ -191,13 +191,32 @@ const COMMANDS_DIR = path.join(PLUGIN_ROOT, "commands");
 const TEMPLATES_DIR = path.join(PLUGIN_ROOT, "templates");
 const RULES_DIR = path.join(PLUGIN_ROOT, "rules");
 
-// Read version from package.json
+// Read version from package.json + git commit hash
 let PLUGIN_VERSION = "unknown";
 try {
   const pkg = JSON.parse(fs.readFileSync(path.join(PLUGIN_ROOT, "package.json"), "utf8"));
   PLUGIN_VERSION = pkg.version || "unknown";
 } catch {
   // ignore
+}
+
+let PLUGIN_COMMIT = "unknown";
+try {
+  const headFile = path.join(PLUGIN_ROOT, ".git/HEAD");
+  const head = fs.readFileSync(headFile, "utf8").trim();
+  if (head.startsWith("ref: ")) {
+    const refPath = path.join(PLUGIN_ROOT, ".git", head.slice(5));
+    PLUGIN_COMMIT = fs.readFileSync(refPath, "utf8").trim().slice(0, 8);
+  } else {
+    PLUGIN_COMMIT = head.slice(0, 8);
+  }
+} catch {
+  // Not a git checkout (e.g. installed via npm/bun cache) — try .git-commit file
+  try {
+    PLUGIN_COMMIT = fs.readFileSync(path.join(PLUGIN_ROOT, ".git-commit"), "utf8").trim().slice(0, 8);
+  } catch {
+    // ignore
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -235,7 +254,7 @@ export const HivePlugin = async function (ctx) {
     }).catch(() => {});
   };
 
-  log("info", `HIVE plugin v${PLUGIN_VERSION} loaded from ${PLUGIN_ROOT}`);
+  log("info", `HIVE plugin v${PLUGIN_VERSION} (${PLUGIN_COMMIT}) loaded from ${PLUGIN_ROOT}`);
 
   let lastSnapshot = await snapshotAgentsMtime(projectAgentsPath);
 
