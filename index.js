@@ -294,6 +294,30 @@ export const HivePlugin = async function (ctx) {
     "command.execute.before": async (input, _output) => {
       if (input.command === "reload") {
         lastSnapshot = await snapshotAgentsMtime(projectAgentsPath);
+
+        // Bust the plugin cache so dispose + re-init fetches the latest version
+        const cacheBase = path.join(
+          process.env.HOME || "",
+          ".cache/opencode/packages"
+        );
+        if (fs.existsSync(cacheBase)) {
+          try {
+            const entries = fs.readdirSync(cacheBase);
+            for (const entry of entries) {
+              // Match our plugin's cache directory (git URL gets sanitized)
+              if (entry.includes("evolutional_agent_structure")) {
+                fs.rmSync(path.join(cacheBase, entry), {
+                  recursive: true,
+                  force: true,
+                });
+                log("info", `Cleared plugin cache: ${entry}`);
+              }
+            }
+          } catch (err) {
+            log("warn", `Failed to clear plugin cache: ${err.message}`);
+          }
+        }
+
         // @ts-ignore
         client?.instance?.dispose?.();
       }
