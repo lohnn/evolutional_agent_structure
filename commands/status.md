@@ -1,6 +1,5 @@
 ---
 description: View the current state of the capability ecosystem
-agent: hive
 ---
 
 # STATUS — Ecosystem Overview

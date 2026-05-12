@@ -1,6 +1,5 @@
 ---
 description: Return a capability to the void
-agent: hive
 ---
 
 # DISSOLVE — Return to Void

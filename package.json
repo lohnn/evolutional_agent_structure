@@ -1,6 +1,6 @@
 {
   "name": "opencode-hive",
-  "version": "0.2.5",
+  "version": "0.3.0",
   "description": "HIVE — Evolutional agent structure for OpenCode. Collective intelligence that spawns, merges, splits, mutates, and dissolves capabilities as needed.",
   "main": "index.js",
   "type": "module",

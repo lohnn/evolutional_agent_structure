@@ -1,6 +1,5 @@
 ---
 description: Trigger ecosystem self-analysis and evolution
-agent: hive
 ---
 
 # EVOLVE — Ecosystem Evolution

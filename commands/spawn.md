@@ -1,6 +1,5 @@
 ---
 description: Manifest a new capability from the void
-agent: hive
 ---
 
 # SPAWN — Manifest Capability
