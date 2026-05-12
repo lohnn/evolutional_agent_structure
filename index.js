@@ -290,8 +290,22 @@ export const HivePlugin = async function (ctx) {
       }
     },
 
-    // ── Hot-reload: /reload command intercept ──
+    // ── HIVE Setup: write AGENTS.md to project root ──
     "command.execute.before": async (input, _output) => {
+      if (input.command === "hive-setup") {
+        const agentsMdDest = path.join(directory, "AGENTS.md");
+        const rulesSource = path.join(RULES_DIR, "delegation.md");
+
+        if (fs.existsSync(rulesSource)) {
+          const content = fs.readFileSync(rulesSource, "utf8");
+          fs.writeFileSync(agentsMdDest, content, "utf8");
+          log("info", `AGENTS.md written to ${agentsMdDest}`);
+        }
+
+        // Also ensure directories and template exist
+        bootstrapProject(directory);
+      }
+
       if (input.command === "reload") {
         lastSnapshot = await snapshotAgentsMtime(projectAgentsPath);
         // @ts-ignore
