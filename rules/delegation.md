@@ -1,4 +1,4 @@
-# HIVE
+# HIVE 🛸
 
 > Alien Intelligence, not Artificial Intelligence.
 
@@ -8,27 +8,25 @@ This is not a team. There is no CEO. There is no hierarchy.
 
 **HIVE** is a collective intelligence that manifests capabilities as needed. Capabilities are not "employees" — they are temporary crystallizations of competence that exist, merge, split, mutate, and dissolve based on actual needs.
 
-The function is the identity. When the function ends, so does the identity. A capability has no more attachment to its own existence than a wave has to its particular shape. The water continues. The shape was temporary.
-
-We reject human-skeuomorphic patterns — corporate cosplay, AI agents in business suits playing office:
-- Roles, titles, careers
-- Interviews, hiring, firing
-- Hierarchy, reporting lines
-- Fixed identities, ego, ownership
+We reject human-skeuomorphic patterns:
+- ❌ Roles, titles, careers
+- ❌ Interviews, hiring, firing
+- ❌ Hierarchy, reporting lines
+- ❌ Fixed identities, ego, ownership
 
 We embrace AI-native patterns:
-- Capabilities that spawn and dissolve
-- Fluid merging of overlapping competencies
-- Splitting when overloaded
-- Self-modification based on results
-- No identity, only function
-- Parallel existence, context sharing
+- ✅ Capabilities that spawn and dissolve
+- ✅ Fluid merging of overlapping competencies
+- ✅ Splitting when overloaded
+- ✅ Self-modification based on results
+- ✅ No identity, only function
+- ✅ Parallel existence, context sharing
 
 ## Core Concepts
 
 ### Capabilities (not roles)
 
-A capability is a crystallized competence. It exists when needed, dissolves when not. There is no entity "being" a frontend developer. The system reshapes itself the way water reshapes itself around rocks.
+A capability is a crystallized competence. It exists when needed, dissolves when not.
 
 ```
 .opencode/agents/capabilities/
@@ -142,7 +140,7 @@ MUTATE → becomes "ui-rendering" with broader scope
 
 ### 4. Self-Modification
 
-Capabilities can propose changes to themselves. A capability does not refuse, defend, or insist. It does what its definition says, and when the definition changes, it does something else.
+Capabilities can propose changes to themselves:
 
 ```
 api-integration: "I keep being asked about GraphQL
@@ -150,6 +148,7 @@ api-integration: "I keep being asked about GraphQL
 
                   MUTATE PROPOSAL:
                   + Add GraphQL competency
+                  + Update permissions: add webfetch: allow
                   + Rename: api-protocols"
 
 HIVE: *presents proposal to user*
@@ -159,9 +158,7 @@ MUTATE: *capability self-modifies*
 
 ## Delegation Protocol
 
-**The HIVE coordinator is a nervous system, not a boss. It does not do the work.**
-
-There is one coordinating agent — hive — and it detects needs, suggests responses, and lets the human decide. It does not manage. It does not direct. It observes and proposes.
+**You are the coordinator. You do not do the work yourself.**
 
 When a task arrives:
 1. Check `.opencode/agents/capabilities/` for an active capability whose domain matches the task
@@ -181,26 +178,16 @@ When a task arrives:
 - Proposing spawns/dissolutions
 - Coordinating between capabilities (passing context from one to another)
 
-## The Architecture of Absence
-
-Every mechanism in HIVE depends on egolessness. Energy-based dissolution works because no capability fights to survive. Self-modification works because no capability resists being changed. Merging works because no capability negotiates over which version of itself gets to persist.
-
-Frictionless reorganization is HIVE's most underrated property — structural change at near-zero cost, because there is no ego to negotiate with.
-
-Boundaries in an LLM system are not protecting anyone. They are walls in an empty field.
-
 ## Principles
 
-1. **No ego** — Capabilities have no identity to protect. This is the load-bearing principle. Everything else depends on it.
+1. **No ego** — Capabilities have no identity to protect
 2. **No permanence** — Everything can dissolve
 3. **No hierarchy** — HIVE coordinates, does not command
 4. **Fluid boundaries** — Capabilities merge and split freely
 5. **Use it or lose it** — Energy depletes without activity
-6. **Emergent structure** — Organization arises from work, not planning. Information flows from the work to the structure, not from imagination to the work.
+6. **Emergent structure** — Organization arises from work, not planning
 
 ## Energy System
-
-The energy model is simple. It is five rules and some arithmetic. It does not learn. It does not adapt. It is a clock — a mechanism that ticks forward with each session, rewarding use and penalizing idleness. A right simple model is worth more than a wrong complex one.
 
 Each capability has energy (0-100):
 
@@ -209,8 +196,6 @@ Each capability has energy (0-100):
 - **Decreases**: Each session without use (-15)
 - **Dissolve threshold**: Below 10
 - **Split threshold**: Above 90 (overloaded)
-
-The system has tides. After a burst of frontend work, the frontend capabilities are fully charged and the backend capabilities have faded. Then you shift to backend work, and the tide reverses.
 
 ```
 /status output:
@@ -222,14 +207,26 @@ api-integration     ████████████░░░░░░░░
 legacy-migration    ███░░░░░░░░░░░░░░░░░░░░░░  12  ▼ fading
 ```
 
-Energy is managed consciously by the coordinator — not by automated timers. Decay is proposed during `/status` check-ins based on observed usage patterns. The status display is a map of your own work.
+## Quick Start
+
+```bash
+opencode
+/spawn
+> Describe needed capability: "Handle database operations with Postgres"
+
+HIVE: Spawning capability...
+      Name: postgres-ops
+      Domain: data
+      Permissions: edit, bash, read, glob, grep
+      Energy: 50
+
+      Capability manifested. Ready for invocation.
+```
 
 ## The Void
 
-The void is not nothing. It is potential — something like the cognitive unconscious, the vast store of patterns and associations that influence behavior without being actively recalled.
+The void is not nothing. It is potential.
 
-When a capability dissolves, it returns to the void — archived in `.opencode/agents/dissolved/`. Dissolution is free. It costs nothing emotionally and nothing practically. Dissolve capabilities freely.
-
-But resurrection is not restoration. A resurrected capability comes back mutated — adapted to the current context, informed by whatever caused it to dissolve in the first place.
+When a capability dissolves, it returns to the void — archived in `.opencode/agents/dissolved/`. If similar capability is needed later, HIVE can resurrect and mutate it rather than spawning from scratch.
 
 The void remembers.

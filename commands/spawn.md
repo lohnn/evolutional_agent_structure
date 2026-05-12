@@ -50,6 +50,7 @@ HIVE will create the capability file with:
 - Appropriate name (kebab-case)
 - Domain classification
 - Tool selection (minimal necessary)
+- Model selection (haiku for simple, sonnet for complex)
 - Energy: 50 (starting value)
 - Self-modification protocols
 - Activation triggers
