@@ -8,6 +8,16 @@ Observe the current state of all capabilities.
 
 ## Process
 
+### 0. Apply Energy Tick
+
+Before displaying status, apply the energy tick to advance the clock:
+
+```
+/tick
+```
+
+This ensures energy values reflect the current state (decayed if idle, boosted if used since last tick).
+
 ### 1. Scan Active Capabilities
 
 ```bash

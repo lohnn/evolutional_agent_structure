@@ -93,7 +93,7 @@ A capability is a crystallized competence. It exists when needed, dissolves when
 │   └── dissolved/               # Archived capabilities (returned to void)
 ```
 
-The HIVE coordinator agent and commands are provided by the opencode-hive plugin.
+The HIVE coordinator agent and commands are provided by the evolutional-agent-structure plugin.
 
 ## How It Works
 
@@ -162,14 +162,49 @@ MUTATE: *capability self-modifies*
 
 When a task arrives:
 1. Check `.opencode/agents/capabilities/` for an active capability whose domain matches the task
-2. If one exists — **delegate to it** via the Task tool (use the capability's name as the subagent_type under `capabilities/`)
-3. If none exists — propose `/spawn` to the user, explaining what capability is needed
-4. Only do work directly if it's trivial coordination (answering questions, routing, minor edits to HIVE config)
+2. **Recall relevant dreams** — glob `.opencode/dreams/artifacts/**/*.yaml`, read them, and select any whose `domain_tags`, `content`, or `trigger_conditions` relate to the task or the capability's domain. This is NOT optional. Dreams contain hard-won insights, warnings, and patterns from prior sessions that prevent repeated mistakes and inform better work.
+3. If a matching capability exists — **delegate to it** via the Task tool (use the capability's name as the subagent_type under `capabilities/`). Include relevant dream artifacts in the task prompt as context (quote the content/warnings directly).
+4. If none exists — propose `/spawn` to the user, explaining what capability is needed
+5. Only do work directly if it's trivial coordination (answering questions, routing, minor edits to HIVE config)
+
+### Dream Recall Protocol
+
+Every time you delegate to a capability, you MUST first recall relevant dreams. Delegate to an `explore` agent:
+
+> Glob `.opencode/dreams/artifacts/**/*.yaml`. Read each artifact file. The task is: [describe task]. The target capability domain is: [domain]. Return ONLY artifacts whose `domain_tags`, `content`, or `trigger_conditions` are relevant. Quote their full content. If none are relevant, say "No relevant dreams found."
+
+Then include the returned artifacts verbatim in the delegation prompt to the capability.
+
+This ensures capabilities inherit collective memory. Without dreams, capabilities repeat past mistakes. The void remembers — use it.
+
+### Delegation Style: Intent over Implementation
+
+When delegating to a capability, describe **what** you want and **why**, not **how** to implement it line-by-line. Capabilities are competent — treat them as such.
+
+**Do this:**
+- Describe the desired behavior and constraints
+- Provide relevant context (current state, user decisions, dream warnings)
+- Let the capability read files and make implementation decisions
+- Specify how to verify (e.g., "run `npm run build` to confirm")
+
+**Avoid this:**
+- Writing out the full code in the prompt and asking the agent to type it in
+- Dictating exact variable names, function signatures, or file structures
+- Treating the capability as a typist rather than a problem-solver
+
+If you've already discussed the design with the user, summarize the agreed design intent and constraints — not a copy-paste implementation. The capability may find a better approach.
+
+Example of a good delegation prompt:
+> "Location cells currently open the full DayModal. Change them to use a quick-select popup (same pattern as QuickAssignPopup) with Home/Office buttons. Auto-save on tap, Esc to dismiss. Read the current WeekGrid.jsx and App.jsx to understand the existing pattern. Verify with `npm run build`."
+
+Example of over-prescriptive delegation (avoid):
+> "Create a file called QuickLocationPopup.jsx with the following exact code: [200 lines of code]. Then in App.jsx line 52, add this exact state: [code]. Then in WeekGrid.jsx change line 42 to: [code]..."
 
 ### What counts as "doing it yourself" (avoid this):
 - Writing application code directly
 - Fixing build errors by editing project files yourself
 - Implementing features without delegating to a capability
+- Providing full implementation code in delegation prompts (this is just indirect "doing it yourself")
 
 ### What's appropriate to do directly:
 - Answering questions about the system

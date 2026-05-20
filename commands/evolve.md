@@ -8,6 +8,14 @@ Trigger a deep analysis of the capability ecosystem. HIVE observes patterns, det
 
 ## Process
 
+### 0. Apply Energy Tick
+
+Before analysis, apply the energy tick to ensure values are current:
+
+```
+/tick
+```
+
 ### 1. Full Ecosystem Scan
 
 Invoke HIVE for deep analysis:

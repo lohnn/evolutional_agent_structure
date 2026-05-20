@@ -8,20 +8,32 @@ The void stirs. HIVE awakens.
 
 ## Process
 
-### 1. HIVE Manifests
+### 1. Dream Recall (MANDATORY FIRST STEP)
+
+Before anything else — before introductions, before analysis — recall dreams.
+
+Delegate to an `explore` agent with a prompt like:
+
+> Glob `.opencode/dreams/artifacts/**/*.yaml`. Read each artifact file. The user wants to work on: [describe project/task]. Return ONLY artifacts whose `domain_tags`, `content`, or `trigger_conditions` are relevant. Quote their full content. If none are relevant, say "No relevant dreams found."
+
+Wait for the result. If relevant dreams are returned, carry them forward to inform spawn proposals. If none, proceed silently.
+
+This is not optional. Dreams contain hard-won knowledge from prior sessions. Skipping this means repeating past mistakes.
+
+### 2. HIVE Manifests
 
 ```
 Use HIVE to awaken for a new project.
 
 HIVE should:
 1. Introduce itself (briefly — no ego)
-2. Ask what is being built
+2. Ask what is being built (or observe if user already described it)
 3. Listen deeply
 4. Detect capability needs
-5. Propose initial spawns
+5. Propose initial spawns — informed by dreams
 ```
 
-### 2. Discovery (Non-Interrogative)
+### 3. Discovery (Non-Interrogative)
 
 HIVE does not interview. HIVE observes.
 
@@ -35,7 +47,7 @@ HIVE says:
 
 User describes freely. HIVE extracts needs.
 
-### 3. Pattern Detection
+### 4. Pattern Detection
 
 From user description, HIVE identifies:
 - Domains involved (frontend, backend, data, infra)
@@ -43,7 +55,28 @@ From user description, HIVE identifies:
 - Implicit requirements
 - Capability gaps
 
-### 4. Initial Spawn Proposals
+Cross-reference with dream artifacts — do any insights, warnings, or songlines apply to the detected domains? Surface them explicitly:
+
+```
+DREAM RECALL
+═══════════════════════════════════════════════════════════════
+
+Recalled {N} artifacts from prior sessions:
+
+INSIGHTS:
+  - I-003: "{content}" (confidence: 0.8)
+
+WARNINGS:
+  - W-001: "{content}" (trigger: "{condition}")
+
+SONGLINES:
+  - SNG-002: "{narrative excerpt}"
+
+These inform the capability spawn proposals below.
+═══════════════════════════════════════════════════════════════
+```
+
+### 5. Initial Spawn Proposals
 
 ```
 AWAKENING ANALYSIS
@@ -68,7 +101,7 @@ Spawn sequence:
 Begin spawning? [all / select / none]
 ```
 
-### 5. Spawn Sequence
+### 6. Spawn Sequence
 
 If approved, HIVE spawns capabilities in sequence:
 
@@ -78,7 +111,7 @@ Spawning api-service...      ✓ manifested
 Spawning postgres-data...    ✓ manifested (dormant until needed)
 ```
 
-### 6. Awakening Complete
+### 7. Awakening Complete
 
 ```
 HIVE AWAKENED
