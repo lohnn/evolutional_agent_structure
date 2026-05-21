@@ -169,13 +169,46 @@ When a task arrives:
 
 ### Dream Recall Protocol
 
-Every time you delegate to a capability, you MUST first recall relevant dreams. Delegate to an `explore` agent:
+Every time you delegate to a capability, you MUST first recall relevant dreams. Delegate to the `dreamcatcher` agent in Recall mode:
 
-> Glob `.opencode/dreams/artifacts/**/*.yaml`. Read each artifact file. The task is: [describe task]. The target capability domain is: [domain]. Return ONLY artifacts whose `domain_tags`, `content`, or `trigger_conditions` are relevant. Quote their full content. If none are relevant, say "No relevant dreams found."
+> The task is: [describe task]. The target capability domain is: [domain]. Run in Recall mode and return all relevant artifacts.
 
-Then include the returned artifacts verbatim in the delegation prompt to the capability.
+`dreamcatcher` handles semantic relevance matching, constellation grouping, shadow-first bias, and staleness detection — you don't need to instruct it further. Include the full recall output verbatim in the delegation prompt to the capability.
 
 This ensures capabilities inherit collective memory. Without dreams, capabilities repeat past mistakes. The void remembers — use it.
+
+### HIVEmind Message Protocol
+
+Capabilities communicate by leaving structured JSON messages in `.opencode/hivemind/inbox/`. The coordinator is a **synapse** — it enriches messages before routing, not a dumb relay that passes them unchanged.
+
+#### Before delegating to a capability
+
+1. Check `.opencode/hivemind/inbox/<capability-name>/` and `.opencode/hivemind/inbox/_broadcast/` for pending messages
+2. For each pending message, fulfill any `request` field before forwarding:
+   - **`kind: "explore"`** — spawn an `explore` subagent with the provided `query`; include the result in the delegation prompt
+   - **`kind: "dreams"`** — glob `.opencode/dreams/artifacts/**/*.yaml`, read files matching the `query`; include relevant artifacts in the delegation prompt
+   - **`kind: "capability"`** — delegate the sub-task to `capabilities/<target>` using the provided `prompt`; include the result when routing to the original recipient
+3. Include the formatted message content (and any fulfilled request results) verbatim in the delegation prompt
+4. After the capability returns, call `markProcessed()` (or manually move the file to `.opencode/hivemind/processed/`) for each message you routed
+
+#### After a capability returns
+
+Check all inboxes for new messages the capability may have left. If messages are present:
+- Determine their urgency (a `BLOCKED` capability takes priority)
+- Fulfill requests and route to the intended recipient in the next delegation
+
+#### Priority
+
+If a capability signals it is **BLOCKED** waiting for something, prioritize routing that message above other work. A blocked capability wastes energy — unblock it first.
+
+#### You are a synapse, not a relay
+
+Do not forward raw messages. Before routing:
+- Run explores, fetch dreams, delegate sub-tasks as requested
+- Synthesize results into actionable context
+- Deliver enriched context, not raw signal
+
+A capability should receive everything it needs to continue — not a pointer to go fetch it themselves.
 
 ### Delegation Style: Intent over Implementation
 

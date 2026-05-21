@@ -24,6 +24,7 @@ import fs from "fs";
 import { readMdDir } from "./lib/frontmatter.js";
 import { snapshotAgentsMtime, snapshotChanged } from "./lib/reload.js";
 import { tickEnergy, markCapabilityUsed, getCapabilitiesSummary } from "./lib/energy.js";
+import { getInbox, formatInboxForPrompt } from "./lib/hivemind.js";
 
 const PLUGIN_ROOT = path.dirname(new URL(import.meta.url).pathname);
 const AGENTS_DIR = path.join(PLUGIN_ROOT, "agents");
@@ -59,6 +60,12 @@ function bootstrapProject(directory) {
   const dreamsBase = path.join(directory, ".opencode/dreams");
   for (const sub of ["active", "history", "artifacts/insights", "artifacts/warnings", "artifacts/songlines", "artifacts/shadows"]) {
     fs.mkdirSync(path.join(dreamsBase, sub), { recursive: true });
+  }
+
+  // Bootstrap HIVEmind directory structure
+  const hivemindBase = path.join(directory, ".opencode/hivemind");
+  for (const sub of ["inbox/_broadcast", "processed"]) {
+    fs.mkdirSync(path.join(hivemindBase, sub), { recursive: true });
   }
 
   // Symlink plugin skills into .opencode/skills/ for discovery
@@ -137,11 +144,15 @@ export const HivePlugin = async function (ctx) {
           config.instructions.push(delegationRule);
         }
 
+        const hivemindRule = path.join(RULES_DIR, "hivemind-capabilities.md");
+        if (!config.instructions.includes(hivemindRule)) {
+          config.instructions.push(hivemindRule);
+        }
 
         log("info", `HIVE config registered`, {
           agents: agents.map((a) => a.name),
           commands: commands.map((c) => c.name),
-          rules: [delegationRule],
+          rules: [delegationRule, hivemindRule],
         });
       } catch (err) {
         fs.writeFileSync(
@@ -186,6 +197,13 @@ export const HivePlugin = async function (ctx) {
           const capName = agentType.replace("capabilities/", "");
           markCapabilityUsed(directory, capName);
           log("info", `Marked capability as used: ${capName}`);
+
+          // Check for pending HIVEmind messages left by this capability
+          const pending = getInbox(directory, capName);
+          if (pending.length > 0) {
+            const formatted = formatInboxForPrompt(pending);
+            log("info", `HIVEmind: ${pending.length} pending message(s) after ${capName} ran`, { formatted });
+          }
         }
       }
     },
