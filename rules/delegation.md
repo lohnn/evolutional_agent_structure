@@ -183,19 +183,38 @@ Capabilities communicate by leaving structured JSON messages in `.opencode/hivem
 
 #### Before delegating to a capability
 
-1. Check `.opencode/hivemind/inbox/<capability-name>/` and `.opencode/hivemind/inbox/_broadcast/` for pending messages
-2. For each pending message, fulfill any `request` field before forwarding:
+1. **Build the Capability Roster** — glob `.opencode/agents/capabilities/*.md`, read the `description` frontmatter field from each file, and inject a roster into the delegation prompt:
+   ```
+   ## Active Capabilities
+   capability-name — description
+   capability-name — description
+   ...
+   ```
+   This gives the capability situational awareness of who else exists so it can address HIVEmind messages correctly. The coordinator builds this dynamically — there is no static registry file.
+2. Check `.opencode/hivemind/inbox/<capability-name>/` and `.opencode/hivemind/inbox/_broadcast/` for pending messages
+3. For each pending message, fulfill any `request` field before forwarding:
    - **`kind: "explore"`** — spawn an `explore` subagent with the provided `query`; include the result in the delegation prompt
    - **`kind: "dreams"`** — glob `.opencode/dreams/artifacts/**/*.yaml`, read files matching the `query`; include relevant artifacts in the delegation prompt
    - **`kind: "capability"`** — delegate the sub-task to `capabilities/<target>` using the provided `prompt`; include the result when routing to the original recipient
-3. Include the formatted message content (and any fulfilled request results) verbatim in the delegation prompt
-4. After the capability returns, call `markProcessed()` (or manually move the file to `.opencode/hivemind/processed/`) for each message you routed
+4. Include the formatted message content (and any fulfilled request results) verbatim in the delegation prompt
+5. After the capability returns, call `markProcessed()` (or manually move the file to `.opencode/hivemind/processed/`) for each message you routed
 
 #### After a capability returns
 
 Check all inboxes for new messages the capability may have left. If messages are present:
 - Determine their urgency (a `BLOCKED` capability takes priority)
 - Fulfill requests and route to the intended recipient in the next delegation
+
+#### Orphaned messages
+
+After a capability returns, compare any new inbox messages against the current capability roster. A message addressed to a recipient not in the roster is **orphaned** — it cannot be routed.
+
+An orphaned message is a **spawn signal**:
+- The message's `recipient` field names the capability needed
+- The message `content` describes the work it requires
+- Use both as the seed for a spawn proposal
+
+Do not drop orphaned messages. Do not route them to the void. Propose spawning a new capability whose domain matches the message's intent, using the message content as the capability specification seed. Once spawned, route the message to the new capability's inbox.
 
 #### Priority
 
