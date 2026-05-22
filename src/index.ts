@@ -316,17 +316,72 @@ export const HivePlugin: Plugin = async function (ctx: PluginInput) {
       const roster = buildCapabilityRoster(capabilitiesPath)
       output.system.push(roster)
 
-      // Inject pending messages for the calling agent
-      if (input.sessionID) {
-        const info = sessionMap.get(input.sessionID)
-        if (info?.agent) {
-          const pending = getInbox(directory, shortAgentName(info.agent))
-          if (pending.length > 0) {
-            const formatted = formatInboxForPrompt(pending)
-            if (formatted) {
-              output.system.push(formatted)
+      if (!input.sessionID) return
+
+      const info = sessionMap.get(input.sessionID)
+      const isCapability = info?.agent?.startsWith("capabilities/")
+
+      if (isCapability && info?.agent) {
+        // Capability session: inject its own pending messages
+        const pending = getInbox(directory, shortAgentName(info.agent))
+        if (pending.length > 0) {
+          const formatted = formatInboxForPrompt(pending)
+          if (formatted) {
+            output.system.push(formatted)
+          }
+        }
+      } else {
+        // Coordinator/primary session: summarize all pending messages across all inboxes
+        const inboxBase = path.join(directory, ".opencode/hivemind/inbox")
+        let inboxDirs: string[]
+        try {
+          inboxDirs = fs.readdirSync(inboxBase).filter(
+            (d) => !d.startsWith("_") && fs.statSync(path.join(inboxBase, d)).isDirectory()
+          )
+        } catch {
+          inboxDirs = []
+        }
+
+        const pendingSummary: string[] = []
+        for (const recipient of inboxDirs) {
+          const pending = getInbox(directory, recipient)
+          if (pending.length === 0) continue
+
+          // Check if recipient capability exists
+          const capFile = path.join(capabilitiesPath, `${recipient}.md`)
+          const exists = fs.existsSync(capFile)
+
+          // Check if recipient has an active session
+          let active = false
+          for (const [, sInfo] of sessionMap.entries()) {
+            if (shortAgentName(sInfo.agent) === recipient && sInfo.active) {
+              active = true
+              break
             }
           }
+
+          if (!exists) {
+            pendingSummary.push(`- **${recipient}** — ${pending.length} message(s) — ⚠ CAPABILITY DOES NOT EXIST (spawn signal)`)
+          } else if (active) {
+            pendingSummary.push(`- **${recipient}** — ${pending.length} message(s) — session active (will receive automatically)`)
+          } else {
+            pendingSummary.push(`- **${recipient}** — ${pending.length} message(s) — ⏳ waiting (needs delegation to receive)`)
+          }
+        }
+
+        // Also check _coordinator inbox
+        const coordinatorPending = getInbox(directory, "_coordinator")
+        if (coordinatorPending.length > 0) {
+          const formatted = formatInboxForPrompt(coordinatorPending)
+          if (formatted) {
+            output.system.push(formatted)
+          }
+        }
+
+        if (pendingSummary.length > 0) {
+          output.system.push(
+            `## HIVEmind — Message Queue Status\n\n${pendingSummary.join("\n")}\n\nCapabilities marked ⏳ have unread messages that will be delivered when you next delegate to them. Capabilities marked ⚠ need to be spawned.`
+          )
         }
       }
     },
@@ -363,7 +418,10 @@ export const HivePlugin: Plugin = async function (ctx: PluginInput) {
           content: tool.schema.string().describe("Message content"),
         },
         async execute(args, context) {
-          const sender = shortAgentName(context.agent || "unknown")
+          // Resolve sender: prefer session map (reliable) over context.agent (may be "build" in resumed sessions)
+          const sessionInfo = sessionMap.get(context.sessionID)
+          const rawAgent = sessionInfo?.agent || context.agent || "unknown"
+          const sender = shortAgentName(rawAgent)
 
           const filename = sendMessage(directory, {
             sender,
@@ -418,7 +476,9 @@ export const HivePlugin: Plugin = async function (ctx: PluginInput) {
           mark_read: tool.schema.boolean().optional().describe("If true, mark all messages as read after retrieving them"),
         },
         async execute(args, context) {
-          const agent = shortAgentName(context.agent || "unknown")
+          const sessionInfo = sessionMap.get(context.sessionID)
+          const rawAgent = sessionInfo?.agent || context.agent || "unknown"
+          const agent = shortAgentName(rawAgent)
           const pending = getInbox(directory, agent)
 
           if (pending.length === 0) {
