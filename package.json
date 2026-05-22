@@ -14,9 +14,11 @@
   },
   "keywords": ["opencode", "plugin", "agents", "hive"],
   "license": "MIT",
-  "devDependencies": {
+  "dependencies": {
     "@opencode-ai/plugin": "^1.15.7",
-    "@opencode-ai/sdk": "^1.15.7",
+    "@opencode-ai/sdk": "^1.15.7"
+  },
+  "devDependencies": {
     "@types/node": "^25.9.1",
     "typescript": "^6.0.3"
   }
