@@ -39,6 +39,9 @@ try {
   // ignore
 }
 
+// Track the most recently active sessionId so tool hooks can reference it
+let activeSessionId = "unknown"
+
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 
 function bootstrapProject(directory: string): void {
@@ -191,7 +194,7 @@ export const HivePlugin: Plugin = async function (ctx: PluginInput) {
         const agentType = input?.args?.subagent_type || ""
         if (agentType.startsWith("capabilities/")) {
           const capName = agentType.replace("capabilities/", "")
-          markCapabilityUsed(directory, capName)
+          markCapabilityUsed(directory, capName, activeSessionId)
           log("info", `Marked capability as used: ${capName}`)
 
           const pending = getInbox(directory, capName)
@@ -220,6 +223,7 @@ export const HivePlugin: Plugin = async function (ctx: PluginInput) {
       if (event.type === "session.status") {
         const props = event.properties as { sessionID: string; status: { type: string } }
         if (props.status.type === "busy") {
+          activeSessionId = props.sessionID
           ns.markActive(props.sessionID)
         }
       }

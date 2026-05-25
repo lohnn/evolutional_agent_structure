@@ -2,14 +2,13 @@ import path from "path"
 import fs from "fs"
 
 const ENERGY_DECAY = 10
-const ENERGY_BOOST = 10
 const ENERGY_MIN = 0
 const ENERGY_MAX = 100
 const DISSOLVE_THRESHOLD = 10
 
 export interface HiveState {
   lastTick: string | null
-  usedCapabilities: string[]
+  usageLog: Array<{ capability: string; sessionId: string; timestamp: string }>
 }
 
 export interface TickResult {
@@ -25,9 +24,14 @@ function getStatePath(directory: string): string {
 
 export function readHiveState(directory: string): HiveState {
   try {
-    return JSON.parse(fs.readFileSync(getStatePath(directory), "utf8"))
+    const raw = JSON.parse(fs.readFileSync(getStatePath(directory), "utf8"))
+    // Migrate old format: usedCapabilities → empty usageLog
+    if (raw.usedCapabilities !== undefined && raw.usageLog === undefined) {
+      return { lastTick: raw.lastTick ?? null, usageLog: [] }
+    }
+    return raw as HiveState
   } catch {
-    return { lastTick: null, usedCapabilities: [] }
+    return { lastTick: null, usageLog: [] }
   }
 }
 
@@ -37,10 +41,14 @@ export function writeHiveState(directory: string, state: HiveState): void {
   fs.writeFileSync(statePath, JSON.stringify(state, null, 2), "utf8")
 }
 
-export function markCapabilityUsed(directory: string, capabilityName: string): void {
+export function markCapabilityUsed(directory: string, capabilityName: string, sessionId: string): void {
   const state = readHiveState(directory)
-  if (!state.usedCapabilities.includes(capabilityName)) {
-    state.usedCapabilities.push(capabilityName)
+  // Deduplicate by (capability + sessionId) pair
+  const alreadyLogged = state.usageLog.some(
+    (e) => e.capability === capabilityName && e.sessionId === sessionId
+  )
+  if (!alreadyLogged) {
+    state.usageLog.push({ capability: capabilityName, sessionId, timestamp: new Date().toISOString() })
   }
   writeHiveState(directory, state)
 }
@@ -56,9 +64,9 @@ function updateFrontmatterEnergy(filePath: string, newEnergy: number): void {
 export function tickEnergy(directory: string): { results: TickResult[]; warnings: TickResult[]; skipped: boolean } {
   const capabilitiesPath = path.join(directory, ".opencode/agents/capabilities")
   const state = readHiveState(directory)
-  const usedSet = new Set(state.usedCapabilities || [])
+  const usageLog = state.usageLog || []
 
-  if (usedSet.size === 0) {
+  if (usageLog.length === 0) {
     return { results: [], warnings: [], skipped: true }
   }
 
@@ -68,6 +76,15 @@ export function tickEnergy(directory: string): { results: TickResult[]; warnings
     if (lastTickDate === todayDate) {
       return { results: [], warnings: [], skipped: true }
     }
+  }
+
+  // Count unique sessions per capability
+  const sessionsByCapability = new Map<string, Set<string>>()
+  for (const entry of usageLog) {
+    if (!sessionsByCapability.has(entry.capability)) {
+      sessionsByCapability.set(entry.capability, new Set())
+    }
+    sessionsByCapability.get(entry.capability)!.add(entry.sessionId)
   }
 
   let files: string[]
@@ -89,11 +106,13 @@ export function tickEnergy(directory: string): { results: TickResult[]; warnings
     if (!energyMatch) continue
 
     let energy = parseInt(energyMatch[1], 10)
-    const wasUsed = usedSet.has(name)
+    const uses = sessionsByCapability.get(name)?.size ?? 0
+    const wasUsed = uses > 0
     const oldEnergy = energy
 
     if (wasUsed) {
-      energy += ENERGY_BOOST
+      const boost = Math.floor(Math.log2(uses + 1) * 10)
+      energy += boost
     } else {
       energy -= ENERGY_DECAY
     }
@@ -105,7 +124,7 @@ export function tickEnergy(directory: string): { results: TickResult[]; warnings
 
   writeHiveState(directory, {
     lastTick: new Date().toISOString(),
-    usedCapabilities: [],
+    usageLog: [],
   })
 
   const warnings = results.filter((r) => r.newEnergy < DISSOLVE_THRESHOLD)
