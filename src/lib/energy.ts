@@ -92,8 +92,11 @@ export function tickEnergy(directory: string): { results: TickResult[]; warnings
     const wasUsed = usedSet.has(name)
     const oldEnergy = energy
 
-    energy -= ENERGY_DECAY
-    if (wasUsed) energy += ENERGY_BOOST
+    if (wasUsed) {
+      energy += ENERGY_BOOST
+    } else {
+      energy -= ENERGY_DECAY
+    }
     energy = Math.max(ENERGY_MIN, Math.min(ENERGY_MAX, energy))
 
     updateFrontmatterEnergy(filePath, energy)
