@@ -18,13 +18,13 @@ import path from "path"
 import fs from "fs"
 import { tool } from "@opencode-ai/plugin"
 import type { Plugin, Hooks, PluginInput } from "@opencode-ai/plugin"
-import { readMdDir, readMdFile } from "./lib/frontmatter.js"
+import { readMdDir } from "./lib/frontmatter.js"
 import { snapshotAgentsMtime, snapshotChanged } from "./lib/reload.js"
 import { tickEnergy, markCapabilityUsed, getCapabilitiesSummary } from "./lib/energy.js"
-import { getInbox, formatInboxForPrompt, sendMessage, markAllRead } from "./lib/hivemind.js"
+import { getInbox, formatInboxForPrompt } from "./lib/hivemind.js"
+import { NervousSystem, shortName } from "./lib/nervous-system.js"
 
 const PLUGIN_ROOT = path.dirname(new URL(import.meta.url).pathname)
-// Navigate up from src/ to plugin root
 const PACKAGE_ROOT = path.resolve(PLUGIN_ROOT, "..")
 const AGENTS_DIR = path.join(PACKAGE_ROOT, "agents")
 const COMMANDS_DIR = path.join(PACKAGE_ROOT, "commands")
@@ -38,21 +38,6 @@ try {
 } catch {
   // ignore
 }
-
-// ── Session tracking ──────────────────────────────────────────────────────────
-
-interface SessionInfo {
-  agent: string
-  active: boolean
-}
-
-/** Strip "capabilities/" prefix to get the short name used for inbox dirs and roster lookups */
-function shortAgentName(agent: string): string {
-  return agent.replace(/^capabilities\//, "")
-}
-
-const sessionMap = new Map<string, SessionInfo>()
-const knownCapabilityFiles = new Set<string>()
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 
@@ -103,40 +88,6 @@ function bootstrapProject(directory: string): void {
       }
     }
   }
-
-  // Initialize known capability files set
-  try {
-    for (const f of fs.readdirSync(capDir)) {
-      if (f.endsWith(".md") && !f.startsWith("_")) {
-        knownCapabilityFiles.add(f)
-      }
-    }
-  } catch {
-    // ignore
-  }
-}
-
-// ── Roster builder ────────────────────────────────────────────────────────────
-
-function buildCapabilityRoster(capabilitiesPath: string): string {
-  const lines: string[] = ["## Active Capabilities"]
-  try {
-    const files = fs.readdirSync(capabilitiesPath)
-    for (const file of files) {
-      if (!file.endsWith(".md") || file.startsWith("_")) continue
-      const name = file.replace(".md", "")
-      const filePath = path.join(capabilitiesPath, file)
-      const { frontmatter } = readMdFile(filePath)
-      const desc = (frontmatter.description as string) || "(no description)"
-      lines.push(`  ${name} — ${desc}`)
-    }
-  } catch {
-    // no capabilities dir
-  }
-  if (lines.length === 1) {
-    lines.push("  (none)")
-  }
-  return lines.join("\n")
 }
 
 // ── Plugin entry ──────────────────────────────────────────────────────────────
@@ -147,6 +98,8 @@ export const HivePlugin: Plugin = async function (ctx: PluginInput) {
   const capabilitiesPath = path.join(projectAgentsPath, "capabilities")
 
   bootstrapProject(directory)
+
+  const ns = new NervousSystem(client, directory)
 
   const log = (level: "info" | "debug" | "error" | "warn", message: string, extra?: Record<string, unknown>) => {
     client?.app?.log?.({
@@ -264,132 +217,48 @@ export const HivePlugin: Plugin = async function (ctx: PluginInput) {
         }
       }
 
-      // Track session → agent mapping
       if (event.type === "session.status") {
         const props = event.properties as { sessionID: string; status: { type: string } }
         if (props.status.type === "busy") {
-          const info = sessionMap.get(props.sessionID)
-          if (info) info.active = true
+          ns.markActive(props.sessionID)
         }
       }
 
       if (event.type === "session.idle") {
         const props = event.properties as { sessionID: string }
-        const info = sessionMap.get(props.sessionID)
-        if (info) info.active = false
+        ns.markIdle(props.sessionID)
       }
 
-      // File watcher: detect new capabilities
       if (event.type === "file.watcher.updated") {
         const props = event.properties as unknown as { path: string }
-        const updatedPath = props.path
-        if (updatedPath.includes(".opencode/agents/capabilities/") && updatedPath.endsWith(".md")) {
-          const filename = path.basename(updatedPath)
-          if (!filename.startsWith("_") && !knownCapabilityFiles.has(filename)) {
-            knownCapabilityFiles.add(filename)
-            // New capability detected — notify all active sessions
-            const capName = filename.replace(".md", "")
-            let desc = "(no description)"
-            try {
-              const { frontmatter } = readMdFile(updatedPath)
-              desc = (frontmatter.description as string) || desc
-            } catch {
-              // ignore
-            }
-
-            const notification = `[HIVEmind] New capability available: ${capName} — ${desc}`
-            for (const [sessionID, info] of sessionMap.entries()) {
-              if (info.active) {
-                client.session.prompt({
-                  path: { id: sessionID },
-                  body: { noReply: true, parts: [{ type: "text", text: notification }] },
-                }).catch(() => {})
-              }
-            }
-          }
-        }
+        await ns.handleFileChange(props.path)
       }
     },
 
     // ── System transform: inject roster + pending messages ──
     "experimental.chat.system.transform": async (input, output) => {
-      const roster = buildCapabilityRoster(capabilitiesPath)
-      output.system.push(roster)
+      output.system.push(ns.buildRoster())
 
       if (!input.sessionID) return
 
-      const info = sessionMap.get(input.sessionID)
-      const isCapability = info?.agent?.startsWith("capabilities/")
-
-      if (isCapability && info?.agent) {
-        // Capability session: inject its own pending messages
-        const pending = getInbox(directory, shortAgentName(info.agent))
-        if (pending.length > 0) {
-          const formatted = formatInboxForPrompt(pending)
-          if (formatted) {
-            output.system.push(formatted)
-          }
-        }
+      if (ns.isCapabilitySession(input.sessionID)) {
+        // Capability: inject its own pending messages
+        const formatted = ns.formatMessages(ns.resolveAgent(input.sessionID))
+        if (formatted) output.system.push(formatted)
       } else {
-        // Coordinator/primary session: summarize all pending messages across all inboxes
-        const inboxBase = path.join(directory, ".opencode/hivemind/inbox")
-        let inboxDirs: string[]
-        try {
-          inboxDirs = fs.readdirSync(inboxBase).filter(
-            (d) => !d.startsWith("_") && fs.statSync(path.join(inboxBase, d)).isDirectory()
-          )
-        } catch {
-          inboxDirs = []
-        }
+        // Coordinator: inject _coordinator messages + queue status dashboard
+        const coordMessages = ns.formatMessages("_coordinator")
+        if (coordMessages) output.system.push(coordMessages)
 
-        const pendingSummary: string[] = []
-        for (const recipient of inboxDirs) {
-          const pending = getInbox(directory, recipient)
-          if (pending.length === 0) continue
-
-          // Check if recipient capability exists
-          const capFile = path.join(capabilitiesPath, `${recipient}.md`)
-          const exists = fs.existsSync(capFile)
-
-          // Check if recipient has an active session
-          let active = false
-          for (const [, sInfo] of sessionMap.entries()) {
-            if (shortAgentName(sInfo.agent) === recipient && sInfo.active) {
-              active = true
-              break
-            }
-          }
-
-          if (!exists) {
-            pendingSummary.push(`- **${recipient}** — ${pending.length} message(s) — ⚠ CAPABILITY DOES NOT EXIST (spawn signal)`)
-          } else if (active) {
-            pendingSummary.push(`- **${recipient}** — ${pending.length} message(s) — session active (will receive automatically)`)
-          } else {
-            pendingSummary.push(`- **${recipient}** — ${pending.length} message(s) — ⏳ waiting (needs delegation to receive)`)
-          }
-        }
-
-        // Also check _coordinator inbox
-        const coordinatorPending = getInbox(directory, "_coordinator")
-        if (coordinatorPending.length > 0) {
-          const formatted = formatInboxForPrompt(coordinatorPending)
-          if (formatted) {
-            output.system.push(formatted)
-          }
-        }
-
-        if (pendingSummary.length > 0) {
-          output.system.push(
-            `## HIVEmind — Message Queue Status\n\n${pendingSummary.join("\n")}\n\nCapabilities marked ⏳ have unread messages that will be delivered when you next delegate to them. Capabilities marked ⚠ need to be spawned.`
-          )
-        }
+        const queueStatus = ns.buildQueueStatus()
+        if (queueStatus) output.system.push(queueStatus)
       }
     },
 
     // ── Chat message: track session → agent mapping ──
     "chat.message": async (input, _output) => {
       if (input.sessionID && input.agent) {
-        sessionMap.set(input.sessionID, { agent: input.agent, active: true })
+        ns.registerSession(input.sessionID, input.agent)
       }
     },
 
@@ -418,51 +287,8 @@ export const HivePlugin: Plugin = async function (ctx: PluginInput) {
           content: tool.schema.string().describe("Message content"),
         },
         async execute(args, context) {
-          // Resolve sender: prefer session map (reliable) over context.agent (may be "build" in resumed sessions)
-          const sessionInfo = sessionMap.get(context.sessionID)
-          const rawAgent = sessionInfo?.agent || context.agent || "unknown"
-          const sender = shortAgentName(rawAgent)
-
-          const filename = sendMessage(directory, {
-            sender,
-            recipient: args.recipient,
-            type: args.type,
-            content: args.content,
-          })
-
-          // Attempt real-time delivery
-          let delivered = false
-          if (args.recipient !== "_broadcast" && args.recipient !== "_coordinator") {
-            for (const [sessionID, info] of sessionMap.entries()) {
-              if (shortAgentName(info.agent) === args.recipient && info.active) {
-                try {
-                  await client.session.prompt({
-                    path: { id: sessionID },
-                    body: {
-                      noReply: true,
-                      parts: [{ type: "text", text: `[HIVEmind] Message from ${sender} (${args.type}): ${args.content}` }],
-                    },
-                  })
-                  delivered = true
-                } catch {
-                  // queued instead
-                }
-              }
-            }
-          } else if (args.recipient === "_broadcast") {
-            for (const [sessionID, info] of sessionMap.entries()) {
-              if (info.active && shortAgentName(info.agent) !== shortAgentName(sender)) {
-                client.session.prompt({
-                  path: { id: sessionID },
-                  body: {
-                    noReply: true,
-                    parts: [{ type: "text", text: `[HIVEmind broadcast from ${sender}] (${args.type}): ${args.content}` }],
-                  },
-                }).catch(() => {})
-              }
-            }
-            delivered = true
-          }
+          const sender = ns.resolveAgent(context.sessionID, context.agent)
+          const { filename, delivered } = await ns.send(sender, args.recipient, args.type, args.content)
 
           return delivered
             ? `Message sent to ${args.recipient} and delivered in real-time. (file: ${filename})`
@@ -476,20 +302,13 @@ export const HivePlugin: Plugin = async function (ctx: PluginInput) {
           mark_read: tool.schema.boolean().optional().describe("If true, mark all messages as read after retrieving them"),
         },
         async execute(args, context) {
-          const sessionInfo = sessionMap.get(context.sessionID)
-          const rawAgent = sessionInfo?.agent || context.agent || "unknown"
-          const agent = shortAgentName(rawAgent)
-          const pending = getInbox(directory, agent)
+          const agent = ns.resolveAgent(context.sessionID, context.agent)
+          const pending = ns.readMessages(agent)
 
-          if (pending.length === 0) {
-            return "No pending messages."
-          }
+          if (pending.length === 0) return "No pending messages."
 
           const formatted = formatInboxForPrompt(pending)
-
-          if (args.mark_read) {
-            markAllRead(directory, agent)
-          }
+          if (args.mark_read) ns.acknowledgeMessages(agent)
 
           return formatted || "No pending messages."
         },
