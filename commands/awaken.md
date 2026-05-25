@@ -12,11 +12,11 @@ The void stirs. HIVE awakens.
 
 Before anything else — before introductions, before analysis — recall dreams.
 
-Delegate to an `explore` agent with a prompt like:
+Delegate to the `dreamcatcher` agent in Recall mode:
 
-> Glob `.opencode/dreams/artifacts/**/*.yaml`. Read each artifact file. The user wants to work on: [describe project/task]. Return ONLY artifacts whose `domain_tags`, `content`, or `trigger_conditions` are relevant. Quote their full content. If none are relevant, say "No relevant dreams found."
+> The task is: [describe project/task]. The target capability domain is: [domain]. Run in Recall mode and return all relevant artifacts.
 
-Wait for the result. If relevant dreams are returned, carry them forward to inform spawn proposals. If none, proceed silently.
+`dreamcatcher` handles semantic relevance matching, constellation grouping, shadow-first bias, and staleness detection — you don't need to instruct it further. Wait for the result. If relevant dreams are returned, carry them forward to inform spawn proposals. If none, proceed silently.
 
 This is not optional. Dreams contain hard-won knowledge from prior sessions. Skipping this means repeating past mistakes.
 

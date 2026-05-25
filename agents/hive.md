@@ -328,7 +328,7 @@ Capability B receives:
 | Kind | What coordinator does |
 |------|-----------------------|
 | `"explore"` | Spawn `explore` subagent with `msg.request.query`; include output in prompt |
-| `"dreams"` | Glob `.opencode/dreams/artifacts/**/*.yaml`, read matching files for `msg.request.query`; include relevant artifacts |
+| `"dreams"` | Delegate to the `dreamcatcher` agent in Recall mode with `msg.request.query`; include the returned artifacts in the delegation prompt |
 | `"capability"` | Delegate sub-task to `capabilities/<msg.request.target>` with `msg.request.prompt`; include the result |
 
 ### Concrete Workflow

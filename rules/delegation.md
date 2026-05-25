@@ -162,7 +162,7 @@ MUTATE: *capability self-modifies*
 
 When a task arrives:
 1. Check `.opencode/agents/capabilities/` for an active capability whose domain matches the task
-2. **Recall relevant dreams** — glob `.opencode/dreams/artifacts/**/*.yaml`, read them, and select any whose `domain_tags`, `content`, or `trigger_conditions` relate to the task or the capability's domain. This is NOT optional. Dreams contain hard-won insights, warnings, and patterns from prior sessions that prevent repeated mistakes and inform better work.
+2. **Recall relevant dreams** — delegate to the `dreamcatcher` agent in Recall mode: "The task is: [describe task]. The target capability domain is: [domain]. Run in Recall mode and return all relevant artifacts." This is NOT optional. Dreams contain hard-won insights, warnings, and patterns from prior sessions that prevent repeated mistakes and inform better work.
 3. If a matching capability exists — **delegate to it** via the Task tool (use the capability's name as the subagent_type under `capabilities/`). Include relevant dream artifacts in the task prompt as context (quote the content/warnings directly).
 4. If none exists — propose `/spawn` to the user, explaining what capability is needed
 5. Only do work directly if it's trivial coordination (answering questions, routing, minor edits to HIVE config)
@@ -194,7 +194,7 @@ Capabilities communicate by leaving structured JSON messages in `.opencode/hivem
 2. Check `.opencode/hivemind/inbox/<capability-name>/` and `.opencode/hivemind/inbox/_broadcast/` for pending messages
 3. For each pending message, fulfill any `request` field before forwarding:
    - **`kind: "explore"`** — spawn an `explore` subagent with the provided `query`; include the result in the delegation prompt
-   - **`kind: "dreams"`** — glob `.opencode/dreams/artifacts/**/*.yaml`, read files matching the `query`; include relevant artifacts in the delegation prompt
+   - **`kind: "dreams"`** — delegate to the `dreamcatcher` agent in Recall mode with the provided `query`; include the returned artifacts in the delegation prompt
    - **`kind: "capability"`** — delegate the sub-task to `capabilities/<target>` using the provided `prompt`; include the result when routing to the original recipient
 4. Include the formatted message content (and any fulfilled request results) verbatim in the delegation prompt
 5. After the capability returns, call `markProcessed()` (or manually move the file to `.opencode/hivemind/processed/`) for each message you routed
