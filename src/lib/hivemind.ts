@@ -133,7 +133,7 @@ export function listPendingInboxes(directory: string): { recipient: string; coun
   let dirs: string[]
   try {
     dirs = fs.readdirSync(base).filter(
-      (d) => !d.startsWith("_") && fs.statSync(path.join(base, d)).isDirectory()
+      (d) => d !== "_broadcast" && fs.statSync(path.join(base, d)).isDirectory()
     )
   } catch {
     return []

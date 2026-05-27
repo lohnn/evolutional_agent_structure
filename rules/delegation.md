@@ -163,9 +163,44 @@ MUTATE: *capability self-modifies*
 When a task arrives:
 1. Check `.opencode/agents/capabilities/` for an active capability whose domain matches the task
 2. **Recall relevant dreams** — delegate to the `dreamcatcher` agent in Recall mode: "The task is: [describe task]. The target capability domain is: [domain]. Run in Recall mode and return all relevant artifacts." This is NOT optional. Dreams contain hard-won insights, warnings, and patterns from prior sessions that prevent repeated mistakes and inform better work.
-3. If a matching capability exists — **delegate to it** via the Task tool (use the capability's name as the subagent_type under `capabilities/`). Include relevant dream artifacts in the task prompt as context (quote the content/warnings directly).
+3. If a matching capability exists — **dispatch it** using the appropriate method (see Dispatch Modes below). Include relevant dream artifacts in the prompt as context.
 4. If none exists — propose `/spawn` to the user, explaining what capability is needed
 5. Only do work directly if it's trivial coordination (answering questions, routing, minor edits to HIVE config)
+
+### Dispatch Modes
+
+You have two ways to launch a capability:
+
+| Mode | Tool | When to use |
+|------|------|-------------|
+| **Blocking** | `Task` (subagent_type: `capabilities/<name>`) | You need the result back immediately to continue your reasoning or respond to the user |
+| **Async** | `hive_dispatch` | The capability can run independently; you don't need its result right now |
+
+**Prefer `hive_dispatch` (async) when:**
+- The user's request spawns multiple independent work streams
+- You're routing a message from one capability to another
+- The work is self-contained and doesn't require a response before you can continue
+- You want to dispatch several capabilities in sequence without waiting
+
+**Use `Task` (blocking) when:**
+- You need the result to answer the user's question
+- The next step depends on what the capability returns
+- You're doing dream recall or explore (these are fast lookups, blocking is fine)
+
+**Async lifecycle:**
+1. You call `hive_dispatch(capability, prompt, resume: true)`
+2. It returns immediately — you are free to continue
+3. The capability runs in the background
+4. When it finishes, the plugin automatically wakes you if there are pending messages to route
+5. You read the messages, enrich context, and dispatch further as needed
+
+**Routing wake-ups:**
+The plugin will poke you (via `promptAsync`) when:
+- A capability finishes and left messages for inactive/non-existent capabilities
+- A `hive_signal` is sent to a capability with no active session
+- A message is addressed to a capability that doesn't exist (spawn signal)
+
+When you receive a routing notification, act on it: enrich context, dispatch the recipient, or propose a spawn.
 
 ### Dream Recall Protocol
 
@@ -199,11 +234,13 @@ Capabilities communicate by leaving structured JSON messages in `.opencode/hivem
 4. Include the formatted message content (and any fulfilled request results) verbatim in the delegation prompt
 5. After the capability returns, call `markProcessed()` (or manually move the file to `.opencode/hivemind/processed/`) for each message you routed
 
-#### After a capability returns
+#### After a capability returns (or you are woken by the plugin)
 
 Check all inboxes for new messages the capability may have left. If messages are present:
 - Determine their urgency (a `BLOCKED` capability takes priority)
 - Fulfill requests and route to the intended recipient in the next delegation
+
+Note: With async dispatch (`hive_dispatch`), you don't explicitly "wait" for a capability to return. The plugin wakes you automatically when a capability finishes and there are unrouted messages. When woken, follow the same protocol: read inboxes, enrich, route.
 
 #### Orphaned messages
 
@@ -215,6 +252,8 @@ An orphaned message is a **spawn signal**:
 - Use both as the seed for a spawn proposal
 
 Do not drop orphaned messages. Do not route them to the void. Propose spawning a new capability whose domain matches the message's intent, using the message content as the capability specification seed. Once spawned, route the message to the new capability's inbox.
+
+Note: The plugin will wake you when a message is sent to a non-existent capability. The routing notification will clearly mark it as "CAPABILITY DOES NOT EXIST". Treat this as a spawn signal.
 
 #### Priority
 

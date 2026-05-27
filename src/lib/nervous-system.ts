@@ -9,6 +9,8 @@ import { readMdFile } from "./frontmatter.js"
 export interface SessionInfo {
   agent: string
   active: boolean
+  /** The coordinator session that owns this session's dispatch group */
+  groupID?: string
 }
 
 type Client = ReturnType<typeof createOpencodeClient>
@@ -21,16 +23,49 @@ type Client = ReturnType<typeof createOpencodeClient>
  */
 export class NervousSystem {
   private sessionMap = new Map<string, SessionInfo>()
+  private capabilitySessionMap = new Map<string, string>()
   private knownCapabilityFiles = new Set<string>()
   private client: Client
   private directory: string
   private capabilitiesPath: string
+  private stateFilePath: string
 
   constructor(client: Client, directory: string) {
     this.client = client
     this.directory = directory
     this.capabilitiesPath = path.join(directory, ".opencode/agents/capabilities")
+    this.stateFilePath = path.join(directory, ".opencode/hivemind/.nervous-system-state.json")
     this.initKnownCapabilities()
+    this.loadPersistedState()
+  }
+
+  private loadPersistedState(): void {
+    try {
+      const raw = fs.readFileSync(this.stateFilePath, "utf8")
+      const state = JSON.parse(raw)
+      if (state.sessions) {
+        for (const entry of state.sessions) {
+          this.sessionMap.set(entry.id, { agent: entry.agent, active: false, groupID: entry.groupID })
+          if (entry.agent.startsWith("capabilities/")) {
+            this.capabilitySessionMap.set(shortName(entry.agent), entry.id)
+          }
+        }
+      }
+    } catch {
+      // no state file yet, fine
+    }
+  }
+
+  private persistState(): void {
+    const sessions: { id: string; agent: string; groupID?: string }[] = []
+    for (const [id, info] of this.sessionMap.entries()) {
+      sessions.push({ id, agent: info.agent, groupID: info.groupID })
+    }
+    try {
+      fs.writeFileSync(this.stateFilePath, JSON.stringify({ sessions }, null, 2), "utf8")
+    } catch {
+      // ignore write failures
+    }
   }
 
   private initKnownCapabilities(): void {
@@ -48,7 +83,69 @@ export class NervousSystem {
   // ── Session tracking ──────────────────────────────────────────────────────
 
   registerSession(sessionID: string, agent: string): void {
-    this.sessionMap.set(sessionID, { agent, active: true })
+    const existing = this.sessionMap.get(sessionID)
+    const groupID = existing?.groupID || (agent.startsWith("capabilities/") ? undefined : sessionID)
+    this.sessionMap.set(sessionID, { agent, active: true, groupID })
+    if (agent.startsWith("capabilities/")) {
+      this.capabilitySessionMap.set(shortName(agent), sessionID)
+    }
+    this.persistState()
+  }
+
+  /** Assign a capability session to a coordinator's dispatch group */
+  setParent(childSessionID: string, coordinatorSessionID: string): void {
+    const info = this.sessionMap.get(childSessionID)
+    if (info) {
+      info.groupID = coordinatorSessionID
+    }
+    // Also ensure the coordinator itself is in its own group
+    const coordInfo = this.sessionMap.get(coordinatorSessionID)
+    if (coordInfo && !coordInfo.groupID) {
+      coordInfo.groupID = coordinatorSessionID
+    }
+    this.persistState()
+  }
+
+  /** Get the group (coordinator session ID) for a given session */
+  getGroupID(sessionID: string): string | undefined {
+    return this.sessionMap.get(sessionID)?.groupID
+  }
+
+  /** Returns session ID if the capability has a known session AND it is currently idle */
+  findIdleSession(capabilityName: string): string | undefined {
+    const sessionID = this.capabilitySessionMap.get(capabilityName)
+    if (!sessionID) return undefined
+    const info = this.sessionMap.get(sessionID)
+    if (info && !info.active) return sessionID
+    return undefined
+  }
+
+  /** Returns session ID for any active non-capability session (coordinator) */
+  findCoordinatorSession(): string | undefined {
+    for (const [sessionID, info] of this.sessionMap.entries()) {
+      if (!info.agent.startsWith("capabilities/") && info.active) return sessionID
+    }
+    return undefined
+  }
+
+  /** Returns the coordinator session that should be woken for a given child session.
+   *  Uses groupID if available, otherwise falls back to any known coordinator. */
+  getCoordinatorSessionFor(childSessionID?: string): string | undefined {
+    // If we know the group, the groupID IS the coordinator session
+    if (childSessionID) {
+      const info = this.sessionMap.get(childSessionID)
+      if (info?.groupID && this.sessionMap.has(info.groupID)) return info.groupID
+    }
+    // Fallback: any non-capability session
+    for (const [sessionID, info] of this.sessionMap.entries()) {
+      if (!info.agent.startsWith("capabilities/")) return sessionID
+    }
+    return undefined
+  }
+
+  /** @deprecated Use getCoordinatorSessionFor() instead */
+  getCoordinatorSession(): string | undefined {
+    return this.getCoordinatorSessionFor()
   }
 
   markActive(sessionID: string): void {
@@ -75,28 +172,65 @@ export class NervousSystem {
 
   // ── Message sending + delivery ────────────────────────────────────────────
 
-  async send(sender: string, recipient: string, type: "question" | "info" | "result" | "request", content: string): Promise<{ filename: string; delivered: boolean }> {
+  async send(sender: string, recipient: string, type: "question" | "info" | "result" | "request", content: string, senderSessionID?: string): Promise<{ filename: string; delivered: boolean }> {
     const filename = sendMessage(this.directory, { sender, recipient, type, content })
+    const senderGroupID = senderSessionID ? this.getGroupID(senderSessionID) : undefined
 
     let delivered = false
 
     if (recipient === "_broadcast") {
       for (const [sessionID, info] of this.sessionMap.entries()) {
         if (info.active && shortName(info.agent) !== sender) {
+          // Only broadcast within the same group if sender has a group
+          if (senderGroupID && info.groupID && info.groupID !== senderGroupID) continue
           this.injectIntoSession(sessionID, `[HIVEmind broadcast from ${sender}] (${type}): ${content}`).catch(() => {})
         }
       }
       delivered = true
-    } else if (recipient !== "_coordinator") {
-      delivered = await this.deliverToRecipient(recipient, sender, type, content)
+    } else if (recipient === "_coordinator") {
+      // Deliver to this sender's coordinator (via group)
+      const coordSessionID = senderGroupID || this.findCoordinatorSession()
+      if (coordSessionID) {
+        try {
+          await this.injectIntoSession(coordSessionID, `[HIVEmind] Message from ${sender} (${type}): ${content}`)
+          delivered = true
+        } catch {
+          // queued fallback
+        }
+      }
+    } else {
+      // Named capability: try real-time delivery within the same group; if not active, wake coordinator
+      delivered = await this.deliverToRecipient(recipient, sender, type, content, senderGroupID)
+      if (!delivered) {
+        this.wakeCoordinator(`Capability ${recipient} received a queued message from ${sender} (${type}) but has no active session. Routing needed.`, senderSessionID).catch(() => {})
+      }
     }
 
     return { filename, delivered }
   }
 
-  private async deliverToRecipient(recipient: string, sender: string, type: string, content: string): Promise<boolean> {
+  /** Wake the coordinator with a routing notification. Uses promptAsync which queues safely even if the session is busy. */
+  async wakeCoordinator(reason: string, childSessionID?: string): Promise<string> {
+    const coordSessionID = this.getCoordinatorSessionFor(childSessionID)
+    if (!coordSessionID) {
+      return `NO_COORDINATOR_SESSION (sessionMap size=${this.sessionMap.size})`
+    }
+    try {
+      await this.client.session.promptAsync({
+        path: { id: coordSessionID },
+        body: { parts: [{ type: "text", text: `[HIVEmind] ${reason}` }] },
+      })
+      return `SENT_TO_${coordSessionID}`
+    } catch (err) {
+      return `FAILED: ${String(err)}`
+    }
+  }
+
+  private async deliverToRecipient(recipient: string, sender: string, type: string, content: string, senderGroupID?: string): Promise<boolean> {
     for (const [sessionID, info] of this.sessionMap.entries()) {
       if (shortName(info.agent) === recipient && info.active) {
+        // If sender has a group, only deliver to sessions in the same group
+        if (senderGroupID && info.groupID && info.groupID !== senderGroupID) continue
         try {
           await this.injectIntoSession(sessionID, `[HIVEmind] Message from ${sender} (${type}): ${content}`)
           return true

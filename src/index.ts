@@ -16,13 +16,20 @@
 
 import path from "path"
 import fs from "fs"
-import { tool } from "@opencode-ai/plugin"
 import type { Plugin, Hooks, PluginInput } from "@opencode-ai/plugin"
 import { readMdDir } from "./lib/frontmatter.js"
-import { snapshotAgentsMtime, snapshotChanged } from "./lib/reload.js"
-import { tickEnergy, markCapabilityUsed, getCapabilitiesSummary } from "./lib/energy.js"
-import { getInbox, formatInboxForPrompt } from "./lib/hivemind.js"
-import { NervousSystem, shortName } from "./lib/nervous-system.js"
+import { snapshotAgentsMtime } from "./lib/reload.js"
+import { tickEnergy } from "./lib/energy.js"
+import { NervousSystem } from "./lib/nervous-system.js"
+import { createHiveTools } from "./tools.js"
+import {
+  createEventHook,
+  createSystemTransformHook,
+  createChatMessageHook,
+  createCompactionHook,
+  createToolExecuteAfterHook,
+  type HooksContext,
+} from "./hooks.js"
 
 const PLUGIN_ROOT = path.dirname(new URL(import.meta.url).pathname)
 const PACKAGE_ROOT = path.resolve(PLUGIN_ROOT, "..")
@@ -38,9 +45,6 @@ try {
 } catch {
   // ignore
 }
-
-// Track the most recently active sessionId so tool hooks can reference it
-let activeSessionId = "unknown"
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 
@@ -112,7 +116,22 @@ export const HivePlugin: Plugin = async function (ctx: PluginInput) {
 
   log("info", `HIVE plugin v${PLUGIN_VERSION} loaded from ${PACKAGE_ROOT}`)
 
+  // Mutable state for hooks
   let lastSnapshot = await snapshotAgentsMtime(projectAgentsPath)
+  let activeSessionId = "unknown"
+
+  const hooksContext: HooksContext = {
+    ns,
+    client,
+    directory,
+    projectAgentsPath,
+    capabilitiesPath,
+    log,
+    getLastSnapshot: () => lastSnapshot,
+    setLastSnapshot: (s) => { lastSnapshot = s },
+    getActiveSessionId: () => activeSessionId,
+    setActiveSessionId: (id) => { activeSessionId = id },
+  }
 
   const hooks: Hooks = {
     // ── Config: register agents, commands, and rules ──
@@ -189,135 +208,22 @@ export const HivePlugin: Plugin = async function (ctx: PluginInput) {
     },
 
     // ── Track capability usage when delegated to via Task tool ──
-    "tool.execute.after": async (input) => {
-      if (input.tool === "task") {
-        const agentType = input?.args?.subagent_type || ""
-        if (agentType.startsWith("capabilities/")) {
-          const capName = agentType.replace("capabilities/", "")
-          markCapabilityUsed(directory, capName, activeSessionId)
-          log("info", `Marked capability as used: ${capName}`)
-
-          const pending = getInbox(directory, capName)
-          if (pending.length > 0) {
-            const formatted = formatInboxForPrompt(pending)
-            log("info", `HIVEmind: ${pending.length} pending message(s) after ${capName} ran`, { formatted })
-          }
-        }
-      }
-    },
+    "tool.execute.after": createToolExecuteAfterHook(hooksContext),
 
     // ── Event: session tracking, energy tick, hot-reload, file watcher ──
-    event: async ({ event }) => {
-      if (event.type === "session.created") {
-        const { results, skipped } = tickEnergy(directory)
-        if (!skipped) {
-          log("info", "Energy tick applied on session.created", { results })
-        }
-
-        const currentSnapshot = await snapshotAgentsMtime(projectAgentsPath)
-        if (snapshotChanged(lastSnapshot, currentSnapshot)) {
-          lastSnapshot = currentSnapshot
-        }
-      }
-
-      if (event.type === "session.status") {
-        const props = event.properties as { sessionID: string; status: { type: string } }
-        if (props.status.type === "busy") {
-          activeSessionId = props.sessionID
-          ns.markActive(props.sessionID)
-        }
-      }
-
-      if (event.type === "session.idle") {
-        const props = event.properties as { sessionID: string }
-        ns.markIdle(props.sessionID)
-      }
-
-      if (event.type === "file.watcher.updated") {
-        const props = event.properties as unknown as { path: string }
-        await ns.handleFileChange(props.path)
-      }
-    },
+    event: createEventHook(hooksContext),
 
     // ── System transform: inject roster + pending messages ──
-    "experimental.chat.system.transform": async (input, output) => {
-      output.system.push(ns.buildRoster())
-
-      if (!input.sessionID) return
-
-      if (ns.isCapabilitySession(input.sessionID)) {
-        // Capability: inject its own pending messages
-        const formatted = ns.formatMessages(ns.resolveAgent(input.sessionID))
-        if (formatted) output.system.push(formatted)
-      } else {
-        // Coordinator: inject _coordinator messages + queue status dashboard
-        const coordMessages = ns.formatMessages("_coordinator")
-        if (coordMessages) output.system.push(coordMessages)
-
-        const queueStatus = ns.buildQueueStatus()
-        if (queueStatus) output.system.push(queueStatus)
-      }
-    },
+    "experimental.chat.system.transform": createSystemTransformHook(hooksContext),
 
     // ── Chat message: track session → agent mapping ──
-    "chat.message": async (input, _output) => {
-      if (input.sessionID && input.agent) {
-        ns.registerSession(input.sessionID, input.agent)
-      }
-    },
+    "chat.message": createChatMessageHook(hooksContext),
 
     // ── Compaction: auto-tick + preserve HIVE state ──
-    "experimental.session.compacting": async (_input, output) => {
-      const { results, skipped } = tickEnergy(directory)
-      if (!skipped) {
-        log("info", "Energy tick applied on compaction", { results })
-      }
+    "experimental.session.compacting": createCompactionHook(hooksContext),
 
-      const summary = getCapabilitiesSummary(capabilitiesPath)
-      if (summary) {
-        output.context.push(
-          `## HIVE State (preserved across compaction)\n\n${summary}\n\nUse /status to see full details. Capabilities with low energy may need attention.`
-        )
-      }
-    },
-
-    // ── Custom tools: hive_signal and hive_listen ──
-    tool: {
-      hive_signal: tool({
-        description: "Send a message to another capability in the HIVE ecosystem. Use this when you need information from, or want to share information with, another capability. Messages are delivered in real-time if the recipient is active, otherwise queued for their next session. Check the Active Capabilities list in your system prompt to see valid recipients.",
-        args: {
-          recipient: tool.schema.string().describe("Target capability name, '_broadcast' for all, or '_coordinator' to escalate"),
-          type: tool.schema.enum(["question", "info", "result", "request"]).describe("Message type: question (need answer), info (FYI), result (answering prior question), request (ask coordinator to act)"),
-          content: tool.schema.string().describe("Message content"),
-        },
-        async execute(args, context) {
-          const sender = ns.resolveAgent(context.sessionID, context.agent)
-          const { filename, delivered } = await ns.send(sender, args.recipient, args.type, args.content)
-
-          return delivered
-            ? `Message sent to ${args.recipient} and delivered in real-time. (file: ${filename})`
-            : `Message queued for ${args.recipient}. They will receive it on their next session. (file: ${filename})`
-        },
-      }),
-
-      hive_listen: tool({
-        description: "Read pending messages from other capabilities addressed to you. Messages are also injected into your system prompt automatically, but use this tool to explicitly check for and acknowledge messages.",
-        args: {
-          mark_read: tool.schema.boolean().optional().describe("If true, mark all messages as read after retrieving them"),
-        },
-        async execute(args, context) {
-          const agent = ns.resolveAgent(context.sessionID, context.agent)
-          const pending = ns.readMessages(agent)
-
-          if (pending.length === 0) return "No pending messages."
-
-          const formatted = formatInboxForPrompt(pending)
-          if (args.mark_read) ns.acknowledgeMessages(agent)
-
-          return formatted || "No pending messages."
-        },
-      }),
-    },
+    // ── Custom tools: hive_signal, hive_listen, hive_dispatch ──
+    tool: createHiveTools(ns, client, log),
   }
 
   return hooks
