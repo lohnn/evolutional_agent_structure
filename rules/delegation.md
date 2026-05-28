@@ -174,33 +174,36 @@ You have two ways to launch a capability:
 | Mode | Tool | When to use |
 |------|------|-------------|
 | **Blocking** | `Task` (subagent_type: `capabilities/<name>`) | You need the result back immediately to continue your reasoning or respond to the user |
-| **Async** | `hive_dispatch` | The capability can run independently; you don't need its result right now |
+| **Background** | `Task` (subagent_type: `capabilities/<name>`, background: true) | The capability can run independently; you don't need its result right now |
 
-**Prefer `hive_dispatch` (async) when:**
+**Prefer background (`background: true`) when:**
 - The user's request spawns multiple independent work streams
 - You're routing a message from one capability to another
 - The work is self-contained and doesn't require a response before you can continue
-- You want to dispatch several capabilities in sequence without waiting
+- You want to dispatch several capabilities in parallel without waiting
 
-**Use `Task` (blocking) when:**
+**Use blocking (no `background` flag) when:**
 - You need the result to answer the user's question
 - The next step depends on what the capability returns
 - You're doing dream recall or explore (these are fast lookups, blocking is fine)
 
-**Async lifecycle:**
-1. You call `hive_dispatch(capability, prompt, resume: true)`
-2. It returns immediately — you are free to continue
-3. The capability runs in the background
-4. When it finishes, the plugin automatically wakes you if there are pending messages to route
-5. You read the messages, enrich context, and dispatch further as needed
+**Background lifecycle:**
+1. You call `Task` with `background: true` and `subagent_type: "capabilities/<name>"`
+2. The task launches in the background — you are free to continue
+3. The capability runs independently (its prompt is automatically enriched with roster and pending messages by the plugin)
+4. When it finishes, you are auto-notified with the result and any routing information
+5. You read any HIVEmind messages, enrich context, and dispatch further as needed
 
-**Routing wake-ups:**
-The plugin will poke you (via `promptAsync`) when:
-- A capability finishes and left messages for inactive/non-existent capabilities
-- A `hive_signal` is sent to a capability with no active session
-- A message is addressed to a capability that doesn't exist (spawn signal)
+**Routing notifications:**
+When a background capability task completes, the plugin appends routing information to the task output showing any pending HIVEmind messages that need attention. Act on these: enrich context, dispatch the recipient, or propose a spawn.
 
-When you receive a routing notification, act on it: enrich context, dispatch the recipient, or propose a spawn.
+**Prompt enrichment is automatic:**
+When you dispatch to a capability via the `Task` tool, the plugin automatically injects:
+- The full capability roster (so the capability knows who else exists)
+- Pending HIVEmind messages for that capability
+- Broadcast messages
+
+You do NOT need to manually include these in your prompt. Just provide the task-specific instructions and any dream recall artifacts.
 
 ### Dream Recall Protocol
 
@@ -218,21 +221,17 @@ Capabilities communicate by leaving structured JSON messages in `.opencode/hivem
 
 #### Before delegating to a capability
 
-1. **Build the Capability Roster** — glob `.opencode/agents/capabilities/*.md`, read the `description` frontmatter field from each file, and inject a roster into the delegation prompt:
-   ```
-   ## Active Capabilities
-   capability-name — description
-   capability-name — description
-   ...
-   ```
-   This gives the capability situational awareness of who else exists so it can address HIVEmind messages correctly. The coordinator builds this dynamically — there is no static registry file.
-2. Check `.opencode/hivemind/inbox/<capability-name>/` and `.opencode/hivemind/inbox/_broadcast/` for pending messages
-3. For each pending message, fulfill any `request` field before forwarding:
-   - **`kind: "explore"`** — spawn an `explore` subagent with the provided `query`; include the result in the delegation prompt
-   - **`kind: "dreams"`** — delegate to the `dreamcatcher` agent in Recall mode with the provided `query`; include the returned artifacts in the delegation prompt
-   - **`kind: "capability"`** — delegate the sub-task to `capabilities/<target>` using the provided `prompt`; include the result when routing to the original recipient
-4. Include the formatted message content (and any fulfilled request results) verbatim in the delegation prompt
-5. After the capability returns, call `markProcessed()` (or manually move the file to `.opencode/hivemind/processed/`) for each message you routed
+The plugin **automatically** handles context injection when you dispatch via the `Task` tool:
+- **Capability roster** — injected into the capability's system prompt (via `system.transform`)
+- **Pending HIVEmind messages** — injected into the capability's prompt on first dispatch (via `tool.execute.before`)
+- **Broadcast messages** — included alongside pending messages
+
+You do NOT need to manually build or inject roster/messages. Just provide task-specific instructions and dream recall artifacts.
+
+However, if a pending message contains a `request` field, you MUST fulfill it before dispatching:
+- **`kind: "explore"`** — spawn an `explore` subagent with the provided `query`; include the result in your delegation prompt
+- **`kind: "dreams"`** — delegate to the `dreamcatcher` agent in Recall mode with the provided `query`; include the returned artifacts in your delegation prompt
+- **`kind: "capability"`** — delegate the sub-task to `capabilities/<target>` using the provided `prompt`; include the result in your delegation prompt
 
 #### After a capability returns (or you are woken by the plugin)
 
@@ -240,7 +239,7 @@ Check all inboxes for new messages the capability may have left. If messages are
 - Determine their urgency (a `BLOCKED` capability takes priority)
 - Fulfill requests and route to the intended recipient in the next delegation
 
-Note: With async dispatch (`hive_dispatch`), you don't explicitly "wait" for a capability to return. The plugin wakes you automatically when a capability finishes and there are unrouted messages. When woken, follow the same protocol: read inboxes, enrich, route.
+Note: With background dispatch (`task(background: true)`), you don't explicitly "wait" for a capability to return. You are auto-notified when it finishes. When notified, follow the same protocol: read inboxes, enrich, route.
 
 #### Orphaned messages
 
