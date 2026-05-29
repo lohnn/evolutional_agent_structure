@@ -155,12 +155,37 @@ export class NervousSystem {
     return this.sessionMap.get(sessionID)?.groupID
   }
 
-  /** Returns session ID if the capability has a known session AND it is currently idle */
+  /** Returns session ID if the capability has a known session AND it is currently idle.
+   *  capabilityName is normalized via shortName(), so "capabilities/X" and "X" both match.
+   *  All session IDs are disk-persisted (.nervous-system-state.json) and loaded as
+   *  active:false on construction, so this survives plugin restarts. */
   findIdleSession(capabilityName: string): string | undefined {
-    const sessionID = this.capabilitySessionMap.get(capabilityName)
+    const name = shortName(capabilityName)
+    const sessionID = this.capabilitySessionMap.get(name)
     if (!sessionID) return undefined
     const info = this.sessionMap.get(sessionID)
     if (info && !info.active) return sessionID
+    return undefined
+  }
+
+  /**
+   * Returns the session ID for an idle capability session that belongs to the given
+   * dispatch group (coordinator session). Falls back to the plain idle lookup when no
+   * groupID is supplied. Used for group-scoped resumption (I-032): a capability launched
+   * by coordinator A should be resumed by coordinator A.
+   *
+   * Scans the full sessionMap (not just capabilitySessionMap, which only keeps the most
+   * recent session per capability) so a group's own idle session is found even when the
+   * latest session for that capability belongs to a different group.
+   */
+  findIdleSessionInGroup(capabilityName: string, groupID?: string): string | undefined {
+    const name = shortName(capabilityName)
+    if (!groupID) return this.findIdleSession(capabilityName)
+    for (const [sessionID, info] of this.sessionMap.entries()) {
+      if (info.active) continue
+      if (shortName(info.agent) !== name) continue
+      if (info.groupID === groupID) return sessionID
+    }
     return undefined
   }
 
@@ -396,7 +421,22 @@ export class NervousSystem {
 
   // ── Roster ────────────────────────────────────────────────────────────────
 
-  buildRoster(): string {
+  /**
+   * Build the capability roster for injection into coordinator/capability prompts.
+   *
+   * When `groupID` is provided (the requesting coordinator's session), idle capabilities
+   * that own a resumable session within that group are annotated with a [resumable: ...]
+   * hint instructing the coordinator how to continue that session via the task tool's
+   * task_id argument. Busy capabilities and capabilities with no known group session are
+   * never annotated.
+   *
+   * NOTE (SHADOW-003): task_id is treated as the subagent sessionID — confirmed by the
+   * shared `ses_...` id format and our existing capabilitySessionMap tracking. The exact
+   * resumption semantic (full context+message restoration vs. lineage only) is not
+   * verifiable from the SDK types alone; the annotation is phrased as a capability the
+   * coordinator MAY use, and the empirical behaviour is pending verification.
+   */
+  buildRoster(groupID?: string): string {
     const lines: string[] = ["## Active Capabilities"]
     try {
       const files = fs.readdirSync(this.capabilitiesPath)
@@ -405,7 +445,12 @@ export class NervousSystem {
         const name = file.replace(".md", "")
         const { frontmatter } = readMdFile(path.join(this.capabilitiesPath, file))
         const desc = (frontmatter.description as string) || "(no description)"
-        lines.push(`  ${name} — ${desc}`)
+
+        const resumableSession = this.findIdleSessionInGroup(name, groupID)
+        const suffix = resumableSession
+          ? ` [resumable: pass task_id="${resumableSession}" to continue this session and preserve its context + messages]`
+          : ""
+        lines.push(`  ${name} — ${desc}${suffix}`)
       }
     } catch {
       // no capabilities dir

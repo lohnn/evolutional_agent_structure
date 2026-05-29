@@ -115,7 +115,11 @@ export function createSystemTransformHook(ctx: HooksContext) {
     // Only inject HIVE context for coordinator and capability sessions
     if (!isCap && !isCoordinator) return
 
-    output.system.push(ns.buildRoster())
+    // For a coordinator, its own sessionID is its dispatch groupID — scope the
+    // roster's [resumable] annotations to sessions this coordinator owns (I-032).
+    // Capability sessions don't dispatch, so they get an unannotated roster.
+    const rosterGroupID = isCoordinator ? ns.getGroupID(input.sessionID) || input.sessionID : undefined
+    output.system.push(ns.buildRoster(rosterGroupID))
 
     if (isCap) {
       // Capability: inject hivemind messaging rules + pending messages
@@ -191,7 +195,7 @@ export function createToolDefinitionHook(ctx: HooksContext) {
     log("info", `[HIVE] tool.definition hook fired for: ${input.toolID}`)
     const roster = ns.buildRoster()
 
-    output.description += `\n\n## HIVE Capability Dispatch\n\nWhen dispatching to a capability (subagent_type starting with "capabilities/"), use \`background: true\` for non-blocking async execution. The capability will run independently and you will be notified when it completes.\n\n${roster}\n\nThe prompt you provide will be automatically enriched with the capability roster, pending HIVEmind messages, and relevant context. You do NOT need to manually inject these — just provide the task-specific instructions.`
+    output.description += `\n\n## HIVE Capability Dispatch\n\nWhen dispatching to a capability (subagent_type starting with "capabilities/"), use \`background: true\` for non-blocking async execution. The capability will run independently and you will be notified when it completes.\n\nIf a capability in the roster shows \`[resumable: task_id=...]\`, you MAY pass that value as the \`task_id\` argument to continue its existing session (preserving its accumulated context and pending HIVEmind messages) instead of spawning a fresh one. Prefer resumption when the new work is a direct continuation of what that capability was doing; prefer a fresh dispatch for unrelated work to avoid context bloat. The resumable annotation only appears for idle capabilities you previously dispatched in this session.\n\n${roster}\n\nThe prompt you provide will be automatically enriched with the capability roster, pending HIVEmind messages, and relevant context. You do NOT need to manually inject these — just provide the task-specific instructions.`
   }
 }
 
