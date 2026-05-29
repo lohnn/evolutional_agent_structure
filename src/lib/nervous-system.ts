@@ -224,11 +224,6 @@ export class NervousSystem {
     return undefined
   }
 
-  /** @deprecated Use getCoordinatorSessionFor() instead */
-  getCoordinatorSession(): string | undefined {
-    return this.getCoordinatorSessionFor()
-  }
-
   markActive(sessionID: string): void {
     const info = this.sessionMap.get(sessionID)
     if (info) info.active = true

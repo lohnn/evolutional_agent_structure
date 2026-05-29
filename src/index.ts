@@ -28,7 +28,6 @@ import {
   createChatMessageHook,
   createCompactionHook,
   createToolDefinitionHook,
-  createToolExecuteBeforeHook,
   createToolExecuteAfterHook,
   type HooksContext,
 } from "./hooks.js"
@@ -209,9 +208,6 @@ export const HivePlugin: Plugin = async function (ctx: PluginInput) {
 
     // ── Enrich task tool description with HIVE capability roster ──
     "tool.definition": createToolDefinitionHook(hooksContext),
-
-    // ── Enrich task tool prompt when targeting a capability ──
-    "tool.execute.before": createToolExecuteBeforeHook(hooksContext),
 
     // ── Event: session tracking, energy tick, hot-reload, file watcher ──
     event: createEventHook(hooksContext),

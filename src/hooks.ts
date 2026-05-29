@@ -198,30 +198,6 @@ export function createToolDefinitionHook(ctx: HooksContext) {
   }
 }
 
-export function createToolExecuteBeforeHook(ctx: HooksContext) {
-  return async (input: { tool: string; sessionID: string; callID: string }, output: { args: any }) => {
-    if (input.tool !== "task") return
-
-    const { log } = ctx
-    const args = output.args
-    const agentType = args?.subagent_type || ""
-
-    if (!agentType.startsWith("capabilities/")) return
-
-    const capName = agentType.replace("capabilities/", "")
-    log("info", `[HIVE] tool.execute.before fired for capability: ${capName}, sessionID: ${input.sessionID}`)
-
-    // Note: input.sessionID is the CALLER's session (coordinator), not the subagent's.
-    // Do NOT register it as a capability session — that corrupts the session map.
-    // The subagent's session will be registered via chat.message hook when it starts.
-    //
-    // Roster and pending messages are injected by system.transform (which fires
-    // for the subagent's session after chat.message registers it). No prompt
-    // enrichment needed here.
-    log("info", `[HIVE] No prompt enrichment — system.transform handles roster + messages for ${capName}`)
-  }
-}
-
 export function createToolExecuteAfterHook(ctx: HooksContext) {
   return async (input: { tool: string; sessionID: string; callID: string; args?: any }, output: { title: string; output: string; metadata: any }) => {
     const { ns, directory, log, getActiveSessionId } = ctx
