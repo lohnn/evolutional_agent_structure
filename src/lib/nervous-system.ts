@@ -128,11 +128,23 @@ export class NervousSystem {
 
   registerSession(sessionID: string, agent: string): void {
     const existing = this.sessionMap.get(sessionID)
-    const groupID = existing?.groupID || (agent.startsWith("capabilities/") ? undefined : sessionID)
-    this.sessionMap.set(sessionID, { agent, active: true, groupID })
+
+    let groupID: string | undefined
     if (agent.startsWith("capabilities/")) {
+      // Capability session: inherit groupID from disk-loaded entry if present,
+      // otherwise auto-assign to the currently-active coordinator so that
+      // isSessionAwake() can resolve awake-state via the coordinator's awakeSessions
+      // entry. Without this, capability sessions have groupID=undefined and the
+      // isSessionAwake inheritance path silently fails, blocking system.transform
+      // injection for resumed sessions (SHADOW-003 follow-up).
+      groupID = existing?.groupID ?? this.findCoordinatorSession()
       this.capabilitySessionMap.set(shortName(agent), sessionID)
+    } else {
+      // Non-capability (coordinator): its own sessionID is its groupID
+      groupID = existing?.groupID ?? sessionID
     }
+
+    this.sessionMap.set(sessionID, { agent, active: true, groupID })
     this.persistState()
   }
 

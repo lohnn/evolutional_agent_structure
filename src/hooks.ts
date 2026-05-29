@@ -99,18 +99,17 @@ export function createSystemTransformHook(ctx: HooksContext) {
   let delegationContent: string | null = null
   let hivemindCapContent: string | null = null
 
-  return async (input: { sessionID?: string }, output: { system: string[] }) => {
+  return async (input: { sessionID?: string; model?: unknown }, output: { system: string[] }) => {
     const { ns, log, rulesDir } = ctx
 
     if (!input.sessionID) return
 
     // Check if HIVE is awake for this session
     const isAwake = ns.hasCapabilities() && ns.isSessionAwake(input.sessionID)
-    if (!isAwake) return
-
     const isCap = ns.isCapabilitySession(input.sessionID)
     const isCoordinator = ns.isCoordinatorSession(input.sessionID)
-    log("info", `[HIVE] system.transform fired — sessionID: ${input.sessionID}, isCapability: ${isCap}, isCoordinator: ${isCoordinator}`)
+    log("info", `[HIVE] system.transform fired — sessionID: ${input.sessionID}, isCapability: ${isCap}, isCoordinator: ${isCoordinator}, isAwake: ${isAwake}`)
+    if (!isAwake) return
 
     // Only inject HIVE context for coordinator and capability sessions
     if (!isCap && !isCoordinator) return
