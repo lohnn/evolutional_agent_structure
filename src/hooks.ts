@@ -1,5 +1,8 @@
 /**
  * HIVE event hooks: session tracking, energy tick, hot-reload, system transform, compaction
+ *
+ * Debug logging: set HIVE_DEBUG=1 in the environment to enable verbose [HIVE] info logs.
+ * Error and warn level logs are always emitted regardless of this flag.
  */
 
 import path from "path"
@@ -21,6 +24,8 @@ export interface HooksContext {
   capabilitiesPath: string
   rulesDir: string
   log: LogFn
+  /** Like log("info", ...) but gated behind HIVE_DEBUG=1. Use for high-frequency diagnostic lines. */
+  debugLog: (message: string, extra?: Record<string, unknown>) => void
   getLastSnapshot: () => Record<string, number>
   setLastSnapshot: (snapshot: Record<string, number>) => void
   getActiveSessionId: () => string
@@ -29,12 +34,12 @@ export interface HooksContext {
 
 export function createEventHook(ctx: HooksContext) {
   return async ({ event }: { event: { type: string; properties?: unknown } }) => {
-    const { ns, directory, projectAgentsPath, log, getLastSnapshot, setLastSnapshot, setActiveSessionId } = ctx
+    const { ns, directory, projectAgentsPath, log, debugLog, getLastSnapshot, setLastSnapshot, setActiveSessionId } = ctx
 
     if (event.type === "session.created") {
       const { results, skipped } = tickEnergy(directory)
       if (!skipped) {
-        log("info", "Energy tick applied on session.created", { results })
+        debugLog("Energy tick applied on session.created", { results })
       }
 
       const currentSnapshot = await snapshotAgentsMtime(projectAgentsPath)
@@ -100,15 +105,16 @@ export function createSystemTransformHook(ctx: HooksContext) {
   let hivemindCapContent: string | null = null
 
   return async (input: { sessionID?: string; model?: unknown }, output: { system: string[] }) => {
-    const { ns, log, rulesDir } = ctx
+    const { ns, log, debugLog, rulesDir } = ctx
 
     if (!input.sessionID) return
 
-    // Check if HIVE is awake for this session
+    // Check if HIVE is awake for this session — log BEFORE the guard (W-017) so gate
+    // failures are visible when HIVE_DEBUG=1.
     const isAwake = ns.hasCapabilities() && ns.isSessionAwake(input.sessionID)
     const isCap = ns.isCapabilitySession(input.sessionID)
     const isCoordinator = ns.isCoordinatorSession(input.sessionID)
-    log("info", `[HIVE] system.transform fired — sessionID: ${input.sessionID}, isCapability: ${isCap}, isCoordinator: ${isCoordinator}, isAwake: ${isAwake}`)
+    debugLog(`[HIVE] system.transform fired — sessionID: ${input.sessionID}, isCapability: ${isCap}, isCoordinator: ${isCoordinator}, isAwake: ${isAwake}`)
     if (!isAwake) return
 
     // Only inject HIVE context for coordinator and capability sessions
@@ -135,7 +141,7 @@ export function createSystemTransformHook(ctx: HooksContext) {
       const formatted = ns.formatMessages(capName)
       if (formatted) {
         output.system.push(formatted)
-        log("info", `[HIVE] system.transform injected messages for ${capName}`)
+        debugLog(`[HIVE] system.transform injected messages for ${capName}`)
       }
     } else if (isCoordinator) {
       // Coordinator: inject delegation rules + _coordinator messages + queue status
@@ -169,11 +175,11 @@ export function createChatMessageHook(ctx: HooksContext) {
 
 export function createCompactionHook(ctx: HooksContext) {
   return async (_input: unknown, output: { context: string[] }) => {
-    const { directory, capabilitiesPath, log } = ctx
+    const { directory, capabilitiesPath, debugLog } = ctx
 
     const { results, skipped } = tickEnergy(directory)
     if (!skipped) {
-      log("info", "Energy tick applied on compaction", { results })
+      debugLog("Energy tick applied on compaction", { results })
     }
 
     const summary = getCapabilitiesSummary(capabilitiesPath)
@@ -189,9 +195,9 @@ export function createToolDefinitionHook(ctx: HooksContext) {
   return async (input: { toolID: string }, output: { description: string; parameters: any }) => {
     if (input.toolID !== "task") return
 
-    const { ns, log } = ctx
+    const { ns, debugLog } = ctx
     if (!ns.hasCapabilities() || !ns.isHiveActive()) return
-    log("info", `[HIVE] tool.definition hook fired for: ${input.toolID}`)
+    debugLog(`[HIVE] tool.definition hook fired for: ${input.toolID}`)
     const roster = ns.buildRoster()
 
     output.description += `\n\n## HIVE Capability Dispatch\n\nWhen dispatching to a capability (subagent_type starting with "capabilities/"), use \`background: true\` for non-blocking async execution. The capability will run independently and you will be notified when it completes.\n\nIf a capability in the roster shows \`[resumable: task_id=...]\`, you MAY pass that value as the \`task_id\` argument to continue its existing session (preserving its accumulated context and pending HIVEmind messages) instead of spawning a fresh one. Prefer resumption when the new work is a direct continuation of what that capability was doing; prefer a fresh dispatch for unrelated work to avoid context bloat. The resumable annotation only appears for idle capabilities you previously dispatched in this session.\n\n${roster}\n\nThe prompt you provide will be automatically enriched with the capability roster, pending HIVEmind messages, and relevant context. You do NOT need to manually inject these — just provide the task-specific instructions.`
@@ -200,7 +206,7 @@ export function createToolDefinitionHook(ctx: HooksContext) {
 
 export function createToolExecuteAfterHook(ctx: HooksContext) {
   return async (input: { tool: string; sessionID: string; callID: string; args?: any }, output: { title: string; output: string; metadata: any }) => {
-    const { ns, directory, log, getActiveSessionId } = ctx
+    const { ns, directory, debugLog, getActiveSessionId } = ctx
 
     if (input.tool !== "task") return
 
@@ -210,7 +216,7 @@ export function createToolExecuteAfterHook(ctx: HooksContext) {
     const capName = agentType.replace("capabilities/", "")
     const { markCapabilityUsed } = await import("./lib/energy.js")
     markCapabilityUsed(directory, capName, getActiveSessionId())
-    log("info", `[HIVE] Capability task completed: ${capName}`)
+    debugLog(`[HIVE] Capability task completed: ${capName}`)
 
     // Check for pending messages that need routing
     const pendingInboxes = listPendingInboxes(directory)

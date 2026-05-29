@@ -115,6 +115,13 @@ export const HivePlugin: Plugin = async function (ctx: PluginInput) {
     }).catch(() => {})
   }
 
+  // High-frequency diagnostic logs gated behind HIVE_DEBUG=1.
+  // Set this env var to re-enable verbose [HIVE] info output for debugging.
+  // Error/warn logs are always emitted via log() directly.
+  const debugLog = (message: string, extra?: Record<string, unknown>) => {
+    if (process.env.HIVE_DEBUG === "1") log("info", message, extra)
+  }
+
   log("info", `HIVE plugin v${PLUGIN_VERSION} loaded from ${PACKAGE_ROOT}`)
 
   // Mutable state for hooks
@@ -129,6 +136,7 @@ export const HivePlugin: Plugin = async function (ctx: PluginInput) {
     capabilitiesPath,
     rulesDir: RULES_DIR,
     log,
+    debugLog,
     getLastSnapshot: () => lastSnapshot,
     setLastSnapshot: (s) => { lastSnapshot = s },
     getActiveSessionId: () => activeSessionId,
