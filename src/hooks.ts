@@ -19,6 +19,7 @@ export interface HooksContext {
   directory: string
   projectAgentsPath: string
   capabilitiesPath: string
+  rulesDir: string
   log: LogFn
   getLastSnapshot: () => Record<string, number>
   setLastSnapshot: (snapshot: Record<string, number>) => void
@@ -94,32 +95,63 @@ export function createEventHook(ctx: HooksContext) {
 }
 
 export function createSystemTransformHook(ctx: HooksContext) {
-  return async (input: { sessionID?: string }, output: { system: string[] }) => {
-    const { ns, log } = ctx
+  // Cache rule file contents (they don't change during a session)
+  let delegationContent: string | null = null
+  let hivemindCapContent: string | null = null
 
-    output.system.push(ns.buildRoster())
+  return async (input: { sessionID?: string }, output: { system: string[] }) => {
+    const { ns, log, rulesDir } = ctx
 
     if (!input.sessionID) return
 
+    // Check if HIVE is awake for this session
+    const isAwake = ns.hasCapabilities() && ns.isSessionAwake(input.sessionID)
+    if (!isAwake) return
+
     const isCap = ns.isCapabilitySession(input.sessionID)
-    log("info", `[HIVE] system.transform fired — sessionID: ${input.sessionID}, isCapability: ${isCap}`)
+    const isCoordinator = ns.isCoordinatorSession(input.sessionID)
+    log("info", `[HIVE] system.transform fired — sessionID: ${input.sessionID}, isCapability: ${isCap}, isCoordinator: ${isCoordinator}`)
+
+    // Only inject HIVE context for coordinator and capability sessions
+    if (!isCap && !isCoordinator) return
+
+    output.system.push(ns.buildRoster())
 
     if (isCap) {
-      // Capability: inject its own pending messages
+      // Capability: inject hivemind messaging rules + pending messages
+      if (hivemindCapContent === null) {
+        try {
+          hivemindCapContent = fs.readFileSync(path.join(rulesDir, "hivemind-capabilities.md"), "utf8")
+        } catch {
+          hivemindCapContent = ""
+        }
+      }
+      if (hivemindCapContent) output.system.push(hivemindCapContent)
+
       const capName = ns.resolveAgent(input.sessionID)
       const formatted = ns.formatMessages(capName)
       if (formatted) {
         output.system.push(formatted)
         log("info", `[HIVE] system.transform injected messages for ${capName}`)
       }
-    } else {
-      // Coordinator: inject _coordinator messages + queue status dashboard
+    } else if (isCoordinator) {
+      // Coordinator: inject delegation rules + _coordinator messages + queue status
+      if (delegationContent === null) {
+        try {
+          delegationContent = fs.readFileSync(path.join(rulesDir, "delegation.md"), "utf8")
+        } catch {
+          delegationContent = ""
+        }
+      }
+      if (delegationContent) output.system.push(delegationContent)
+
       const coordMessages = ns.formatMessages("_coordinator")
       if (coordMessages) output.system.push(coordMessages)
 
       const queueStatus = ns.buildQueueStatus()
       if (queueStatus) output.system.push(queueStatus)
     }
+    // else: non-HIVE subagent (general, explore, dreamcatcher) — nothing injected
   }
 }
 
@@ -155,6 +187,7 @@ export function createToolDefinitionHook(ctx: HooksContext) {
     if (input.toolID !== "task") return
 
     const { ns, log } = ctx
+    if (!ns.hasCapabilities() || !ns.isHiveActive()) return
     log("info", `[HIVE] tool.definition hook fired for: ${input.toolID}`)
     const roster = ns.buildRoster()
 

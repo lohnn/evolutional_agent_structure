@@ -25,6 +25,7 @@ export class NervousSystem {
   private sessionMap = new Map<string, SessionInfo>()
   private capabilitySessionMap = new Map<string, string>()
   private knownCapabilityFiles = new Set<string>()
+  private awakeSessions = new Set<string>()
   private client: Client
   private directory: string
   private capabilitiesPath: string
@@ -51,6 +52,11 @@ export class NervousSystem {
           }
         }
       }
+      if (state.awakeSessions) {
+        for (const id of state.awakeSessions) {
+          this.awakeSessions.add(id)
+        }
+      }
     } catch {
       // no state file yet, fine
     }
@@ -61,8 +67,9 @@ export class NervousSystem {
     for (const [id, info] of this.sessionMap.entries()) {
       sessions.push({ id, agent: info.agent, groupID: info.groupID })
     }
+    const awakeSessions = Array.from(this.awakeSessions)
     try {
-      fs.writeFileSync(this.stateFilePath, JSON.stringify({ sessions }, null, 2), "utf8")
+      fs.writeFileSync(this.stateFilePath, JSON.stringify({ sessions, awakeSessions }, null, 2), "utf8")
     } catch {
       // ignore write failures
     }
@@ -78,6 +85,43 @@ export class NervousSystem {
     } catch {
       // ignore
     }
+  }
+
+  /** Returns true if any non-template capability files exist (HIVE is awake) */
+  hasCapabilities(): boolean {
+    return this.knownCapabilityFiles.size > 0
+  }
+
+  /** Returns true if any session is currently HIVE-awake */
+  isHiveActive(): boolean {
+    return this.awakeSessions.size > 0
+  }
+
+  /** Mark a session as HIVE-awake (persists across restarts) */
+  awakenSession(sessionID: string): void {
+    this.awakeSessions.add(sessionID)
+    this.persistState()
+  }
+
+  /** Check if a session (or its group coordinator) is HIVE-awake */
+  isSessionAwake(sessionID: string): boolean {
+    if (this.awakeSessions.has(sessionID)) return true
+    // Inherit from group coordinator
+    const info = this.sessionMap.get(sessionID)
+    if (info?.groupID && info.groupID !== sessionID) {
+      return this.awakeSessions.has(info.groupID)
+    }
+    return false
+  }
+
+  /** Prune awake sessions older than maxAge (default 7 days) */
+  pruneAwakeSessions(keepSessionIDs: Set<string>): void {
+    for (const id of this.awakeSessions) {
+      if (!keepSessionIDs.has(id)) {
+        this.awakeSessions.delete(id)
+      }
+    }
+    this.persistState()
   }
 
   // ── Session tracking ──────────────────────────────────────────────────────
@@ -168,6 +212,19 @@ export class NervousSystem {
   isCapabilitySession(sessionID: string): boolean {
     const info = this.sessionMap.get(sessionID)
     return info?.agent?.startsWith("capabilities/") ?? false
+  }
+
+  /** Returns true if this session is a coordinator (primary agent, not a subagent or capability) */
+  isCoordinatorSession(sessionID: string): boolean {
+    const info = this.sessionMap.get(sessionID)
+    if (!info) return false
+    // Capabilities are not coordinators
+    if (info.agent.startsWith("capabilities/")) return false
+    // Known subagent types are not coordinators
+    const subagentTypes = ["general", "explore", "dreamcatcher", "scout"]
+    if (subagentTypes.includes(info.agent)) return false
+    // Everything else (build, hive, etc.) is a coordinator
+    return true
   }
 
   // ── Message sending + delivery ────────────────────────────────────────────

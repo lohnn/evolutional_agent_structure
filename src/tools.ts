@@ -59,5 +59,14 @@ export function createHiveTools(
         return formatted || "No pending messages."
       },
     }),
+
+    hive_awaken: tool({
+      description: "Activate HIVE for the current session. Call this when processing /awaken to enable capability dispatch, roster injection, and HIVEmind messaging for this session. Without this, HIVE context is not injected.",
+      args: {},
+      async execute(_args, context) {
+        ns.awakenSession(context.sessionID)
+        return "HIVE awakened for this session. Capability dispatch and HIVEmind messaging are now active."
+      },
+    }),
   }
 }

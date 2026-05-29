@@ -8,7 +8,11 @@ The void stirs. HIVE awakens.
 
 ## Process
 
-### 1. Dream Recall (MANDATORY FIRST STEP)
+### 0. Activate HIVE Session
+
+**FIRST**, call the `hive_awaken` tool to activate HIVE for this session. This enables capability dispatch, roster injection, and HIVEmind messaging. Without this step, no HIVE context will be injected.
+
+### 1. Dream Recall (MANDATORY)
 
 Before anything else — before introductions, before analysis — recall dreams.
 
