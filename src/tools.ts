@@ -300,6 +300,27 @@ export function createHiveTools(
           ? args.domain_tags.split(",").map((t) => t.trim()).filter(Boolean)
           : undefined
 
+        // Guard the silent-empty footgun: domain_tags only exists on insights/songlines.
+        // If a tag filter is combined with a type filter restricted to tagless types
+        // (warning/shadow), the result can ONLY be empty — which reads as "no relevant
+        // artifacts" when it really means "tags don't apply here". Fail loudly with guidance
+        // instead of returning a misleading empty list.
+        if (tagFilter && tagFilter.length > 0 && typeFilter && typeFilter.length > 0) {
+          const TAGLESS: ArtifactType[] = ["warning", "shadow"]
+          const requestedTagless = typeFilter.filter((t) => TAGLESS.includes(t))
+          const requestedTagged = typeFilter.filter((t) => !TAGLESS.includes(t))
+          if (requestedTagged.length === 0) {
+            return (
+              `Invalid query: domain_tags was set, but every requested type (${requestedTagless.join(", ")}) is tagless. ` +
+              `domain_tags only exists on insights and songlines — warnings and shadows carry no tags, so this filter combination can ONLY return empty. ` +
+              `An empty result here would mean "tags don't apply", NOT "no relevant artifacts exist".\n\n` +
+              `To cover this topic, run two queries:\n` +
+              `  1. hive_dream_query(types: "insight,songline", domain_tags: "${args.domain_tags}")  — tagged retrieval\n` +
+              `  2. hive_dream_query(types: "${requestedTagless.join(",")}", min_confidence: <floor>)  — drop domain_tags; judge relevance from content`
+            )
+          }
+        }
+
         if (process.env.HIVE_DEBUG === "1") {
           log("info", "[dream_query] querying artifacts", { typeFilter, tagFilter, min_confidence: args.min_confidence })
         }
@@ -310,8 +331,21 @@ export function createHiveTools(
           min_confidence: args.min_confidence,
         })
 
+        // Mixed-case reminder: a tag filter silently excludes tagless types (warning/shadow).
+        // The all-tagless case is already rejected above; here we only nudge when the query
+        // is valid but tagless types were (or could have been) dropped by the tag filter.
+        let taglessNote = ""
+        if (tagFilter && tagFilter.length > 0) {
+          const taglessExcluded = !typeFilter || typeFilter.some((t) => t === "warning" || t === "shadow")
+          if (taglessExcluded) {
+            taglessNote =
+              `\n\nNote: domain_tags excludes warnings and shadows (they carry no tags). ` +
+              `If failure-patterns on this topic matter, run a follow-up: hive_dream_query(types: "warning,shadow", min_confidence: <floor>) without domain_tags.`
+          }
+        }
+
         if (result.total === 0) {
-          return "No artifacts found matching the given filters."
+          return "No artifacts found matching the given filters." + taglessNote
         }
 
         if (result.mode === "full" && result.full) {
@@ -321,7 +355,7 @@ export function createHiveTools(
             lines.push(serializeArtifact(entry.artifact).trimEnd())
             lines.push("")
           }
-          return lines.join("\n")
+          return lines.join("\n") + taglessNote
         }
 
         // Index mode
@@ -329,7 +363,7 @@ export function createHiveTools(
         for (const { id, type, summary } of result.index!) {
           lines.push(`${id} [${type}]: ${summary}`)
         }
-        return lines.join("\n")
+        return lines.join("\n") + taglessNote
       },
     }),
 
