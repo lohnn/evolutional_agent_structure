@@ -5,8 +5,20 @@
  * feed the dreamtime consolidation workflow.
  *
  * Layout:
- *   .opencode/dreams/raw/<capability>.md        — active journal (append-only)
- *   .opencode/dreams/raw/.harvested/<cap>-<ts>.md — archived after harvest
+ *   .opencode/dreams/raw/<capability>.<sessionID>.md   — active journal, one per (capability, session)
+ *   .opencode/dreams/raw/.harvested/<cap>.<sid>-<ts>.md — archived after harvest
+ *
+ * Per-(capability, session) keying prevents concurrent same-capability sessions
+ * from corrupting each other via interleaved appendFileSync calls.  A resumed
+ * session (same sessionID) correctly accumulates into the same file.
+ *
+ * Attribution on harvest: split filename on the FIRST dot —
+ *   capability = everything before first dot  (e.g. "hive-infra")
+ *   session    = everything between first dot and ".md"  (e.g. "ses_17dc…")
+ * Capability short-names use hyphens only (never dots), so this split is safe.
+ * Legacy files of the form "<capability>.md" (no session segment) are also
+ * handled: the "session" part becomes the empty string, capability attribution
+ * still works correctly.
  */
 
 import path from "path"
@@ -18,8 +30,25 @@ function rawDir(directory: string): string {
   return path.join(directory, ".opencode/dreams/raw")
 }
 
-function journalPath(directory: string, capabilityName: string): string {
-  return path.join(rawDir(directory), `${capabilityName}.md`)
+/** Sanitise sessionID for use as a filename segment — strip any path separators. */
+function sanitiseSessionID(sessionID: string): string {
+  return sessionID.replace(/[/\\]/g, "_")
+}
+
+function journalPath(directory: string, capabilityName: string, sessionID: string): string {
+  const sid = sanitiseSessionID(sessionID)
+  return path.join(rawDir(directory), `${capabilityName}.${sid}.md`)
+}
+
+/**
+ * Extract capability name from a journal filename.
+ * Files are named `<capability>.<sessionID>.md` — capability is everything
+ * before the first dot.  Legacy `<capability>.md` files are also handled.
+ */
+function capabilityFromFilename(filename: string): string {
+  const base = filename.replace(/\.md$/, "")        // strip .md
+  const dotIdx = base.indexOf(".")
+  return dotIdx === -1 ? base : base.slice(0, dotIdx)
 }
 
 function harvestedDir(directory: string): string {
@@ -31,16 +60,20 @@ function harvestedDir(directory: string): string {
 export type ResidueKind = "insight" | "warning" | "shadow" | "note"
 
 /**
- * Append a delta of dream-worthy learnings to the capability's journal.
+ * Append a delta of dream-worthy learnings to the capability's per-session journal.
  * Creates the file if it does not exist; never overwrites.
+ * Each (capability, sessionID) pair maps to its own file — concurrent sessions
+ * of the same capability cannot interleave.  A resumed session (same sessionID)
+ * appends to the same file, accumulating correctly (I-042).
  */
 export function appendResidue(
   directory: string,
   capabilityName: string,
+  sessionID: string,
   content: string,
   kind?: ResidueKind
 ): void {
-  const filePath = journalPath(directory, capabilityName)
+  const filePath = journalPath(directory, capabilityName, sessionID)
   const ts = new Date().toISOString()
   const kindTag = kind ? ` [${kind}]` : ""
   const header = `\n## ${ts}${kindTag}\n`
@@ -87,14 +120,16 @@ export function harvestJournals(
 
     if (!content) continue
 
-    const capability = file.replace(/\.md$/, "")
+    const capability = capabilityFromFilename(file)
     entries.push({ capability, content })
 
     if (clear) {
       const archiveDir = harvestedDir(directory)
       // harvestedDir should already exist via bootstrap, but be safe
       fs.mkdirSync(archiveDir, { recursive: true })
-      const dest = path.join(archiveDir, `${capability}-${ts}.md`)
+      // Archive filename: strip .md, append -<ts>.md so it's traceable
+      const base = file.replace(/\.md$/, "")
+      const dest = path.join(archiveDir, `${base}-${ts}.md`)
       try {
         fs.renameSync(src, dest)
       } catch {

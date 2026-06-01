@@ -127,7 +127,7 @@ export function createHiveTools(
           log("warn", "[dream_residue] could not resolve capability from session — residue not written", { sessionID: context.sessionID, agent: context.agent })
           return "Warning: could not resolve capability identity. Residue was NOT written."
         }
-        appendResidue(directory, capability, args.content, args.kind as ResidueKind | undefined)
+        appendResidue(directory, capability, context.sessionID, args.content, args.kind as ResidueKind | undefined)
         return `Residue appended to journal for \`${capability}\`${args.kind ? ` [${args.kind}]` : ""}.`
       },
     }),
