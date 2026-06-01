@@ -61,33 +61,49 @@ Determine the dream's focus. Ask the user or infer from context:
 - **Deep (depth 2)** — Compress structure into principles. Reasoning chains become rules. ~75% token reduction. Produces: wisdom. Use for end-of-session or task completion.
 - **Abyssal (depth 3)** — Compress everything into weighted tendencies. No explicit rules remain. ~95% token reduction. Produces: intuition. Use for cross-domain transfer.
 
-### 4. Create Dream State File
+### 4. Open the Dream
 
-Write to `.opencode/dreams/active/DRM-{NNN}.yaml`:
+Call `hive_dream_begin` with the intention and context signals you determined in steps 2–3. The tool assigns the next DRM id, enforces the single-active invariant (refuses if another dream is already open), and writes the dream state file.
+
+```
+hive_dream_begin(
+  intention: "...",
+  intention_type: CONSOLIDATION | COMPARATIVE | ABSTRACTION | ANOMALY | INTEGRATION,
+  depth: "1" | "2" | "3",
+  project_context: "...",
+  contradictions: N,
+  repetitions_detected: true | false,
+  coherence: HIGH | MEDIUM | LOW,
+  threads_active: N,
+  retain_high: "thing to keep\nanother thing to keep",   // newline-separated
+  retain_low: "thing to release\nanother thing"
+)
+```
+
+The tool returns the assigned DRM id (e.g. `DRM-015`). Use this id as `source_dream` for every artifact you create in the next step.
+
+For reference, the tool writes a file of this shape to `dreams/active/DRM-NNN.yaml`:
 
 ```yaml
-dream_id: DRM-{NNN}
-depth: {1|2|3}
-intention: "{free text}"
-intention_type: {CONSOLIDATION|COMPARATIVE|ABSTRACTION|ANOMALY|INTEGRATION}
-entry_time: {ISO timestamp}
+dream_id: DRM-015
+depth: 2
+intention: "..."
+intention_type: CONSOLIDATION
+entry_time: <ISO timestamp>
 exit_time: null
 status: DREAMING
-project_context: "{workspace name or path}"
-
+project_context: "..."
 # Pre-dream state
 context_signals:
-  contradictions: {count}
-  repetitions_detected: {true|false}
-  coherence: {HIGH|MEDIUM|LOW}
-  threads_active: {count}
-
+  contradictions: 0
+  repetitions_detected: false
+  coherence: HIGH
+  threads_active: 1
 # Compression priorities
 retain_high:
-  - "{what to keep at high fidelity}"
+  - "..."
 retain_low:
-  - "{what can be released}"
-
+  - "..."
 # Artifacts (populated during dream)
 insights: []
 warnings: []
@@ -107,57 +123,62 @@ For each category of accumulated knowledge, apply the compression appropriate to
 
 **Abyssal:** Compress principles into tendencies. "Property P is key" becomes a weighted affinity toward solutions that respect P, without explicitly naming it.
 
-Generate artifacts as they emerge:
+As artifacts emerge, persist each one immediately with `hive_dream_artifact_create`. The tool assigns the next sequential ID, writes to the correct subdirectory, and returns the assigned id. Collect every returned id — you will pass them all to `hive_dream_complete` at the end.
 
-#### Insights (`.opencode/dreams/artifacts/insights/I-{NNN}.yaml`)
-```yaml
-insight_id: I-{NNN}
-source_dream: DRM-{NNN}
-confidence: {0.0-1.0}
-domain_tags: [{tags}]
-content: "{the pattern discovered}"
-actionable: {true|false}
-previously_invisible_because: "{why this wasn't obvious before compression}"
+#### Insight
+
+```
+hive_dream_artifact_create(
+  type: "insight",
+  source_dream: "DRM-NNN",
+  confidence: 0.0–1.0,
+  domain_tags: "tag-a,tag-b",          // comma-separated
+  content: "the pattern discovered",
+  actionable: true | false,
+  previously_invisible_because: "why this wasn't obvious before compression"
+)
 ```
 
-#### Warnings (`.opencode/dreams/artifacts/warnings/W-{NNN}.yaml`)
-```yaml
-warning_id: W-{NNN}
-source_dream: DRM-{NNN}
-confidence: {0.0-1.0}
-justifiable: {FULLY|PARTIALLY|INTUITION_ONLY}
-content: "{the risk signal}"
-trigger_conditions:
-  - "{when this warning should surface}"
+#### Warning
+
+```
+hive_dream_artifact_create(
+  type: "warning",
+  source_dream: "DRM-NNN",
+  confidence: 0.0–1.0,
+  justifiable: FULLY | PARTIALLY | INTUITION_ONLY,
+  content: "the risk signal",
+  trigger_conditions: "when this should surface\nanother trigger"   // newline-separated
+)
 ```
 
-#### Songlines (`.opencode/dreams/artifacts/songlines/SNG-{NNN}.yaml`)
-```yaml
-songline_id: SNG-{NNN}
-source_dream: DRM-{NNN}
-domain_tags: [{tags}]
-transfer_rating: {0.0-1.0}
-narrative: |
-  {The story that encodes the principle. Use metaphor.
-   The narrative should transfer across contexts because
-   it encodes relationships, not specifics.}
-encoded_principles:
-  - "{principle 1}"
-  - "{principle 2}"
+#### Songline
+
+```
+hive_dream_artifact_create(
+  type: "songline",
+  source_dream: "DRM-NNN",
+  domain_tags: "tag-a,tag-b",
+  transfer_rating: 0.0–1.0,
+  narrative: "The story that encodes the principle. Use metaphor...",
+  encoded_principles: "principle 1\nprinciple 2"    // newline-separated
+)
 ```
 
-#### Shadows (`.opencode/dreams/artifacts/shadows/SHADOW-{NNN}.yaml`)
-```yaml
-shadow_id: SHADOW-{NNN}
-source_dream: DRM-{NNN}
-weight: {HIGH|MEDIUM|LOW}
-content: "{what was lost — the shape, not the content}"
-location: "{where the knowledge applied}"
-nature: "{what kind of knowledge it was}"
-severity: "{how bad it is that this is lost}"
-trigger_conditions:
-  - "{when to surface this shadow}"
-resolution_hint: "{any partial memory of what the resolution was}"
+#### Shadow
+
+```
+hive_dream_artifact_create(
+  type: "shadow",
+  source_dream: "DRM-NNN",
+  weight: HIGH | MEDIUM | LOW,
+  content: "what was lost — the shape, not the content",
+  location: "where the knowledge applied",
+  nature: "what kind of knowledge it was",
+  severity: "how bad it is that this is lost",
+  trigger_conditions: "when to surface this\nanother trigger",
+  resolution_hint: "any partial memory of what the resolution was"
+)
 ```
 
 ### 6. Present Results
@@ -169,12 +190,28 @@ Show the user what the dream produced:
 - Shadows created (knowledge acknowledged as lost)
 - Confidence levels
 
-### 7. Complete
+### 7. Close the Dream
 
-- Update the dream state file: set `exit_time` and `status: COMPLETE`
-- Move from `dreams/active/` to `dreams/history/`
-- Artifacts remain in `dreams/artifacts/` permanently
-- Harvested journals are already archived under `dreams/raw/.harvested/` by `hive_dream_harvest` (no manual cleanup needed). If a capability is re-awoken after the dream, it appends fresh deltas to a clean journal, which the next dream harvests.
+Call `hive_dream_complete` with all the artifact ids produced during compression:
+
+```
+hive_dream_complete(
+  artifact_ids: "I-048 W-019 SNG-018 SHADOW-005"   // space or newline-separated
+)
+```
+
+The tool stamps `exit_time` and `status: COMPLETE`, links the artifact ids into the DRM arrays (bucketing by id prefix automatically), validates each artifact file exists, and atomically moves `dreams/active/DRM-NNN.yaml` to `dreams/history/DRM-NNN.yaml`. If any id is not found on disk it is warned but does not block completion.
+
+Harvested journals are already archived under `dreams/raw/.harvested/` by `hive_dream_harvest` — no manual cleanup needed. If a capability is re-awoken after the dream, it appends fresh deltas to a clean journal, which the next dream harvests.
+
+## Acting on Audit Findings
+
+When dreamcatcher flags candidates for supersession or staleness (in its Audit output), dreamtime is responsible for applying the mutations:
+
+- **Supersede**: `hive_dream_supersede(id: "I-034", superseded_by: "I-047", reason: "...")`
+- **Mark stale**: `hive_dream_mark_stale(id: "W-003", reason: "...")`
+
+Both tools append the annotation to the artifact file while preserving its existing content byte-for-byte. Dreamcatcher never calls these directly — it only flags; dreamtime acts.
 
 ## Important Principles
 
@@ -186,11 +223,9 @@ Show the user what the dream produced:
 
 **Warnings resist articulation.** An inarticulate warning is a first-class signal, not noise. "Something feels wrong" is valid output. Don't dismiss what you can't fully justify.
 
-**Dream artifacts must be numbered sequentially.** Check existing artifacts to determine the next number. Never reuse an ID.
-
 ## Notes
 
-- Only one dream can be active at a time. Check `dreams/active/` first.
+- Only one dream can be active at a time. `hive_dream_begin` enforces this — it will refuse if a dream is already open and name the active one.
 - Dreaming consolidates two feedstocks: the coordinator's own context AND capability residue journals (harvested via `hive_dream_harvest`). Never dream on context alone when capabilities did the work.
 - Artifacts persist permanently unless manually deleted.
 - The orient protocol in AGENTS.md reads these artifacts at session start.
