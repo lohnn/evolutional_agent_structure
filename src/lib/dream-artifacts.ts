@@ -481,3 +481,229 @@ export function queryArtifacts(directory: string, filter: QueryFilter): QueryRes
 
   return { index, total, mode: "index" }
 }
+
+// ── ID → type resolution ──────────────────────────────────────────────────────
+
+/** Map an artifact ID prefix to its type. Returns null if unrecognised. */
+export function idToType(id: string): ArtifactType | null {
+  if (/^I-\d+$/.test(id)) return "insight"
+  if (/^W-\d+$/.test(id)) return "warning"
+  if (/^SNG-\d+$/.test(id)) return "songline"
+  if (/^SHADOW-\d+$/.test(id)) return "shadow"
+  return null
+}
+
+/** Resolve the filesystem path for any artifact ID. Returns null if prefix unknown. */
+export function pathForId(directory: string, id: string): string | null {
+  const type = idToType(id)
+  if (!type) return null
+  return artifactPath(directory, type, id)
+}
+
+// ── Cheap list (no full parse) ────────────────────────────────────────────────
+
+export interface ListEntry {
+  id: string
+  type: ArtifactType
+  source_dream: string
+  summary: string   // first ~80 chars of primary content field
+}
+
+/**
+ * Lightweight index of artifacts — extracts id, source_dream, and a content
+ * summary WITHOUT a full parse. Reads just enough lines to find the fields.
+ * Primary field: insight/warning/shadow → content; songline → narrative.
+ *
+ * Optional filters: type and/or source_dream.
+ */
+export function listArtifacts(
+  directory: string,
+  opts: { types?: ArtifactType[]; source_dream?: string } = {}
+): ListEntry[] {
+  const targetTypes: ArtifactType[] = opts.types ?? ["insight", "warning", "songline", "shadow"]
+  const entries: ListEntry[] = []
+
+  for (const type of targetTypes) {
+    const subdir = artifactSubdir(directory, type)
+    let files: string[]
+    try {
+      files = fs.readdirSync(subdir).filter((f) => f.endsWith(".yaml"))
+    } catch {
+      continue
+    }
+
+    for (const file of files) {
+      const id = file.replace(/\.yaml$/, "")
+      const filePath = path.join(subdir, file)
+
+      let source_dream = ""
+      let summary = ""
+
+      try {
+        const content = fs.readFileSync(filePath, "utf8")
+        const lines = content.split("\n")
+
+        // Walk lines looking for source_dream and the primary content field
+        // Stop early once both found — avoids parsing the whole file
+        let inNarrative = false
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i]
+
+          // Leaving narrative block
+          if (inNarrative && !line.startsWith("  ") && line.trim() !== "") {
+            inNarrative = false
+          }
+
+          if (inNarrative && summary.length < 80) {
+            const text = line.startsWith("  ") ? line.slice(2) : line
+            if (summary.length === 0) summary = text
+            // just take the first non-empty line of the narrative
+          }
+
+          if (line.startsWith("source_dream:")) {
+            source_dream = line.split(":")[1].trim().replace(/^["']|["']$/g, "")
+          }
+
+          if ((type === "insight" || type === "warning" || type === "shadow") &&
+              line.startsWith("content:") && summary === "") {
+            const val = line.slice("content:".length).trim()
+            const unquoted = val.startsWith('"') ? val.slice(1, -1).replace(/\\"/g, '"') : val
+            summary = unquoted.slice(0, 80)
+          }
+
+          if (type === "songline" && line.startsWith("narrative: |")) {
+            inNarrative = true
+          }
+
+          // Early exit once we have both
+          if (source_dream && summary) break
+        }
+      } catch {
+        continue
+      }
+
+      // source_dream filter
+      if (opts.source_dream && source_dream !== opts.source_dream) continue
+
+      entries.push({ id, type, source_dream, summary: summary.slice(0, 80) })
+    }
+  }
+
+  return entries
+}
+
+// ── Append-field mutation (supersede / mark_stale) ────────────────────────────
+
+/**
+ * Append one or more `key: value` fields to an existing artifact file.
+ * Preserves the original content byte-for-byte; only appends to the end.
+ * Values are double-quoted if they are strings; booleans/numbers are unquoted.
+ * All files end with a single `\n` — we trim it, append fields, re-add `\n`.
+ */
+export function appendFieldsToArtifact(
+  filePath: string,
+  fields: Array<{ key: string; value: string | boolean | number }>
+): void {
+  const original = fs.readFileSync(filePath, "utf8")
+  // Trim the final newline; we'll re-add it after appending
+  const base = original.endsWith("\n") ? original.slice(0, -1) : original
+  const additions = fields.map(({ key, value }) => {
+    if (typeof value === "boolean") return `${key}: ${value}`
+    if (typeof value === "number") return `${key}: ${value}`
+    // string — double-quote
+    const escaped = (value as string).replace(/\\/g, "\\\\").replace(/"/g, '\\"')
+    return `${key}: "${escaped}"`
+  })
+  fs.writeFileSync(filePath, base + "\n" + additions.join("\n") + "\n", "utf8")
+}
+
+// ── Duplicate detection ───────────────────────────────────────────────────────
+
+export interface DuplicateCandidate {
+  idA: string
+  typeA: ArtifactType
+  idB: string
+  typeB: ArtifactType
+  score: number            // 0.0–1.0 combined heuristic
+  tag_jaccard: number
+  token_overlap: number
+  summaryA: string
+  summaryB: string
+}
+
+/** Tokenise a string into lowercase words (≥3 chars, strip punctuation). */
+function tokenise(s: string): Set<string> {
+  return new Set(
+    s.toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter((t) => t.length >= 3)
+  )
+}
+
+/** Jaccard similarity between two sets. */
+function jaccard(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 && b.size === 0) return 0
+  let intersection = 0
+  for (const item of a) if (b.has(item)) intersection++
+  const union = a.size + b.size - intersection
+  return union === 0 ? 0 : intersection / union
+}
+
+/**
+ * Return candidate near-duplicate pairs above a given threshold.
+ * Heuristic: average of domain_tag Jaccard + content-token Jaccard.
+ * Operates only within types that have domain_tags (insight, songline)
+ * AND across all types on content-token overlap.
+ * Semantic judgment stays in the calling agent / dreamcatcher.
+ */
+export function detectDuplicateCandidates(
+  directory: string,
+  threshold = 0.35
+): DuplicateCandidate[] {
+  const entries = scanArtifacts(directory)
+  const candidates: DuplicateCandidate[] = []
+
+  // Pre-compute tokens + tags once per artifact
+  const precomputed = entries.map((e) => {
+    const a = e.artifact
+    let contentText = ""
+    let tags: string[] = []
+    if (a.type === "insight") { contentText = a.content; tags = a.domain_tags }
+    else if (a.type === "warning") { contentText = a.content }
+    else if (a.type === "songline") { contentText = a.narrative; tags = a.domain_tags }
+    else if (a.type === "shadow") { contentText = a.content }
+    return { entry: e, tokens: tokenise(contentText), tags: new Set(tags) }
+  })
+
+  // O(n²) pairwise — 86 artifacts → ~3700 pairs, fast enough
+  for (let i = 0; i < precomputed.length; i++) {
+    for (let j = i + 1; j < precomputed.length; j++) {
+      const a = precomputed[i]
+      const b = precomputed[j]
+
+      const tag_jaccard = jaccard(a.tags, b.tags)
+      const token_overlap = jaccard(a.tokens, b.tokens)
+      const score = (tag_jaccard + token_overlap) / 2
+
+      if (score >= threshold) {
+        const summaryA = [...a.tokens].slice(0, 10).join(" ")
+        const summaryB = [...b.tokens].slice(0, 10).join(" ")
+        candidates.push({
+          idA: a.entry.id,
+          typeA: a.entry.type,
+          idB: b.entry.id,
+          typeB: b.entry.type,
+          score: Math.round(score * 100) / 100,
+          tag_jaccard: Math.round(tag_jaccard * 100) / 100,
+          token_overlap: Math.round(token_overlap * 100) / 100,
+          summaryA,
+          summaryB,
+        })
+      }
+    }
+  }
+
+  // Sort by score descending
+  return candidates.sort((a, b) => b.score - a.score)
+}

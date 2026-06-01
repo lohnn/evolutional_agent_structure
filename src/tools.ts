@@ -2,7 +2,9 @@
  * HIVE custom tools: hive_signal, hive_listen, hive_awaken,
  *                    hive_dream_residue, hive_dream_harvest,
  *                    hive_dream_artifact_create, hive_dream_query,
- *                    hive_dream_begin, hive_dream_complete
+ *                    hive_dream_begin, hive_dream_complete,
+ *                    hive_dream_list, hive_dream_supersede,
+ *                    hive_dream_mark_stale, hive_dream_detect_duplicates
  */
 
 import { tool } from "@opencode-ai/plugin"
@@ -15,6 +17,11 @@ import {
   writeArtifact,
   queryArtifacts,
   serializeArtifact,
+  listArtifacts,
+  pathForId,
+  idToType,
+  appendFieldsToArtifact,
+  detectDuplicateCandidates,
   type ArtifactType,
   type InsightArtifact,
   type WarningArtifact,
@@ -31,6 +38,7 @@ import {
   type CoherenceLevel,
 } from "./lib/dream-state.js"
 import path from "path"
+import fs from "fs"
 
 type Client = ReturnType<typeof createOpencodeClient>
 type LogFn = (level: "info" | "debug" | "error" | "warn", message: string, extra?: Record<string, unknown>) => void
@@ -442,6 +450,181 @@ export function createHiveTools(
         if (missingArtifacts.length > 0) {
           lines.push(`  ⚠ Missing artifact files (linked in DRM but not found on disk): ${missingArtifacts.join(", ")}`)
         }
+        return lines.join("\n")
+      },
+    }),
+
+    // ── Audit helpers ─────────────────────────────────────────────────────────
+
+    hive_dream_list: tool({
+      description:
+        "Return a lightweight index of dream artifacts — ID, type, source dream, and a ~80-char content excerpt. " +
+        "Cheaper than hive_dream_query (no full parse); use for ID validation, audit pre-pass, or a quick 'what exists' overview. " +
+        "Optional filters: type (one artifact type) and/or source_dream (e.g. 'DRM-014'). " +
+        "Distinct from hive_dream_query which returns full content and supports confidence/tag filtering.",
+      args: {
+        type: tool.schema.enum(["insight", "warning", "songline", "shadow"]).optional().describe("Filter to a single artifact type. Omit for all types."),
+        source_dream: tool.schema.string().optional().describe("Filter to artifacts from a specific dream (e.g. 'DRM-014')."),
+      },
+      async execute(args, _context) {
+        if (process.env.HIVE_DEBUG === "1") {
+          log("info", "[dream_list] listing artifacts", { type: args.type, source_dream: args.source_dream })
+        }
+
+        const types: ArtifactType[] | undefined = args.type ? [args.type as ArtifactType] : undefined
+        const entries = listArtifacts(directory, { types, source_dream: args.source_dream })
+
+        if (entries.length === 0) {
+          return "No artifacts found matching the given filters."
+        }
+
+        const lines = [`Dream artifact index — ${entries.length} artifact(s):\n`]
+        for (const { id, type, source_dream, summary } of entries) {
+          lines.push(`${id} [${type}] (${source_dream}): ${summary}${summary.length >= 80 ? "…" : ""}`)
+        }
+        return lines.join("\n")
+      },
+    }),
+
+    hive_dream_supersede: tool({
+      description:
+        "Mark an artifact as superseded by a newer one. " +
+        "Appends superseded_by and optionally supersede_reason to the artifact file, preserving all existing content byte-for-byte. " +
+        "Validates both IDs exist on disk before writing. " +
+        "Called by dreamtime after a dreamcatcher audit flags a supersession candidate — dreamcatcher itself is read-only. " +
+        "Use hive_dream_mark_stale instead if there is no direct replacement artifact.",
+      args: {
+        id: tool.schema.string().describe("The artifact being superseded (e.g. 'I-034')"),
+        superseded_by: tool.schema.string().describe("The replacement artifact ID (e.g. 'I-047')"),
+        reason: tool.schema.string().optional().describe("Optional short explanation of why this artifact was superseded"),
+      },
+      async execute(args, context) {
+        const caller = ns.resolveAgent(context.sessionID, context.agent)
+        if (process.env.HIVE_DEBUG === "1") {
+          log("info", "[dream_supersede] marking superseded", { id: args.id, superseded_by: args.superseded_by, caller })
+        }
+
+        // Validate target artifact exists
+        const targetPath = pathForId(directory, args.id)
+        if (!targetPath) {
+          log("warn", "[dream_supersede] unknown id prefix", { id: args.id, caller })
+          return `Error: cannot resolve artifact type from id '${args.id}'. Expected format: I-NNN, W-NNN, SNG-NNN, SHADOW-NNN.`
+        }
+        if (!fs.existsSync(targetPath)) {
+          log("warn", "[dream_supersede] target artifact not found", { id: args.id, targetPath, caller })
+          return `Error: artifact ${args.id} not found at ${targetPath}.`
+        }
+
+        // Validate replacement artifact exists
+        const replacementPath = pathForId(directory, args.superseded_by)
+        if (!replacementPath) {
+          log("warn", "[dream_supersede] unknown replacement id prefix", { superseded_by: args.superseded_by, caller })
+          return `Error: cannot resolve artifact type from replacement id '${args.superseded_by}'.`
+        }
+        if (!fs.existsSync(replacementPath)) {
+          log("warn", "[dream_supersede] replacement artifact not found", { superseded_by: args.superseded_by, caller })
+          return `Error: replacement artifact ${args.superseded_by} not found at ${replacementPath}. Create it first.`
+        }
+
+        const fields: Array<{ key: string; value: string | boolean | number }> = [
+          { key: "superseded_by", value: args.superseded_by },
+        ]
+        if (args.reason) {
+          fields.push({ key: "supersede_reason", value: args.reason })
+        }
+
+        appendFieldsToArtifact(targetPath, fields)
+        log("info", `[dream_supersede] ${args.id} superseded by ${args.superseded_by}`, { targetPath, caller })
+        return `${args.id} marked superseded_by: ${args.superseded_by}${args.reason ? ` (reason: ${args.reason})` : ""}. File: ${targetPath}`
+      },
+    }),
+
+    hive_dream_mark_stale: tool({
+      description:
+        "Mark an artifact as stale (no longer reliable, but no direct replacement). " +
+        "Appends stale: true and optionally stale_reason to the artifact file, preserving all existing content byte-for-byte. " +
+        "Validates the artifact ID exists on disk before writing. " +
+        "Called by dreamtime after a dreamcatcher audit flags a staleness candidate. " +
+        "Use hive_dream_supersede instead if there is a specific replacement artifact.",
+      args: {
+        id: tool.schema.string().describe("The artifact to mark stale (e.g. 'W-003')"),
+        reason: tool.schema.string().optional().describe("Optional short explanation of why this artifact is stale"),
+      },
+      async execute(args, context) {
+        const caller = ns.resolveAgent(context.sessionID, context.agent)
+        if (process.env.HIVE_DEBUG === "1") {
+          log("info", "[dream_mark_stale] marking stale", { id: args.id, caller })
+        }
+
+        const targetPath = pathForId(directory, args.id)
+        if (!targetPath) {
+          log("warn", "[dream_mark_stale] unknown id prefix", { id: args.id, caller })
+          return `Error: cannot resolve artifact type from id '${args.id}'. Expected format: I-NNN, W-NNN, SNG-NNN, SHADOW-NNN.`
+        }
+        if (!fs.existsSync(targetPath)) {
+          log("warn", "[dream_mark_stale] artifact not found", { id: args.id, targetPath, caller })
+          return `Error: artifact ${args.id} not found at ${targetPath}.`
+        }
+
+        const fields: Array<{ key: string; value: string | boolean | number }> = [
+          { key: "stale", value: true },
+        ]
+        if (args.reason) {
+          fields.push({ key: "stale_reason", value: args.reason })
+        }
+
+        appendFieldsToArtifact(targetPath, fields)
+        log("info", `[dream_mark_stale] ${args.id} marked stale`, { targetPath, caller })
+        return `${args.id} marked stale: true${args.reason ? ` (reason: ${args.reason})` : ""}. File: ${targetPath}`
+      },
+    }),
+
+    hive_dream_detect_duplicates: tool({
+      description:
+        "Scan the artifact archive and return candidate near-duplicate pairs using cheap heuristics: " +
+        "domain-tag Jaccard overlap + content-token Jaccard overlap. " +
+        "Returns pairs above a similarity threshold with scores and content excerpts. " +
+        "This is a pre-filter only — semantic relevance judgment and the final merge/supersede decision stay with dreamcatcher and dreamtime. " +
+        "A high score means textual/tag similarity, not guaranteed duplication.",
+      args: {
+        threshold: tool.schema.number().optional().describe("Minimum similarity score 0.0–1.0 to report (default 0.35). Lower = more candidates, higher = fewer but stronger matches."),
+        types: tool.schema.string().optional().describe("Comma-separated artifact types to scan. Default: all types."),
+      },
+      async execute(args, _context) {
+        if (process.env.HIVE_DEBUG === "1") {
+          log("info", "[dream_detect_duplicates] scanning", { threshold: args.threshold, types: args.types })
+        }
+
+        const threshold = args.threshold ?? 0.35
+
+        // If type filter given, re-use full scan and filter — detectDuplicateCandidates
+        // internally scans all types; we post-filter the pairs if needed
+        const typeFilter = args.types
+          ? new Set(args.types.split(",").map((t) => t.trim()) as ArtifactType[])
+          : null
+
+        const candidates = detectDuplicateCandidates(directory, threshold)
+        const filtered = typeFilter
+          ? candidates.filter((c) => typeFilter.has(c.typeA) || typeFilter.has(c.typeB))
+          : candidates
+
+        if (filtered.length === 0) {
+          return `No near-duplicate candidates found above threshold ${threshold}.`
+        }
+
+        const lines = [
+          `Duplicate detection — ${filtered.length} candidate pair(s) above threshold ${threshold}:\n`,
+        ]
+        for (const c of filtered) {
+          lines.push(
+            `${c.idA} [${c.typeA}] ≈ ${c.idB} [${c.typeB}]  score=${c.score} ` +
+            `(tags=${c.tag_jaccard} tokens=${c.token_overlap})`
+          )
+          lines.push(`  A: ${c.summaryA}`)
+          lines.push(`  B: ${c.summaryB}`)
+          lines.push("")
+        }
+        lines.push("Semantic judgment: use dreamcatcher Audit mode to assess whether these are true duplicates.")
         return lines.join("\n")
       },
     }),
