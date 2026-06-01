@@ -283,10 +283,13 @@ export function createHiveTools(
         "or a summary index (ID + excerpt) when large. " +
         "Use this to surface relevant learnings before delegating to a capability, or as feedstock for dreamcatcher Recall. " +
         "Server-side filters reduce context load; semantic relevance judgment stays with the calling agent. " +
-        "All filters are optional — omitting all returns the full archive (likely index mode at 86+ artifacts).",
+        "All filters are optional — omitting all returns the full archive (likely index mode at 86+ artifacts). " +
+        "IMPORTANT: domain_tags only exists on insights and songlines. Warnings and shadows carry NO tags, so any query with a domain_tags filter excludes ALL warnings and shadows. " +
+        "To gather everything on a topic, run TWO queries: (1) domain_tags='<topic>' for tagged insights/songlines, then (2) a separate untagged query (e.g. types='warning,shadow' with no domain_tags) and judge relevance from content. " +
+        "An empty result from a tag-filtered warning/shadow query means 'tags don't apply', NOT 'no relevant artifacts exist'.",
       args: {
         types: tool.schema.string().optional().describe("Comma-separated artifact types to include: insight,warning,songline,shadow. Default: all."),
-        domain_tags: tool.schema.string().optional().describe("Comma-separated tags — returns artifacts matching ANY listed tag (applies to insights and songlines). E.g. 'plugin-design,file-io'"),
+        domain_tags: tool.schema.string().optional().describe("Comma-separated tags, ANY-match. ONLY applies to insights and songlines — warnings and shadows have no tags and are excluded entirely when this filter is set. Omit it (and filter by types/content instead) to reach warnings/shadows. E.g. 'plugin-design,file-io'"),
         min_confidence: tool.schema.number().optional().describe("Minimum confidence or transfer_rating to include (0.0–1.0). Shadows have no confidence and are always included when their type is requested."),
       },
       async execute(args, _context) {

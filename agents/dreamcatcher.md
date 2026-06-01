@@ -30,10 +30,17 @@ Use the structured tools rather than raw file IO. The tools parse correctly and 
 
 2. **Query for relevant artifacts** with `hive_dream_query`. Filter by `domain_tags`, `types`, and/or `min_confidence` to get a focused result set. The tool returns full artifact content when the filtered set is ≤20, and a summary index when larger — let it do the pruning, then apply semantic judgment to what comes back.
 
-   Example — retrieving warnings and shadows relevant to a plugin task:
+   **Tags only exist on insights and songlines.** Warnings and shadows carry no `domain_tags`, so a query that sets `domain_tags` excludes *every* warning and shadow. An empty result from such a query means "tags don't apply here", not "no relevant warnings exist" — do not conclude the archive is silent on the topic.
+
+   So to cover a topic fully, run **two queries**:
    ```
-   hive_dream_query(types: "warning,shadow", domain_tags: "plugin-design,file-io", min_confidence: 0.7)
+   # (1) tagged types — insights + songlines on the topic
+   hive_dream_query(types: "insight,songline", domain_tags: "plugin-design,file-io", min_confidence: 0.7)
+
+   # (2) untagged types — warnings + shadows; no domain_tags, judge relevance from content
+   hive_dream_query(types: "warning,shadow", min_confidence: 0.7)
    ```
+   Query (2) returns all warnings/shadows above the confidence floor; apply your semantic judgment (step 3) to keep the ones that bear on the task. This shadow-first second pass is exactly where the most valuable failure-patterns surface.
 
 3. **Reason semantically** about the returned artifacts — not just keyword matching. A warning about "filesystem scan behavior" is relevant to a plugin feature task even if the task description doesn't use those words. Think: "would a capable engineer want to know this before starting this task?"
 
