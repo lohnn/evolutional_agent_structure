@@ -1,7 +1,8 @@
 /**
  * HIVE custom tools: hive_signal, hive_listen, hive_awaken,
  *                    hive_dream_residue, hive_dream_harvest,
- *                    hive_dream_artifact_create, hive_dream_query
+ *                    hive_dream_artifact_create, hive_dream_query,
+ *                    hive_dream_begin, hive_dream_complete
  */
 
 import { tool } from "@opencode-ai/plugin"
@@ -20,6 +21,16 @@ import {
   type SonglineArtifact,
   type ShadowArtifact,
 } from "./lib/dream-artifacts.js"
+import {
+  listActiveDreams,
+  beginDream,
+  completeDream,
+  readDreamState,
+  activeDreamPath,
+  type IntentionType,
+  type CoherenceLevel,
+} from "./lib/dream-state.js"
+import path from "path"
 
 type Client = ReturnType<typeof createOpencodeClient>
 type LogFn = (level: "info" | "debug" | "error" | "warn", message: string, extra?: Record<string, unknown>) => void
@@ -306,6 +317,130 @@ export function createHiveTools(
         const lines = [`Dream archive query — ${result.total} artifact(s) (summary index — request specific types/tags for full content):\n`]
         for (const { id, type, summary } of result.index!) {
           lines.push(`${id} [${type}]: ${summary}`)
+        }
+        return lines.join("\n")
+      },
+    }),
+
+    // ── Dream lifecycle (DRM state files) ─────────────────────────────────────
+
+    hive_dream_begin: tool({
+      description:
+        "Open a new dream session. Assigns the next sequential DRM-NNN id (scanning both active/ and history/ to avoid collisions), " +
+        "enforces the single-active invariant (refuses if a dream is already active — name it in the error), " +
+        "and writes dreams/active/DRM-NNN.yaml with status DREAMING. " +
+        "Use this at the start of the dreamtime workflow, after hive_dream_harvest. " +
+        "Returns the assigned DRM id.",
+      args: {
+        intention: tool.schema.string().describe("Free-text description of what this dream intends to consolidate"),
+        intention_type: tool.schema.enum(["CONSOLIDATION", "COMPARATIVE", "ABSTRACTION", "ANOMALY", "INTEGRATION"]).describe("Dream intention type"),
+        depth: tool.schema.enum(["1", "2", "3"]).describe("Compression depth: 1=surface (~40% reduction), 2=deep (~75%), 3=abyssal (~95%)"),
+        project_context: tool.schema.string().describe("Workspace name or path this dream covers (e.g. '/workspace — evolutional_agent_structure (HIVE plugin)')"),
+        contradictions: tool.schema.number().optional().describe("Number of contradictions detected in pre-dream context (default 0)"),
+        repetitions_detected: tool.schema.boolean().optional().describe("Whether repetitions were detected in pre-dream context (default false)"),
+        coherence: tool.schema.enum(["HIGH", "MEDIUM", "LOW"]).optional().describe("Coherence level of pre-dream context (default HIGH)"),
+        threads_active: tool.schema.number().optional().describe("Number of active threads in pre-dream context (default 1)"),
+        retain_high: tool.schema.string().optional().describe("Newline-separated list of things to retain at high fidelity during compression"),
+        retain_low: tool.schema.string().optional().describe("Newline-separated list of things that can be released during compression"),
+      },
+      async execute(args, context) {
+        const caller = ns.resolveAgent(context.sessionID, context.agent)
+        if (process.env.HIVE_DEBUG === "1") {
+          log("info", "[dream_begin] checking active dreams", { caller })
+        }
+
+        // Single-active invariant
+        const active = listActiveDreams(directory)
+        if (active.length > 0) {
+          const existing = active[0].replace(".yaml", "")
+          log("warn", "[dream_begin] refused — active dream already exists", { existing, caller })
+          return `Cannot begin a new dream: ${existing} is already active. Complete it first with hive_dream_complete, or check dreams/active/ manually.`
+        }
+
+        const splitLines = (s?: string): string[] =>
+          s ? s.split("\n").map((l) => l.trim()).filter(Boolean) : []
+
+        const { dreamId, filePath } = beginDream(directory, {
+          depth: parseInt(args.depth, 10),
+          intention: args.intention,
+          intention_type: args.intention_type as IntentionType,
+          entry_time: new Date().toISOString(),
+          project_context: args.project_context,
+          context_signals: {
+            contradictions: args.contradictions ?? 0,
+            repetitions_detected: args.repetitions_detected ?? false,
+            coherence: (args.coherence ?? "HIGH") as CoherenceLevel,
+            threads_active: args.threads_active ?? 1,
+          },
+          retain_high: splitLines(args.retain_high),
+          retain_low: splitLines(args.retain_low),
+        })
+
+        log("info", `[dream_begin] opened ${dreamId}`, { filePath, caller })
+        return `Dream ${dreamId} opened (status: DREAMING). File: ${filePath}\nProceed with compression and call hive_dream_artifact_create for each artifact, then hive_dream_complete when done.`
+      },
+    }),
+
+    hive_dream_complete: tool({
+      description:
+        "Close the active dream session. Stamps exit_time and status COMPLETE, links the produced artifact IDs into the DRM arrays " +
+        "(bucketed automatically by prefix: I-/W-/SNG-/SHADOW-), validates that referenced artifact files exist (warns on missing, does not hard-fail), " +
+        "and atomically moves dreams/active/DRM-NNN.yaml to dreams/history/DRM-NNN.yaml. " +
+        "Returns a summary of the DRM id, artifact counts, and the final path.",
+      args: {
+        artifact_ids: tool.schema.string().optional().describe("Space or newline-separated list of artifact IDs produced during this dream (e.g. 'I-048 W-019 SNG-018'). May be empty if no artifacts were created."),
+      },
+      async execute(args, context) {
+        const caller = ns.resolveAgent(context.sessionID, context.agent)
+
+        // Single-active invariant checks
+        const active = listActiveDreams(directory)
+        if (active.length === 0) {
+          log("warn", "[dream_complete] no active dream found", { caller })
+          return "Error: no active dream found in dreams/active/. Nothing to complete."
+        }
+        if (active.length > 1) {
+          log("warn", "[dream_complete] multiple active dreams — invariant violated", { active, caller })
+          return `Error: single-active invariant violated — found ${active.length} active dreams: ${active.join(", ")}. Resolve manually.`
+        }
+
+        // Read active dream to get its ID for the log
+        const activeDream = readDreamState(path.join(directory, ".opencode/dreams/active", active[0]))
+        if (process.env.HIVE_DEBUG === "1") {
+          log("info", "[dream_complete] completing dream", { dreamId: activeDream.dream_id, caller })
+        }
+
+        // Parse artifact IDs
+        const rawIds = args.artifact_ids ?? ""
+        const artifactIds = rawIds.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean)
+
+        const exitTime = new Date().toISOString()
+
+        let result
+        try {
+          result = completeDream(directory, exitTime, artifactIds)
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err)
+          if (msg === "NO_ACTIVE_DREAM") {
+            return "Error: no active dream found. Nothing to complete."
+          }
+          log("error", "[dream_complete] failed", { err: msg, caller })
+          return `Error completing dream: ${msg}`
+        }
+
+        const { dreamId, historyPath, linkedArtifacts, missingArtifacts } = result
+        const totalLinked = Object.values(linkedArtifacts).reduce((s, a) => s + a.length, 0)
+
+        log("info", `[dream_complete] completed ${dreamId}`, { historyPath, totalLinked, caller })
+
+        const lines = [
+          `Dream ${dreamId} completed.`,
+          `  Status: COMPLETE`,
+          `  History: ${historyPath}`,
+          `  Artifacts linked: ${totalLinked} (insights:${linkedArtifacts.insights.length} warnings:${linkedArtifacts.warnings.length} songlines:${linkedArtifacts.songlines.length} shadows:${linkedArtifacts.shadows.length})`,
+        ]
+        if (missingArtifacts.length > 0) {
+          lines.push(`  ⚠ Missing artifact files (linked in DRM but not found on disk): ${missingArtifacts.join(", ")}`)
         }
         return lines.join("\n")
       },
