@@ -35,6 +35,16 @@ Check for dream readiness signals:
 
 If no signals are present, warn the user that dreaming may be premature and ask for confirmation.
 
+### 1b. Harvest Capability Residue
+
+Before setting intention, gather the firsthand learnings that capabilities recorded while they worked. Background-dispatched capabilities run in isolated contexts that are gone by the time you dream — their journals are the only durable trace of what they actually experienced.
+
+Call the `hive_dream_harvest` tool. It reads every per-capability residue journal under `.opencode/dreams/raw/`, returns the accumulated deltas attributed per capability, and atomically archives the journals so the next session starts clean. (Pass `peek: true` only if you want to inspect without clearing — e.g. a premature/aborted dream.)
+
+Treat the harvested residue as **first-class feedstock alongside your own context**. It is raw and per-turn: it will contain duplication across re-awakenings, dead-ends that were later resolved, and half-formed signals. That is expected — resolving those into clean artifacts is exactly what the compression step (5) does. Do not skip the harvest because your own context feels sufficient; the richest warnings and shadows are usually the ones a capability hit firsthand and you only saw as a summary.
+
+If the harvest returns empty, proceed with your own context alone.
+
 ### 2. Set Intention
 
 Determine the dream's focus. Ask the user or infer from context:
@@ -86,6 +96,8 @@ shadows: []
 ```
 
 ### 5. Execute Compression
+
+Compress across **two sources together**: your own session context AND the harvested capability residue from step 1b. Where a capability's firsthand residue corroborates or contradicts your secondhand summary, prefer the firsthand signal — the capability was closer to the work. Cross-capability residue on the same topic often forms a stronger constellation than either source alone.
 
 For each category of accumulated knowledge, apply the compression appropriate to the chosen depth:
 
@@ -162,6 +174,7 @@ Show the user what the dream produced:
 - Update the dream state file: set `exit_time` and `status: COMPLETE`
 - Move from `dreams/active/` to `dreams/history/`
 - Artifacts remain in `dreams/artifacts/` permanently
+- Harvested journals are already archived under `dreams/raw/.harvested/` by `hive_dream_harvest` (no manual cleanup needed). If a capability is re-awoken after the dream, it appends fresh deltas to a clean journal, which the next dream harvests.
 
 ## Important Principles
 
@@ -178,6 +191,7 @@ Show the user what the dream produced:
 ## Notes
 
 - Only one dream can be active at a time. Check `dreams/active/` first.
+- Dreaming consolidates two feedstocks: the coordinator's own context AND capability residue journals (harvested via `hive_dream_harvest`). Never dream on context alone when capabilities did the work.
 - Artifacts persist permanently unless manually deleted.
 - The orient protocol in AGENTS.md reads these artifacts at session start.
 - Depth choice is a trade-off: precision for portability. Surface is precise but context-bound. Abyssal transfers everywhere but can't be cited.

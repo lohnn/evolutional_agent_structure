@@ -29,8 +29,19 @@ HIVE should:
 3. Detect overlaps between capabilities
 4. Identify gaps in coverage
 5. Review dissolved capabilities for resurrection potential
-6. Propose evolutionary operations
+6. Audit the dream archive for drift (delegate to dreamcatcher in Audit mode)
+7. Propose evolutionary operations
 ```
+
+### 1b. Dream Archive Audit
+
+The capability ecosystem is not the only thing that drifts — collective memory does too. Duplicate insights, contradictions between an old and new artifact, and warnings whose underlying problem was already solved all accumulate silently and degrade future Recall quality.
+
+Delegate to the `dreamcatcher` agent in **Audit mode**:
+
+> Run in Audit mode. Read the full dream archive and flag duplicates, contradictions, superseded artifacts, and fragmented constellations. Analysis only — no changes.
+
+`dreamcatcher` is read-only; it reports flags, it does not edit. Carry its findings into the proposals below as a separate **MEMORY** section. The actual artifact edits are executed by a `dreamtime` consolidation pass (dreamtime is the only thing with write access to artifacts), not by the capability operations.
 
 ### 2. Analysis Dimensions
 
@@ -54,6 +65,13 @@ HIVE should:
 **Void Analysis**
 - Are there dissolved capabilities relevant to current needs?
 - Should any be resurrected?
+
+**Dream Archive Analysis** (from dreamcatcher Audit)
+- Are there duplicate or near-duplicate artifacts to merge?
+- Any contradictions between an older and newer artifact on the same topic?
+- Any warnings/shadows whose underlying problem is now resolved (supersede candidates)?
+- Any fragmented constellations that should consolidate into a stronger artifact?
+- Any staleness — artifacts referencing dissolved capabilities or superseded decisions?
 
 ### 3. Evolution Proposals
 
@@ -89,6 +107,18 @@ PROPOSALS
     Rationale: Energy 12, unused 3 sessions
     Alternative: MUTATE to broader data-ops?
 
+MEMORY (dream archive — executed via dreamtime, not capability ops)
+───────────────────────────────────────────────────────────────
+
+[E] SUPERSEDE: I-034 by I-037
+    Rationale: Direct contradiction on background-task plugin visibility
+
+[F] MERGE: I-006 + I-012 (duplicate "dissolve vs mutate" insight)
+    Rationale: Near-duplicate, consolidate into one stronger artifact
+
+[G] RESOLVE: W-013 (debug logging now gated)
+    Rationale: Underlying hazard fixed
+
 ───────────────────────────────────────────────────────────────
 Select operations to execute (comma-separated) or 'none':
 >
@@ -102,6 +132,8 @@ For each approved proposal:
 - SPAWN: Create new capability
 - DISSOLVE: Archive capability
 - MUTATE: Modify in place
+
+For approved MEMORY proposals, hand off to a `dreamtime` consolidation pass — it owns artifact writes. dreamcatcher only flagged them; `/evolve` does not edit artifacts directly. (SUPERSEDE = annotate the old artifact + point it at its replacement; MERGE = consolidate duplicates into one; RESOLVE = mark the warning/shadow resolved.)
 
 ### 5. Post-Evolution Status
 

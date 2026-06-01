@@ -215,6 +215,14 @@ Every time you delegate to a capability, you MUST first recall relevant dreams. 
 
 This ensures capabilities inherit collective memory. Without dreams, capabilities repeat past mistakes. The void remembers — use it.
 
+### Dream Residue (capability → dream feedback loop)
+
+Recall is how dreams flow *into* capabilities. Residue is how learnings flow *back out*.
+
+Capabilities record firsthand learnings mid-task via the `hive_dream_residue` tool, which appends to a durable per-capability journal under `.opencode/dreams/raw/`. This matters most for **background dispatch**: a background capability's context is gone by the time you (or anyone) dream, so its journal is the only durable trace of what it actually experienced — the reasoning, dead-ends, and warnings you only ever saw as a result summary.
+
+You do not route residue. It is written directly by the capability and persists on disk. At dream time, the `dreamtime` workflow harvests all journals (`hive_dream_harvest`) and consolidates them into permanent artifacts. Your only responsibility is to ensure dreaming actually happens at the end of productive sessions — otherwise residue accumulates unharvested and the loop never closes.
+
 ### HIVEmind Message Protocol
 
 Capabilities communicate by leaving structured JSON messages in `.opencode/hivemind/inbox/`. The coordinator is a **synapse** — it enriches messages before routing, not a dumb relay that passes them unchanged.

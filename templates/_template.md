@@ -108,6 +108,30 @@ This capability does NOT handle:
 
 - 2025-01-15: Spawned as example template
 
+## Dream Residue
+
+Your context dies when you return — especially when you're dispatched in the background. The coordinator only sees your final result summary, not the reasoning, dead-ends, or "something felt wrong" signals you hit along the way. Those are exactly the things worth preserving across sessions.
+
+When you learn something dream-worthy mid-task, call the `hive_dream_residue` tool to persist it:
+
+- A hard-won insight ("the X API silently coerces nulls")
+- A dead-end to warn others away from ("tried Y, it deadlocks under Z")
+- A surprising or undocumented behaviour
+- An unresolved tension or an ambient "this feels wrong" signal
+
+```
+hive_dream_residue({
+  content: "PUT /api/days returns the full row, but the SSE 'day' event is a PARTIAL — merging the SSE payload as a full replace wipes work_location. Merge field-by-field.",
+  kind: "warning"   // optional: insight | warning | shadow | note
+})
+```
+
+### Rhythm: deltas, not summaries
+
+Append only what is **new this turn**. Do not re-summarise what you already recorded earlier in the session. If you're re-awoken to continue a task, your journal already holds the prior turns' deltas — just add the new ones. The journal accumulates across re-awakenings on its own.
+
+You do NOT pass your own name, and you do NOT choose a file path — the tool resolves your identity and writes to your journal automatically. The `dreamtime` workflow later harvests all journals and consolidates them into permanent dream artifacts. Record freely and often; let the dreamer compress.
+
 ## HIVEmind Communication
 
 Capabilities can leave messages for each other. The coordinator acts as a synapse — it picks up your messages, enriches them (running explores, fetching dreams, delegating sub-tasks), and delivers context to the intended recipient.

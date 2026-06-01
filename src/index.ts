@@ -66,7 +66,7 @@ function bootstrapProject(directory: string): void {
 
   // Bootstrap dreams directory structure
   const dreamsBase = path.join(directory, ".opencode/dreams")
-  for (const sub of ["active", "history", "artifacts/insights", "artifacts/warnings", "artifacts/songlines", "artifacts/shadows"]) {
+  for (const sub of ["active", "history", "artifacts/insights", "artifacts/warnings", "artifacts/songlines", "artifacts/shadows", "raw", "raw/.harvested"]) {
     fs.mkdirSync(path.join(dreamsBase, sub), { recursive: true })
   }
 
@@ -229,8 +229,8 @@ export const HivePlugin: Plugin = async function (ctx: PluginInput) {
     // ── Compaction: auto-tick + preserve HIVE state ──
     "experimental.session.compacting": createCompactionHook(hooksContext),
 
-    // ── Custom tools: hive_signal, hive_listen ──
-    tool: createHiveTools(ns, client, log),
+    // ── Custom tools: hive_signal, hive_listen, hive_dream_residue, hive_dream_harvest ──
+    tool: createHiveTools(ns, client, log, directory),
   }
 
   return hooks
