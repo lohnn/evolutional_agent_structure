@@ -64,7 +64,8 @@ export function createEventHook(ctx: HooksContext) {
       // and wake the coordinator so it can route them
       if (ns.isCapabilitySession(props.sessionID)) {
         const capName = ns.resolveAgent(props.sessionID)
-        const pendingInboxes = listPendingInboxes(directory)
+        const capGroupID = ns.getGroupID(props.sessionID)
+        const pendingInboxes = listPendingInboxes(directory, capGroupID)
         // Find messages that need coordinator attention: _coordinator inbox or
         // capabilities that are not currently active
         const needsRouting = pendingInboxes.filter(({ recipient }) => {
@@ -138,7 +139,8 @@ export function createSystemTransformHook(ctx: HooksContext) {
       if (hivemindCapContent) output.system.push(hivemindCapContent)
 
       const capName = ns.resolveAgent(input.sessionID)
-      const formatted = ns.formatMessages(capName)
+      const sessionGroupID = ns.getGroupID(input.sessionID)
+      const formatted = ns.formatMessages(capName, sessionGroupID)
       if (formatted) {
         output.system.push(formatted)
         debugLog(`[HIVE] system.transform injected messages for ${capName}`)
@@ -154,10 +156,11 @@ export function createSystemTransformHook(ctx: HooksContext) {
       }
       if (delegationContent) output.system.push(delegationContent)
 
-      const coordMessages = ns.formatMessages("_coordinator")
+      const coordGroupID = ns.getGroupID(input.sessionID)
+      const coordMessages = ns.formatMessages("_coordinator", coordGroupID)
       if (coordMessages) output.system.push(coordMessages)
 
-      const queueStatus = ns.buildQueueStatus()
+      const queueStatus = ns.buildQueueStatus(coordGroupID)
       if (queueStatus) output.system.push(queueStatus)
     }
     // else: non-HIVE subagent (general, explore, dreamcatcher) — nothing injected
@@ -218,8 +221,9 @@ export function createToolExecuteAfterHook(ctx: HooksContext) {
     markCapabilityUsed(directory, capName, getActiveSessionId())
     debugLog(`[HIVE] Capability task completed: ${capName}`)
 
-    // Check for pending messages that need routing
-    const pendingInboxes = listPendingInboxes(directory)
+    // Check for pending messages that need routing (scoped to caller's group)
+    const callerGroupID = ns.getGroupID(input.sessionID)
+    const pendingInboxes = listPendingInboxes(directory, callerGroupID)
     const needsRouting = pendingInboxes.filter(({ recipient }) => {
       if (recipient === "_coordinator") return true
       if (recipient === "_broadcast") return false

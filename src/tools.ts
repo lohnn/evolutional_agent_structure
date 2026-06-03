@@ -77,10 +77,11 @@ export function createHiveTools(
       async execute(args, context) {
         const agent = ns.resolveAgent(context.sessionID, context.agent)
         const isCoordinator = !ns.isCapabilitySession(context.sessionID)
+        const groupID = ns.getGroupID(context.sessionID)
 
-        let pending = ns.readMessages(agent)
+        let pending = ns.readMessages(agent, groupID)
         if (isCoordinator) {
-          pending = [...pending, ...ns.readMessages("_coordinator")]
+          pending = [...pending, ...ns.readMessages("_coordinator", groupID)]
         }
 
         if (pending.length === 0) return "No pending messages."

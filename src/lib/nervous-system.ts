@@ -262,8 +262,8 @@ export class NervousSystem {
   // ── Message sending + delivery ────────────────────────────────────────────
 
   async send(sender: string, recipient: string, type: "question" | "info" | "result" | "request", content: string, senderSessionID?: string): Promise<{ filename: string; delivered: boolean }> {
-    const filename = sendMessage(this.directory, { sender, recipient, type, content })
     const senderGroupID = senderSessionID ? this.getGroupID(senderSessionID) : undefined
+    const filename = sendMessage(this.directory, { sender, recipient, type, content, groupId: senderGroupID })
 
     let delivered = false
 
@@ -340,16 +340,16 @@ export class NervousSystem {
 
   // ── Reading messages ──────────────────────────────────────────────────────
 
-  readMessages(capabilityName: string): ReturnType<typeof getInbox> {
-    return getInbox(this.directory, capabilityName)
+  readMessages(capabilityName: string, groupID?: string): ReturnType<typeof getInbox> {
+    return getInbox(this.directory, capabilityName, groupID)
   }
 
   acknowledgeMessages(capabilityName: string): void {
     markAllRead(this.directory, capabilityName)
   }
 
-  formatMessages(capabilityName: string): string | null {
-    const pending = getInbox(this.directory, capabilityName)
+  formatMessages(capabilityName: string, groupID?: string): string | null {
+    const pending = getInbox(this.directory, capabilityName, groupID)
     return formatInboxForPrompt(pending)
   }
 
@@ -358,9 +358,12 @@ export class NervousSystem {
   /**
    * Build a status summary of all pending messages for the coordinator's system prompt.
    * Shows which capabilities are waiting, active, or nonexistent.
+   *
+   * @param groupID - When provided, only counts messages from this session group.
+   *   The coordinator should pass its own groupID so it only sees routing work it owns.
    */
-  buildQueueStatus(): string | null {
-    const pendingInboxes = listPendingInboxes(this.directory)
+  buildQueueStatus(groupID?: string): string | null {
+    const pendingInboxes = listPendingInboxes(this.directory, groupID)
     if (pendingInboxes.length === 0) return null
 
     const lines: string[] = []

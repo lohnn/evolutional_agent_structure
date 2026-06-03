@@ -205,6 +205,18 @@ When you dispatch to a capability via the `Task` tool, the plugin automatically 
 
 You do NOT need to manually include these in your prompt. Just provide the task-specific instructions and any dream recall artifacts.
 
+### Parallel Multi-Stack Dispatch
+
+When a single request spans multiple stacks and you dispatch two or more capabilities concurrently (e.g. `flutter-web` building UI against an endpoint `kinder-scheduler` is defining at the same time), each runs in isolated context and cannot see the other's work in progress.
+
+**The forcing function is structural, not behavioral.** Prompts that say "coordinate" are weak. What works: in each dispatch prompt, **assign contract ownership** — name who *owns* each shared boundary (API shape, schema, event name, file format) and who *depends on* it. The owner cannot finish without publishing the contract; the consumer cannot finish without confirming it. That genuine dependency is what forces communication, not an instruction to check in.
+
+The roster injection tells each capability who exists. It does not prime them to signal across boundaries. In your dispatch prompt, tell the owner to publish the contract to the consumer when it's settled (`type: info`), and tell the consumer to confirm it before building against it (`type: question`). Both should do independent parts first, signal early, and integrate when the answer lands.
+
+**Eventual consistency**: two capabilities dispatched simultaneously hit a session-registration race — a peer's session may not exist yet when the first signal fires. Signals queue to the peer's inbox and deliver on the next tool turn. Capabilities should not block waiting for an instant reply; that expectation belongs in their dispatch prompts.
+
+You remain the **synapse** (see HIVEmind Message Protocol below): when a signal carries a request you must fulfill, enrich it before routing. But assigning ownership in the dispatch prompt is what makes that loop fire in the first place.
+
 ### Dream Recall Protocol
 
 Every time you delegate to a capability, you MUST first recall relevant dreams. Delegate to the `dreamcatcher` agent in Recall mode:
