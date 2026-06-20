@@ -169,23 +169,32 @@ When a task arrives:
 
 ### Dispatch Modes
 
-You have two ways to launch a capability:
+**Default to background dispatch — always pass `background: true` to get it. Blocking is the exception you must justify.**
 
-| Mode | Tool | When to use |
-|------|------|-------------|
-| **Blocking** | `Task` (subagent_type: `capabilities/<name>`) | You need the result back immediately to continue your reasoning or respond to the user |
-| **Background** | `Task` (subagent_type: `capabilities/<name>`, background: true) | The capability can run independently; you don't need its result right now |
+The `Task` tool defaults to *foreground*: if you omit the `background` argument, the call **blocks**. To dispatch in the background you must explicitly set `background: true` on every call — "default" here means *your default choice*, not the tool's built-in behavior.
 
-**Prefer background (`background: true`) when:**
-- The user's request spawns multiple independent work streams
+A capability doing real work (building a feature, refactoring, running a stack) takes minutes. Blocking on it freezes the whole session — you cannot talk to the user, route messages, or dispatch other capabilities while you wait. That is almost never what you want. Pass `background: true` and let the plugin notify you when it finishes.
+
+| Mode | Tool | Use when |
+|------|------|----------|
+| **Background** (your default) | `Task` with **`background: true`** (subagent_type: `capabilities/<name>`) | Anything that does substantive work. The capability runs independently and you are auto-notified on completion. This is your default choice — but you must pass the flag to get it. |
+| **Blocking** (exception) | `Task` with **no `background` flag** (subagent_type: `capabilities/<name>`) | Only when you genuinely cannot proceed without the result *this turn* — and the wait is short. This is what you get if you forget the flag, so be deliberate. |
+
+**Pass `background: true` — your default — whenever:**
+- A capability is doing substantive implementation work (the common case)
+- The user's request spawns one or more independent work streams
 - You're routing a message from one capability to another
-- The work is self-contained and doesn't require a response before you can continue
-- You want to dispatch several capabilities in parallel without waiting
+- You want to dispatch several capabilities in parallel
+- You can keep talking to the user, or do other coordination, while it runs
 
-**Use blocking (no `background` flag) when:**
-- You need the result to answer the user's question
-- The next step depends on what the capability returns
-- You're doing dream recall or explore (these are fast lookups, blocking is fine)
+Crucially: even when you *will* eventually need the result to answer the user, prefer background. Dispatch it, tell the user it's running, and respond when the notification arrives. A blocking call that makes the user stare at a frozen session is worse than a background call plus a "working on it" — almost always.
+
+**Block (no `background` flag) ONLY when every one of these holds:**
+- You literally cannot form *any* useful response or next action until the result lands, AND
+- The work is a fast lookup, not substantive implementation, AND
+- There's no parallel work or user conversation you could do meanwhile
+
+In practice, blocking is appropriate almost exclusively for **fast read-only lookups** — `dreamcatcher` Recall and `explore` — where the result returns in seconds and the next step is fully gated on it. For capability *work*, background is the rule, not the preference.
 
 **Background lifecycle:**
 1. You call `Task` with `background: true` and `subagent_type: "capabilities/<name>"`
