@@ -66,7 +66,7 @@ function bootstrapProject(directory: string): void {
 
   // Bootstrap dreams directory structure
   const dreamsBase = path.join(directory, ".opencode/dreams")
-  for (const sub of ["active", "history", "artifacts/insights", "artifacts/warnings", "artifacts/songlines", "artifacts/shadows", "raw", "raw/.harvested"]) {
+  for (const sub of ["active", "history", "artifacts/insights", "artifacts/warnings", "artifacts/songlines", "artifacts/shadows", "raw", "raw/.harvested", "index/telemetry"]) {
     fs.mkdirSync(path.join(dreamsBase, sub), { recursive: true })
   }
 

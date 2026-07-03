@@ -2,6 +2,7 @@
  * HIVE custom tools: hive_signal, hive_listen, hive_awaken,
  *                    hive_dream_residue, hive_dream_harvest,
  *                    hive_dream_artifact_create, hive_dream_query,
+ *                    hive_dream_rank,
  *                    hive_dream_begin, hive_dream_complete,
  *                    hive_dream_list, hive_dream_supersede,
  *                    hive_dream_mark_stale, hive_dream_detect_duplicates
@@ -37,6 +38,8 @@ import {
   type IntentionType,
   type CoherenceLevel,
 } from "./lib/dream-state.js"
+import { rankArtifacts } from "./lib/dream-rank.js"
+import { recordSurfacedEvent } from "./lib/dream-telemetry.js"
 import path from "path"
 import fs from "fs"
 
@@ -287,13 +290,42 @@ export function createHiveTools(
         "All filters are optional — omitting all returns the full archive (likely index mode at 86+ artifacts). " +
         "IMPORTANT: domain_tags only exists on insights and songlines. Warnings and shadows carry NO tags, so any query with a domain_tags filter excludes ALL warnings and shadows. " +
         "To gather everything on a topic, run TWO queries: (1) domain_tags='<topic>' for tagged insights/songlines, then (2) a separate untagged query (e.g. types='warning,shadow' with no domain_tags) and judge relevance from content. " +
-        "An empty result from a tag-filtered warning/shadow query means 'tags don't apply', NOT 'no relevant artifacts exist'.",
+        "An empty result from a tag-filtered warning/shadow query means 'tags don't apply', NOT 'no relevant artifacts exist'. " +
+        "EXACT FETCH: pass ids='I-012,W-007' to retrieve specific artifacts in full — the companion to hive_dream_rank's shortlist. When ids is set, all other filters are ignored and full content is always returned.",
       args: {
         types: tool.schema.string().optional().describe("Comma-separated artifact types to include: insight,warning,songline,shadow. Default: all."),
         domain_tags: tool.schema.string().optional().describe("Comma-separated tags, ANY-match. ONLY applies to insights and songlines — warnings and shadows have no tags and are excluded entirely when this filter is set. Omit it (and filter by types/content instead) to reach warnings/shadows. E.g. 'plugin-design,file-io'"),
         min_confidence: tool.schema.number().optional().describe("Minimum confidence or transfer_rating to include (0.0–1.0). Shadows have no confidence and are always included when their type is requested."),
+        ids: tool.schema.string().optional().describe("Comma or space-separated artifact IDs for exact fetch (e.g. 'I-012,W-007,SNG-003'). Always returns full content; other filters are ignored. Use after hive_dream_rank to pull the shortlisted artifacts you judged promising."),
       },
-      async execute(args, _context) {
+      async execute(args, context) {
+        // Exact-fetch mode: ids bypass every other filter (a tag/confidence
+        // filter silently dropping an explicitly-requested ID would be the
+        // "empty result is a lie" footgun in new clothes).
+        if (args.ids && args.ids.trim() !== "") {
+          const requested = args.ids.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean)
+          const result = queryArtifacts(directory, { ids: requested })
+          const foundIds = (result.full ?? []).map((e) => e.id)
+          const missing = requested.filter((id) => !foundIds.includes(id))
+
+          // Telemetry (Class B side effect — must never fail the query)
+          recordSurfacedEvent(directory, context.sessionID, "query", `ids:${requested.join(",")}`, foundIds, result.total)
+
+          if (result.total === 0) {
+            return `No artifacts found for ids: ${requested.join(", ")}. Check the ID format (I-NNN, W-NNN, SNG-NNN, SHADOW-NNN).`
+          }
+          const lines = [`Dream archive fetch — ${result.total} artifact(s) (full content):\n`]
+          for (const entry of result.full!) {
+            lines.push(`--- ${entry.id} [${entry.type}] ---`)
+            lines.push(serializeArtifact(entry.artifact).trimEnd())
+            lines.push("")
+          }
+          if (missing.length > 0) {
+            lines.push(`⚠ Not found: ${missing.join(", ")}`)
+          }
+          return lines.join("\n")
+        }
+
         const typeFilter = args.types
           ? (args.types.split(",").map((t) => t.trim()).filter(Boolean) as ArtifactType[])
           : undefined
@@ -332,6 +364,15 @@ export function createHiveTools(
           min_confidence: args.min_confidence,
         })
 
+        // Telemetry (Class B side effect — never fails the query, never feeds ranking)
+        {
+          const surfacedIds = result.mode === "full"
+            ? (result.full ?? []).map((e) => e.id)
+            : (result.index ?? []).map((e) => e.id)
+          const filterSummary = `types:${args.types ?? "*"} tags:${args.domain_tags ?? "*"} min_conf:${args.min_confidence ?? "*"}`
+          recordSurfacedEvent(directory, context.sessionID, "query", filterSummary, surfacedIds, result.total)
+        }
+
         // Mixed-case reminder: a tag filter silently excludes tagless types (warning/shadow).
         // The all-tagless case is already rejected above; here we only nudge when the query
         // is valid but tagless types were (or could have been) dropped by the tag filter.
@@ -365,6 +406,65 @@ export function createHiveTools(
           lines.push(`${id} [${type}]: ${summary}`)
         }
         return lines.join("\n") + taglessNote
+      },
+    }),
+
+    hive_dream_rank: tool({
+      description:
+        "Rank dream artifacts against a free-text query and return a top-k shortlist (id, type, score, ~200-char excerpt). " +
+        "The scale-safe entry point for Recall: instead of reading the whole archive, get a ranked shortlist, judge it semantically, " +
+        "then pull full content for promising entries with hive_dream_query(ids: ...). " +
+        "All four types are ranked uniformly by content (no tag asymmetry). " +
+        "Guarantees: shadows and warnings get reserved slots in the shortlist (shadow-first bias survives top-k), and warnings/shadows " +
+        "whose trigger_conditions literally overlap the query are always included (flag: trigger-match). " +
+        "Entries carry lifecycle flags (stale, superseded_by:X) so staleness is visible at shortlist level. " +
+        "This is a pre-filter: scores are lexical (token backend), not semantic truth — relevance judgment stays with you. " +
+        "A low score does not prove irrelevance; a high score does not prove relevance.",
+      args: {
+        query: tool.schema.string().describe("Free-text description of the task/topic to rank against (e.g. 'concurrent file writes in plugin journals')"),
+        k: tool.schema.number().optional().describe("Shortlist size (default 30). If k >= archive size, everything is returned ranked."),
+        types: tool.schema.string().optional().describe("Comma-separated artifact types to restrict ranking to. Default: all four. NOTE: restricting types also disables the floors for excluded types."),
+      },
+      async execute(args, context) {
+        const query = args.query?.trim() ?? ""
+        if (query === "") {
+          return (
+            "Invalid query: empty. hive_dream_rank needs a free-text topic/task description to rank against. " +
+            "For an unranked overview of the archive, use hive_dream_list instead."
+          )
+        }
+
+        const typeFilter = args.types
+          ? (args.types.split(",").map((t) => t.trim()).filter(Boolean) as ArtifactType[])
+          : undefined
+
+        if (process.env.HIVE_DEBUG === "1") {
+          log("info", "[dream_rank] ranking artifacts", { query, k: args.k, types: args.types })
+        }
+
+        const { results, total, backend } = rankArtifacts(directory, query, {
+          k: args.k,
+          types: typeFilter,
+        })
+
+        // Telemetry (Class B side effect — never fails the query, never feeds ranking)
+        recordSurfacedEvent(directory, context.sessionID, "rank", query, results.map((r) => r.id), total)
+
+        if (results.length === 0) {
+          return "Archive is empty (no artifacts to rank)."
+        }
+
+        const lines = [
+          `Dream rank — top ${results.length} of ${total} artifact(s) (backend: ${backend}):\n`,
+        ]
+        for (const r of results) {
+          const flagStr = r.flags.length > 0 ? `  [${r.flags.join(", ")}]` : ""
+          lines.push(`${r.id} [${r.type}] score=${r.score} (${r.source_dream})${flagStr}`)
+          lines.push(`  ${r.excerpt}`)
+        }
+        lines.push("")
+        lines.push(`Pull full content for promising entries: hive_dream_query(ids: "I-NNN,W-NNN,...")`)
+        return lines.join("\n")
       },
     }),
 
@@ -619,21 +719,30 @@ export function createHiveTools(
 
     hive_dream_detect_duplicates: tool({
       description:
-        "Scan the artifact archive and return candidate near-duplicate pairs using cheap heuristics: " +
+        "Scan the artifact archive and return candidate pairs within a similarity band, using cheap heuristics: " +
         "domain-tag Jaccard overlap + content-token Jaccard overlap. " +
-        "Returns pairs above a similarity threshold with scores and content excerpts. " +
-        "This is a pre-filter only — semantic relevance judgment and the final merge/supersede decision stay with dreamcatcher and dreamtime. " +
+        "Two bands, two jobs: the HIGH band (threshold ~0.6+) surfaces near-duplicate candidates (merge/supersede); " +
+        "the MID band (threshold ~0.30, max_threshold ~0.60) is the contradiction-hunting zone — same topic, different words, possibly different stance. " +
+        "Each pair carries divergence annotations: conf_delta (|confidence difference|) and dream_distance (DRM-ordinal gap) — " +
+        "a high-similarity pair with divergent confidence or a large dream gap is prime supersession/contradiction territory. " +
+        "This is a pre-filter only — divergent CLAIMS are not heuristically detectable; semantic judgment (duplicate vs contradiction vs unrelated) " +
+        "and the final merge/supersede decision stay with dreamcatcher and dreamtime. " +
         "A high score means textual/tag similarity, not guaranteed duplication.",
       args: {
         threshold: tool.schema.number().optional().describe("Minimum similarity score 0.0–1.0 to report (default 0.35). Lower = more candidates, higher = fewer but stronger matches."),
+        max_threshold: tool.schema.number().optional().describe("Maximum similarity score to report (default 1.0). Set threshold=0.30, max_threshold=0.60 to isolate the mid-band for contradiction hunting."),
         types: tool.schema.string().optional().describe("Comma-separated artifact types to scan. Default: all types."),
       },
       async execute(args, _context) {
         if (process.env.HIVE_DEBUG === "1") {
-          log("info", "[dream_detect_duplicates] scanning", { threshold: args.threshold, types: args.types })
+          log("info", "[dream_detect_duplicates] scanning", { threshold: args.threshold, max_threshold: args.max_threshold, types: args.types })
         }
 
         const threshold = args.threshold ?? 0.35
+        const maxThreshold = args.max_threshold ?? 1.0
+        if (maxThreshold < threshold) {
+          return `Invalid band: max_threshold (${maxThreshold}) is below threshold (${threshold}). The band [threshold, max_threshold] can only be empty.`
+        }
 
         // If type filter given, re-use full scan and filter — detectDuplicateCandidates
         // internally scans all types; we post-filter the pairs if needed
@@ -641,28 +750,33 @@ export function createHiveTools(
           ? new Set(args.types.split(",").map((t) => t.trim()) as ArtifactType[])
           : null
 
-        const candidates = detectDuplicateCandidates(directory, threshold)
+        const candidates = detectDuplicateCandidates(directory, threshold, maxThreshold)
         const filtered = typeFilter
           ? candidates.filter((c) => typeFilter.has(c.typeA) || typeFilter.has(c.typeB))
           : candidates
 
+        const bandLabel = maxThreshold < 1.0 ? `band [${threshold}, ${maxThreshold}]` : `threshold ${threshold}`
+
         if (filtered.length === 0) {
-          return `No near-duplicate candidates found above threshold ${threshold}.`
+          return `No candidate pairs found in ${bandLabel}.`
         }
 
         const lines = [
-          `Duplicate detection — ${filtered.length} candidate pair(s) above threshold ${threshold}:\n`,
+          `Similarity scan — ${filtered.length} candidate pair(s) in ${bandLabel}:\n`,
         ]
         for (const c of filtered) {
+          const annotations: string[] = [`tags=${c.tag_jaccard}`, `tokens=${c.token_overlap}`]
+          if (c.confidence_delta !== undefined) annotations.push(`conf_delta=${c.confidence_delta}`)
+          if (c.dream_distance !== undefined) annotations.push(`dream_distance=${c.dream_distance}`)
           lines.push(
             `${c.idA} [${c.typeA}] ≈ ${c.idB} [${c.typeB}]  score=${c.score} ` +
-            `(tags=${c.tag_jaccard} tokens=${c.token_overlap})`
+            `(${annotations.join(" ")})`
           )
           lines.push(`  A: ${c.summaryA}`)
           lines.push(`  B: ${c.summaryB}`)
           lines.push("")
         }
-        lines.push("Semantic judgment: use dreamcatcher Audit mode to assess whether these are true duplicates.")
+        lines.push("Semantic judgment: use dreamcatcher Audit mode to classify each pair as duplicate, contradiction, or unrelated.")
         return lines.join("\n")
       },
     }),

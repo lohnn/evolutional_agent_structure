@@ -26,13 +26,13 @@ Triggered when the coordinator needs dream artifacts relevant to a task before d
 
 Use the structured tools rather than raw file IO. The tools parse correctly and handle the archive at scale:
 
-1. **Get a quick index first** with `hive_dream_list` (optional `type` or `source_dream` filter). This is cheap — no full parse — and tells you what exists and which ids to investigate.
+1. **Rank first** with `hive_dream_rank(query: "<task/topic description>", k: 30)`. This is the scale-safe entry point: it scores **all four types uniformly by content** (no tag asymmetry) and returns a ranked shortlist with ~200-char excerpts. The shortlist has guarantees baked in: shadows and warnings hold reserved slots (shadow-first bias survives top-k), warnings/shadows whose `trigger_conditions` overlap the query are always included (`trigger-match` flag), and stale/superseded artifacts are flagged inline. Write the query as a rich task description, not two keywords — the ranker scores by how much of the query an artifact touches.
 
-2. **Query for relevant artifacts** with `hive_dream_query`. Filter by `domain_tags`, `types`, and/or `min_confidence` to get a focused result set. The tool returns full artifact content when the filtered set is ≤20, and a summary index when larger — let it do the pruning, then apply semantic judgment to what comes back.
+   Scores are lexical, not semantic truth: a low score does not prove irrelevance, a high score does not prove relevance. The shortlist shrinks what you read; the judging is still yours.
 
-   **Tags only exist on insights and songlines.** Warnings and shadows carry no `domain_tags`, so a query that sets `domain_tags` excludes *every* warning and shadow. An empty result from such a query means "tags don't apply here", not "no relevant warnings exist" — do not conclude the archive is silent on the topic.
+2. **Pull full content for the promising entries** with `hive_dream_query(ids: "I-012,W-007,SNG-003")`. Exact fetch — always full content, no other filters applied. Only fetch what the excerpts made look promising; that is the whole point of the two-step.
 
-   So to cover a topic fully, run **two queries**:
+   **Complementary sweep (tag/filter path).** When the task has a well-known domain tag, or the rank shortlist looks thin, run the classic filter queries as a second net:
    ```
    # (1) tagged types — insights + songlines on the topic
    hive_dream_query(types: "insight,songline", domain_tags: "plugin-design,file-io", min_confidence: 0.7)
@@ -40,7 +40,9 @@ Use the structured tools rather than raw file IO. The tools parse correctly and 
    # (2) untagged types — warnings + shadows; no domain_tags, judge relevance from content
    hive_dream_query(types: "warning,shadow", min_confidence: 0.7)
    ```
-   Query (2) returns all warnings/shadows above the confidence floor; apply your semantic judgment (step 3) to keep the ones that bear on the task. This shadow-first second pass is exactly where the most valuable failure-patterns surface.
+   **Tags only exist on insights and songlines.** Warnings and shadows carry no `domain_tags`, so a query that sets `domain_tags` excludes *every* warning and shadow. An empty result from such a query means "tags don't apply here", not "no relevant warnings exist" — do not conclude the archive is silent on the topic. (`hive_dream_rank` does not have this trap — it ranks warnings and shadows by content.)
+
+   If `hive_dream_rank` is unavailable (older plugin load), fall back to `hive_dream_list` for an index plus the two-query pattern above as the primary path.
 
 3. **Reason semantically** about the returned artifacts — not just keyword matching. A warning about "filesystem scan behavior" is relevant to a plugin feature task even if the task description doesn't use those words. Think: "would a capable engineer want to know this before starting this task?"
 
@@ -108,9 +110,15 @@ Use the tools for the mechanical steps; apply your semantic reasoning where the 
 
 1. **Get an overview** with `hive_dream_list` (no filters) — shows total count, id range, and source_dream distribution at a glance.
 
-2. **Run the pre-filter** with `hive_dream_detect_duplicates` (default threshold 0.35, or raise to 0.5 to reduce noise). This returns candidate pairs by tag/token overlap. **These are pre-filter candidates only — do not treat a high score as a confirmed duplicate.** Apply semantic judgment: read the actual content of each flagged pair and decide whether they say the same thing.
+2. **Run the pre-filter in two bands** with `hive_dream_detect_duplicates`:
+   - **Duplicate band**: `threshold: 0.5` (or default 0.35 for a wider net) — near-duplicate candidates for merge/supersede.
+   - **Contradiction band**: `threshold: 0.30, max_threshold: 0.60` — same topic, different words, possibly different stance. Contradictions rarely score as near-duplicates; they live in this mid band.
 
-3. **Detect contradictions**: use `hive_dream_query` to retrieve all insights and reason over them. Flag pairs where newer content makes an older claim false or obsolete.
+   Each pair carries divergence annotations: `conf_delta` (confidence gap — a similar pair at 0.9 vs 0.5 confidence suggests one claim should win) and `dream_distance` (DRM-ordinal gap — a same-topic pair many dreams apart is prime supersession territory). Use them to prioritize which pairs to read first.
+
+   **These are pre-filter candidates only — do not treat a high score as a confirmed duplicate, and do not expect the tool to detect divergent claims; it cannot.** Apply semantic judgment: read the actual content of each flagged pair (`hive_dream_query(ids: "...")` fetches pairs in full) and classify it as **duplicate, contradiction, or unrelated**.
+
+3. **Detect contradictions**: judge the mid-band pairs from step 2 first — flag pairs where newer content makes an older claim false or obsolete. For thoroughness on small archives, you may still retrieve all insights with `hive_dream_query` and reason over them.
 
 4. **Detect superseded artifacts**: a warning whose underlying problem has been solved (a warning + a later insight that directly addresses it = the warning may be stale). Also check for artifacts that already have a `superseded_by` or `stale: true` field — these are already annotated.
 

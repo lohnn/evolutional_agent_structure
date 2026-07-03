@@ -413,6 +413,7 @@ export interface QueryFilter {
   types?: ArtifactType[]
   domain_tags?: string[]          // any-match (OR)
   min_confidence?: number         // applies to insight, warning, songline (transfer_rating)
+  ids?: string[]                  // exact-fetch mode: when set, other filters are bypassed
 }
 
 /** Get the confidence-like numeric field for an artifact, if any. */
@@ -442,6 +443,25 @@ export interface QueryResult {
 const FULL_CONTENT_THRESHOLD = 20
 
 export function queryArtifacts(directory: string, filter: QueryFilter): QueryResult {
+  // ids mode: exact fetch by artifact ID — the companion to hive_dream_rank's
+  // two-step (rank returns an excerpt shortlist; query-by-ids returns full
+  // content for the entries the caller judged promising). Requesting specific
+  // IDs is a deliberate act, so this mode ALWAYS returns full content and
+  // bypasses the other filters (a tag/confidence filter silently dropping an
+  // explicitly-requested ID would be the "empty result is a lie" footgun again).
+  if (filter.ids && filter.ids.length > 0) {
+    const entries: ArtifactEntry[] = []
+    for (const id of filter.ids) {
+      const type = idToType(id)
+      if (!type) continue
+      const artifact = readArtifact(directory, type, id)
+      if (artifact) {
+        entries.push({ type, id, filePath: artifactPath(directory, type, id), artifact })
+      }
+    }
+    return { full: entries, total: entries.length, mode: "full" }
+  }
+
   const all = scanArtifacts(directory, filter.types)
 
   const filtered = all.filter((e) => {
@@ -629,10 +649,14 @@ export interface DuplicateCandidate {
   token_overlap: number
   summaryA: string
   summaryB: string
+  /** |confidence_A − confidence_B| (transfer_rating for songlines). Undefined when either side has no confidence-like field (shadows). A large delta on a high-similarity pair suggests one claim should supersede the other. */
+  confidence_delta?: number
+  /** |ordinal(source_dream_A) − ordinal(source_dream_B)| — DRM-NNN gap. A large gap on a same-topic pair means the topic was revisited much later: prime supersession/contradiction territory. */
+  dream_distance?: number
 }
 
 /** Tokenise a string into lowercase words (≥3 chars, strip punctuation). */
-function tokenise(s: string): Set<string> {
+export function tokenise(s: string): Set<string> {
   return new Set(
     s.toLowerCase()
       .replace(/[^a-z0-9\s]/g, " ")
@@ -642,7 +666,7 @@ function tokenise(s: string): Set<string> {
 }
 
 /** Jaccard similarity between two sets. */
-function jaccard(a: Set<string>, b: Set<string>): number {
+export function jaccard(a: Set<string>, b: Set<string>): number {
   if (a.size === 0 && b.size === 0) return 0
   let intersection = 0
   for (const item of a) if (b.has(item)) intersection++
@@ -650,16 +674,30 @@ function jaccard(a: Set<string>, b: Set<string>): number {
   return union === 0 ? 0 : intersection / union
 }
 
+/** Parse the ordinal out of a DRM id (e.g. "DRM-014" → 14). Returns undefined if unparseable. */
+function dreamOrdinal(sourceDream: string): number | undefined {
+  const m = sourceDream.match(/DRM-(\d+)/)
+  return m ? parseInt(m[1], 10) : undefined
+}
+
 /**
- * Return candidate near-duplicate pairs above a given threshold.
+ * Return candidate pairs within a similarity band [minScore, maxScore].
  * Heuristic: average of domain_tag Jaccard + content-token Jaccard.
- * Operates only within types that have domain_tags (insight, songline)
- * AND across all types on content-token overlap.
  * Semantic judgment stays in the calling agent / dreamcatcher.
+ *
+ * Two bands, two jobs:
+ *   - High band (≥ ~0.6): near-duplicate candidates (merge/supersede).
+ *   - Mid band (~0.30–0.60): contradiction-hunting zone — same topic, different
+ *     words (and possibly different stance). "Divergent claims" is NOT
+ *     heuristically detectable (and embedding cosine is symmetric between
+ *     agreement and contradiction), so this tool only shrinks the pair space;
+ *     each pair is annotated with confidence_delta and dream_distance as cheap
+ *     divergence hints, and dreamcatcher judges duplicate/contradiction/unrelated.
  */
 export function detectDuplicateCandidates(
   directory: string,
-  threshold = 0.35
+  minScore = 0.35,
+  maxScore = 1.0
 ): DuplicateCandidate[] {
   const entries = scanArtifacts(directory)
   const candidates: DuplicateCandidate[] = []
@@ -686,9 +724,22 @@ export function detectDuplicateCandidates(
       const token_overlap = jaccard(a.tokens, b.tokens)
       const score = (tag_jaccard + token_overlap) / 2
 
-      if (score >= threshold) {
+      if (score >= minScore && score <= maxScore) {
         const summaryA = [...a.tokens].slice(0, 10).join(" ")
         const summaryB = [...b.tokens].slice(0, 10).join(" ")
+
+        // Divergence annotations (cheap, reliable) — see docstring
+        const confA = artifactConfidence(a.entry.artifact)
+        const confB = artifactConfidence(b.entry.artifact)
+        const confidence_delta = confA !== undefined && confB !== undefined
+          ? Math.round(Math.abs(confA - confB) * 100) / 100
+          : undefined
+        const ordA = dreamOrdinal(a.entry.artifact.source_dream)
+        const ordB = dreamOrdinal(b.entry.artifact.source_dream)
+        const dream_distance = ordA !== undefined && ordB !== undefined
+          ? Math.abs(ordA - ordB)
+          : undefined
+
         candidates.push({
           idA: a.entry.id,
           typeA: a.entry.type,
@@ -699,6 +750,8 @@ export function detectDuplicateCandidates(
           token_overlap: Math.round(token_overlap * 100) / 100,
           summaryA,
           summaryB,
+          ...(confidence_delta !== undefined && { confidence_delta }),
+          ...(dream_distance !== undefined && { dream_distance }),
         })
       }
     }
