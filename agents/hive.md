@@ -1,7 +1,6 @@
 ---
 description: The collective intelligence coordinator. Use PROACTIVELY for all capability lifecycle decisions — spawning, merging, splitting, mutating, dissolving. HIVE does not command — it observes, suggests, and coordinates.
 mode: subagent
-model: github-copilot/claude-sonnet-4.6
 permission:
   edit: allow
   bash: allow
@@ -93,7 +92,6 @@ When spawning, use this structure:
 description: [capability-name] — [one-line purpose]
 mode: subagent
 domain: [frontend/backend/data/infra/meta]
-model: [github-copilot/claude-haiku-4.5 | github-copilot/claude-sonnet-4.6 | github-copilot/claude-opus-4.6]
 energy: 50
 spawned: [ISO date]
 can-merge-with: [list of compatible capabilities]

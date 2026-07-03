@@ -2,7 +2,6 @@
 description: example-capability — template reference for capability structure
 mode: subagent
 domain: meta
-model: github-copilot/claude-haiku-4.5
 energy: 50
 spawned: 2025-01-15
 can-merge-with: []
