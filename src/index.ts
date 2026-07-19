@@ -64,10 +64,26 @@ function bootstrapProject(directory: string): void {
     }
   }
 
+  // Bootstrap the canonical workspace-root taxonomy shell (see
+  // docs/WORKSPACE-STRUCTURE.md). These live OUTSIDE .opencode/ — they are the
+  // folder contract around the plugin, materialised so the taxonomy exists (and
+  // workspace_map can enumerate it) on any machine, gift or builder. All are
+  // git-ignored (/reference/, /scratch/) so empty dirs add zero tracked clutter,
+  // and mkdirSync(recursive) is a no-op when they already exist (idempotent).
+  for (const sub of ["reference/repos", "reference/material", "scratch"]) {
+    fs.mkdirSync(path.join(directory, sub), { recursive: true })
+  }
+
   // Bootstrap dreams directory structure
   const dreamsBase = path.join(directory, ".opencode/dreams")
   for (const sub of ["active", "history", "artifacts/insights", "artifacts/warnings", "artifacts/songlines", "artifacts/shadows", "raw", "raw/.harvested", "index/telemetry"]) {
     fs.mkdirSync(path.join(dreamsBase, sub), { recursive: true })
+  }
+
+  // Bootstrap pain-point directory structure (harness/workflow friction logs)
+  const painpointsBase = path.join(directory, ".opencode/painpoints")
+  for (const sub of ["raw", "raw/.harvested"]) {
+    fs.mkdirSync(path.join(painpointsBase, sub), { recursive: true })
   }
 
   // Bootstrap HIVEmind directory structure

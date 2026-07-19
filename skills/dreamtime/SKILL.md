@@ -45,6 +45,8 @@ Treat the harvested residue as **first-class feedstock alongside your own contex
 
 If the harvest returns empty, proceed with your own context alone.
 
+Also call `hive_painpoints_harvest` here. It collects the HARNESS/WORKFLOW pain points that capabilities jotted while they worked (via `hive_note_painpoint`) and archives them so the next session starts clean. **Keep these strictly separate from dream residue: pain points are harness-fix candidates, NOT artifact feedstock.** Do NOT compress them into insights/warnings/songlines/shadows. Instead, surface them to the user (or hold them for a fresh-eyes workflow-improvement pass) as concrete problems to fix. If it returns empty, there's nothing to surface. (Use `hive_painpoints_list` instead if you only want to review open pain points without clearing them — e.g. outside a dream.)
+
 ### 2. Set Intention
 
 Determine the dream's focus. Ask the user or infer from context:

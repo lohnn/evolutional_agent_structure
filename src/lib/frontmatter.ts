@@ -22,8 +22,8 @@ export function parseFrontmatter(content: string): MdFile {
   const match = content.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/)
   if (!match) return { frontmatter: {}, body: content }
 
-  const fmStr = match[1]
-  const body = match[2]
+  const fmStr = match[1]!
+  const body = match[2]!
   const frontmatter: Frontmatter = {}
 
   let inNestedBlock = false
@@ -45,8 +45,8 @@ export function parseFrontmatter(content: string): MdFile {
     const topMatch = line.match(/^([a-zA-Z_-]+):\s*(.*)$/)
     if (topMatch && !line.startsWith(" ") && !line.startsWith("\t")) {
       saveState()
-      const key = topMatch[1]
-      const val = topMatch[2].trim()
+      const key = topMatch[1]!
+      const val = topMatch[2]!.trim()
 
       if (val === "") {
         inNestedBlock = true
@@ -61,8 +61,8 @@ export function parseFrontmatter(content: string): MdFile {
     if (inNestedBlock) {
       const nestedMatch = line.match(/^\s+([a-zA-Z_*"'-][a-zA-Z_*0-9"'-]*):\s*(.*)$/)
       if (nestedMatch) {
-        const nk = nestedMatch[1].replace(/^["']|["']$/g, "")
-        const nv = nestedMatch[2].trim().replace(/^["']|["']$/g, "")
+        const nk = nestedMatch[1]!.replace(/^["']|["']$/g, "")
+        const nv = nestedMatch[2]!.trim().replace(/^["']|["']$/g, "")
         nestedObj[nk] = nv
       }
     }

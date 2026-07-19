@@ -130,7 +130,7 @@ export function nextArtifactId(directory: string, type: ArtifactType): string {
       // Match PREFIX-NNN.yaml — prefix may be multi-char (SHADOW)
       const m = f.match(/^[A-Z]+-(\d+)\.yaml$/)
       if (m) {
-        const n = parseInt(m[1], 10)
+        const n = parseInt(m[1]!, 10)
         if (n > max) max = n
       }
     }
@@ -158,7 +158,7 @@ export function parseArtifact(content: string, type: ArtifactType): ArtifactReco
 
   let i = 0
   while (i < lines.length) {
-    const line = lines[i]
+    const line = lines[i]!
 
     // Skip blank lines at top level
     if (line.trim() === "") { i++; continue }
@@ -167,8 +167,8 @@ export function parseArtifact(content: string, type: ArtifactType): ArtifactReco
     const topMatch = line.match(/^([a-zA-Z_]+):\s*(.*)$/)
     if (!topMatch) { i++; continue }
 
-    const key = topMatch[1]
-    const rest = topMatch[2].trim()
+    const key = topMatch[1]!
+    const rest = topMatch[2]!.trim()
 
     // Flow array: [a, b, c]
     if (rest.startsWith("[") && rest.endsWith("]")) {
@@ -188,13 +188,13 @@ export function parseArtifact(content: string, type: ArtifactType): ArtifactReco
       i++
       const blockLines: string[] = []
       // Collect indented lines (2-space indent for our files)
-      while (i < lines.length && (lines[i].startsWith("  ") || lines[i].trim() === "")) {
+      while (i < lines.length && (lines[i]!.startsWith("  ") || lines[i]!.trim() === "")) {
         // Preserve internal blank lines but strip the 2-space indent
-        blockLines.push(lines[i].startsWith("  ") ? lines[i].slice(2) : "")
+        blockLines.push(lines[i]!.startsWith("  ") ? lines[i]!.slice(2) : "")
         i++
       }
       // Trim trailing blank lines, add single trailing newline per YAML spec
-      while (blockLines.length > 0 && blockLines[blockLines.length - 1].trim() === "") {
+      while (blockLines.length > 0 && blockLines[blockLines.length - 1]!.trim() === "") {
         blockLines.pop()
       }
       raw[key] = blockLines.join("\n") + "\n"
@@ -205,10 +205,10 @@ export function parseArtifact(content: string, type: ArtifactType): ArtifactReco
     if (rest === "") {
       i++
       const items: string[] = []
-      while (i < lines.length && lines[i].match(/^\s+-\s/)) {
-        const itemMatch = lines[i].match(/^\s+-\s+(.*)$/)
+      while (i < lines.length && lines[i]!.match(/^\s+-\s/)) {
+        const itemMatch = lines[i]!.match(/^\s+-\s+(.*)$/)
         if (itemMatch) {
-          const raw = itemMatch[1]
+          const raw = itemMatch[1]!
           if (raw.startsWith('"') && raw.endsWith('"')) {
             items.push(raw.slice(1, -1).replace(/\\"/g, '"').replace(/\\\\/g, "\\"))
           } else if (raw.startsWith("'") && raw.endsWith("'")) {
@@ -567,7 +567,7 @@ export function listArtifacts(
         // Stop early once both found — avoids parsing the whole file
         let inNarrative = false
         for (let i = 0; i < lines.length; i++) {
-          const line = lines[i]
+          const line = lines[i]!
 
           // Leaving narrative block
           if (inNarrative && !line.startsWith("  ") && line.trim() !== "") {
@@ -581,7 +581,7 @@ export function listArtifacts(
           }
 
           if (line.startsWith("source_dream:")) {
-            source_dream = line.split(":")[1].trim().replace(/^["']|["']$/g, "")
+            source_dream = line.split(":")[1]!.trim().replace(/^["']|["']$/g, "")
           }
 
           if ((type === "insight" || type === "warning" || type === "shadow") &&
@@ -677,7 +677,7 @@ export function jaccard(a: Set<string>, b: Set<string>): number {
 /** Parse the ordinal out of a DRM id (e.g. "DRM-014" → 14). Returns undefined if unparseable. */
 function dreamOrdinal(sourceDream: string): number | undefined {
   const m = sourceDream.match(/DRM-(\d+)/)
-  return m ? parseInt(m[1], 10) : undefined
+  return m ? parseInt(m[1]!, 10) : undefined
 }
 
 /**
@@ -717,8 +717,8 @@ export function detectDuplicateCandidates(
   // O(n²) pairwise — 86 artifacts → ~3700 pairs, fast enough
   for (let i = 0; i < precomputed.length; i++) {
     for (let j = i + 1; j < precomputed.length; j++) {
-      const a = precomputed[i]
-      const b = precomputed[j]
+      const a = precomputed[i]!
+      const b = precomputed[j]!
 
       const tag_jaccard = jaccard(a.tags, b.tags)
       const token_overlap = jaccard(a.tokens, b.tokens)
