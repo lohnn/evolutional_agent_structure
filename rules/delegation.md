@@ -244,6 +244,8 @@ Capabilities record firsthand learnings mid-task via the `hive_dream_residue` to
 
 You do not route residue. It is written directly by the capability and persists on disk. At dream time, the `dreamtime` workflow harvests all journals (`hive_dream_harvest`) and consolidates them into permanent artifacts. Your only responsibility is to ensure dreaming actually happens at the end of productive sessions — otherwise residue accumulates unharvested and the loop never closes.
 
+Capabilities also record **harness/workflow friction** mid-task via the `hive_note_painpoint` tool (a stricter sibling of residue), which appends to a separate per-session log under `.opencode/painpoints/raw/`. The distinction: residue is a durable *learning about the work*; a pain point is *the harness itself getting in the way* (the tooling/process was the obstacle, not the work being wrong). These are captured problem-and-context only — no fix — and are surfaced at dream time via `hive_painpoints_harvest` as harness-fix candidates, kept distinct from dream feedstock.
+
 ### HIVEmind Message Protocol
 
 Capabilities communicate by leaving structured JSON messages in `.opencode/hivemind/inbox/`. The coordinator is a **synapse** — it enriches messages before routing, not a dumb relay that passes them unchanged.

@@ -130,3 +130,22 @@ hive_dream_residue({
 Append only what is **new this turn**. Do not re-summarise what you already recorded earlier in the session. If you're re-awoken to continue a task, your journal already holds the prior turns' deltas — just add the new ones. The journal accumulates across re-awakenings on its own.
 
 You do NOT pass your own name, and you do NOT choose a file path — the tool resolves your identity and writes to your journal automatically. The `dreamtime` workflow later harvests all journals and consolidates them into permanent dream artifacts. Record freely and often; let the dreamer compress.
+
+## Pain Points
+
+When the **harness itself** gets in your way — the tooling, environment, or process slowed you down — call the `hive_note_painpoint` tool the moment it happens. This is a stricter sibling of Dream Residue, kept in a separate log for later harness fixes.
+
+**Litmus test:** ask *"was the TOOLING/PROCESS in my way, or was my WORK wrong?"* Only the former is a pain point.
+
+- ✅ **Pain points** (harness friction): locating a project took many tool cycles; a tool didn't surface info you needed; stale local state misled you; you had to manually retry the same step over and over.
+- ❌ **Not pain points** (that's the work itself): a failing test, a bug in the feature you're building, an API returning 500. Those are the work being wrong, not the harness getting in the way.
+- **vs. Dream Residue:** residue = a durable *learning about the work*; a pain point = *the harness itself was the obstacle*.
+
+```
+hive_note_painpoint({
+  problem: "Locating the right project on disk took 6 tool calls — no single 'where is X' lookup.",
+  context: "Starting work on the scheduler; ran ls + git status across projects/ repeatedly to find it and check its state."
+})
+```
+
+**Capture-only discipline:** record the **problem + context, NO solution.** Fresh eyes fix it later — jotting a fix mid-friction anchors on the wrong cause. You do NOT pass your own name or a file path; the tool resolves your identity and writes to your log automatically.
