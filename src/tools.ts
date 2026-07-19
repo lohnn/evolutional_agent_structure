@@ -5,7 +5,9 @@
  *                    hive_dream_rank,
  *                    hive_dream_begin, hive_dream_complete,
  *                    hive_dream_list, hive_dream_supersede,
- *                    hive_dream_mark_stale, hive_dream_detect_duplicates
+ *                    hive_dream_mark_stale, hive_dream_detect_duplicates,
+ *                    hive_note_painpoint, hive_painpoints_list, hive_painpoints_harvest,
+ *                    workspace_map
  */
 
 import { tool } from "@opencode-ai/plugin"
@@ -13,6 +15,14 @@ import type { createOpencodeClient } from "@opencode-ai/sdk"
 import { formatInboxForPrompt } from "./lib/hivemind.js"
 import type { NervousSystem } from "./lib/nervous-system.js"
 import { appendResidue, harvestJournals, formatHarvestForDreamer, type ResidueKind } from "./lib/dream-journal.js"
+import { appendPainpoint, listPainpoints, formatPainpointsForReview, harvestPainpoints, formatPainpointsForHarvest } from "./lib/painpoint-journal.js"
+import {
+  buildWorkspaceMap,
+  lookupEntry,
+  formatMap,
+  formatEntry,
+  formatNotFound,
+} from "./lib/workspace-map.js"
 import {
   nextArtifactId,
   writeArtifact,
@@ -40,6 +50,7 @@ import {
 } from "./lib/dream-state.js"
 import { rankArtifacts } from "./lib/dream-rank.js"
 import { recordSurfacedEvent } from "./lib/dream-telemetry.js"
+import { bindSession, autoRegister, startItem, sdkSessionClient, type SdkLikeClient } from "./lib/board-transitions.js"
 import path from "path"
 import fs from "fs"
 
@@ -48,7 +59,7 @@ type LogFn = (level: "info" | "debug" | "error" | "warn", message: string, extra
 
 export function createHiveTools(
   ns: NervousSystem,
-  _client: Client,
+  client: Client,
   log: LogFn,
   directory: string
 ) {
@@ -104,7 +115,110 @@ export function createHiveTools(
       args: {},
       async execute(_args, context) {
         ns.awakenSession(context.sessionID)
-        return "HIVE awakened for this session. Capability dispatch and HIVEmind messaging are now active."
+
+        // Board auto-register (hive-board DESIGN §5.3b): every awakened TOP-LEVEL
+        // coordinator session gets a work item, create-or-bind semantics. Board
+        // failures must never break awakening — best-effort with a warn log.
+        let boardNote = ""
+        try {
+          let title = ""
+          let parentID: string | undefined
+          try {
+            const res = await client.session.get({ path: { id: context.sessionID } })
+            const sess = res?.data as { title?: string; parentID?: string } | undefined
+            title = sess?.title ?? ""
+            parentID = sess?.parentID
+          } catch {
+            // session.get unavailable — proceed with fallback title (awaken is a
+            // user command, virtually always in a top-level chat)
+          }
+          if (!parentID && !ns.isCapabilitySession(context.sessionID)) {
+            const groupID = ns.getGroupID(context.sessionID) ?? context.sessionID
+            const result = await autoRegister(
+              directory,
+              context.sessionID,
+              groupID,
+              title || `Session ${context.sessionID}`
+            )
+            if (result.action === "registered") {
+              boardNote = ` Board: registered work item ${result.item.id} for this session.`
+            } else if (result.action === "noop-owned") {
+              boardNote = ` Board: this session already owns ${result.item.id}.`
+            } else if (result.action === "skipped-released") {
+              boardNote = ` Board: this session was released from ${result.item.id} (true-demoted) — not re-adopted.`
+            }
+          }
+        } catch (err) {
+          log("warn", "[board] awaken auto-register failed", { sessionID: context.sessionID, error: String(err) })
+        }
+
+        return "HIVE awakened for this session. Capability dispatch and HIVEmind messaging are now active." + boardNote
+      },
+    }),
+
+    // ── hive-board: bind current session to a work item ──────────────────────
+
+    hive_board_bind: tool({
+      description:
+        "Bind the CURRENT session to a hive-board work item (.opencode/board/WI-*.md): stamps this session as owner_session (+ group_id), moves the item to in_progress, appends the transition. " +
+        "Session identity is resolved from the runtime — you do NOT pass a session id. " +
+        "Enforced: the item must be un-owned, this session must not own another item (session⟷item is strictly 1:1), and this session must not be tombstoned in the item's released_sessions[].",
+      args: {
+        id: tool.schema.string().describe("Work item id, e.g. WI-007"),
+      },
+      async execute(args, context) {
+        if (ns.isCapabilitySession(context.sessionID)) {
+          return "Refused: capability sessions cannot own work items — only top-level HIVE coordinator sessions do."
+        }
+        if (!ns.isSessionAwake(context.sessionID)) {
+          return "Refused: this session is not HIVE-awakened. Run /awaken first — In Progress requires an awakened coordinator owner (SCHEMA §3, invariant 1)."
+        }
+        const groupID = ns.getGroupID(context.sessionID) ?? context.sessionID
+        const result = await bindSession(directory, args.id.trim(), context.sessionID, groupID)
+        if (!result.ok) {
+          const hint =
+            result.reason === "SESSION_OWNS_OTHER"
+              ? " To re-point this session, true-demote the currently owned item first (board demote — it tombstones this session there), then bind again."
+              : ""
+          return `Refused (${result.reason}): ${result.detail}${hint}`
+        }
+        if (result.action === "already-bound") {
+          return `${result.item.id} is already bound to this session — no-op.`
+        }
+        const absorbedNote =
+          result.action === "bound-absorbed" && result.absorbed
+            ? ` Pristine auto-registered placeholder ${result.absorbed} was absorbed (dissolved; lineage recorded on the bind transition).`
+            : ""
+        return `Bound ${result.item.id} ("${result.item.title}") to this session (${context.sessionID}). Status: in_progress; owner_session + group_id stamped together; spec_hash stamped; transition appended.${absorbedNote}`
+      },
+    }),
+
+    // ── hive-board: start an idea item in a FRESH coordinator session ────────
+
+    hive_board_start: tool({
+      description:
+        "Start a hive-board idea item (backlog/todo, un-owned) in a FRESH top-level HIVE coordinator session: creates the session, stamps it as owner, and triggers /awaken in it seeded with the item's spec. " +
+        "Use hive_board_bind instead when THIS session should own the item. Done items are reopened via re-attach, not started fresh.",
+      args: {
+        id: tool.schema.string().describe("Work item id, e.g. WI-007"),
+      },
+      async execute(args, _context) {
+        const sessions = sdkSessionClient(client as unknown as SdkLikeClient)
+        const result = await startItem(directory, args.id.trim(), sessions, {
+          onAwakenError: (err) =>
+            log("warn", "[board] awaken-on-create trigger failed — session exists and is owned, but /awaken must be run manually", {
+              itemID: args.id.trim(),
+              error: String(err),
+            }),
+        })
+        if (!result.ok) {
+          return `Refused (${result.reason}): ${result.detail}`
+        }
+        return (
+          `Started ${result.item.id} ("${result.item.title}") in fresh coordinator session ${result.sessionID}. ` +
+          `Ownership stamped first, then /awaken triggered in it (seeded with the item spec — the session is awakening in the background). ` +
+          `Deep link: ?session=${result.sessionID}`
+        )
       },
     }),
 
@@ -154,6 +268,95 @@ export function createHiveTools(
         const entries = harvestJournals(directory, clear)
         log("info", `[dream_harvest] harvested ${entries.length} journals`, { clear, caller })
         return formatHarvestForDreamer(entries)
+      },
+    }),
+
+    // ── Pain points (harness/workflow friction — problems only, no fixes) ─────
+
+    hive_note_painpoint: tool({
+      description:
+        "Jot down a HARNESS or WORKFLOW pain point the moment you hit it — a friction in the tools, environment, or process (NOT a bug in the code you're building). " +
+        "Capture the problem and the context needed to understand it later: what you were doing, what was slow or painful, what information you needed and couldn't easily get, and where (file paths, commands, cycle counts, retries). " +
+        "CRITICAL DISCIPLINE — capture the PROBLEM ONLY. Do NOT propose, hint at, or record a solution: there is no solution field on purpose. Fixes come later, with fresh eyes; a premature fix jotted mid-frustration usually anchors on the wrong cause. " +
+        "This is a stricter sibling of hive_dream_residue, kept in a separate log. Use hive_dream_residue for general cross-session learnings; use THIS only for concrete harness/workflow friction worth fixing. " +
+        "The tool resolves your identity automatically; you do NOT pass your own name.",
+      args: {
+        problem: tool.schema.string().describe("The pain point itself — what was frustrating, slow, or missing. State the problem, not a fix."),
+        context: tool.schema.string().describe("Everything needed to understand the problem later: what you were doing, what was painful, what info you needed, and where (file paths, commands, cycle/retry counts). Do NOT include a proposed solution."),
+      },
+      async execute(args, context) {
+        const worker = ns.resolveAgent(context.sessionID, context.agent)
+        if (process.env.HIVE_DEBUG === "1") {
+          log("info", "[note_painpoint] capturing pain point", { worker })
+        }
+        appendPainpoint(directory, worker, context.sessionID, args.problem, args.context)
+        return `Pain point captured (problem-only, no fix — as intended). Logged for \`${worker}\` in this session's pain-point log. Review anytime with hive_painpoints_list.`
+      },
+    }),
+
+    hive_painpoints_list: tool({
+      description:
+        "List all currently-open HARNESS/WORKFLOW pain points across sessions (captured via hive_note_painpoint). " +
+        "Read-only review: reads the raw pain-point logs and returns each open problem with its context, so the user — or a fresh-eyes pass looking to propose fixes — can review them anytime. " +
+        "These are deliberately problems-only (no solutions attached). Use this before a workflow-improvement pass, or when the user asks 'what's been annoying us lately'.",
+      args: {},
+      async execute(_args, _context) {
+        if (process.env.HIVE_DEBUG === "1") {
+          log("info", "[painpoints_list] listing open pain points")
+        }
+        const files = listPainpoints(directory)
+        return formatPainpointsForReview(files)
+      },
+    }),
+
+    hive_painpoints_harvest: tool({
+      description:
+        "Harvest all open HARNESS/WORKFLOW pain points for the dreamtime consolidation workflow, then archive them so the next session starts clean. " +
+        "Analogous to hive_dream_harvest but SEPARATE: pain points are harness-fix CANDIDATES, not dream feedstock — do NOT compress them into insights/warnings/songlines/shadows. Surface them to the user (or a fresh-eyes pass) as concrete workflow problems to fix. " +
+        "By default the logs are atomically archived after reading (peek=true reads without clearing). " +
+        "Call this during the dreamtime harvest step, alongside hive_dream_harvest. If you only want to review without clearing, use hive_painpoints_list instead.",
+      args: {
+        peek: tool.schema.boolean().optional().describe("If true, read pain points without archiving them (non-destructive peek). Default false — harvest and archive."),
+      },
+      async execute(args, _context) {
+        const clear = !args.peek
+        if (process.env.HIVE_DEBUG === "1") {
+          log("info", "[painpoints_harvest] harvesting pain points", { clear })
+        }
+        const files = harvestPainpoints(directory, clear)
+        log("info", `[painpoints_harvest] harvested ${files.length} pain-point log(s)`, { clear })
+        return formatPainpointsForHarvest(files)
+      },
+    }),
+
+    // ── Workspace map (fast orientation) ──────────────────────────────────────
+
+    workspace_map: tool({
+      description:
+        "THE live source of truth for what projects exist in this workspace, where they are on disk, their git state, and what each one is. " +
+        "Use this at the START of any work — to locate a project and see its git footing and description — INSTEAD of searching/globbing the tree or reading a project table (the root AGENTS.md no longer carries one). One call replaces the locate-then-git-status dance. " +
+        "NO argument → the full workspace map across the canonical tiers: projects/ (worked-on — the primary detailed section, each with absolute path, concise git state, and a description read from the project's AGENTS.md/README front-matter), plus secondary context: reference/repos/ (clones of other codebases), reference/material/ (non-code reference), scratch/ (throwaway), and core folders (.opencode/, projects/). " +
+        "WITH a name argument → fuzzy/substring-matches one entry (project, reference repo/material, scratch, or core folder) and returns its absolute path, full description, and git state; on no match it GUIDES you (close matches or the valid scopes) rather than returning empty. " +
+        "Git state per entry: branch, clean/dirty, ahead/behind upstream, and whether it's an embedded/gitlink repo distinct from the workspace root — resolved per-entry, so embedded project repos are reported correctly. State is honest and degrades gracefully: a shared working tree can look odd mid-operation, so treat it as a snapshot, not gospel. " +
+        "Descriptions come from each project's own AGENTS.md front-matter (`description:`), falling back to README.md front-matter; projects that carry neither simply show no description.",
+      args: {
+        name: tool.schema.string().optional().describe("Optional entry name (project, reference repo/material, scratch, or core folder) — fuzzy/substring, case-insensitive. Omit to list the entire workspace map."),
+      },
+      async execute(args, _context) {
+        if (process.env.HIVE_DEBUG === "1") {
+          log("info", "[workspace_map] building map", { name: args.name })
+        }
+        const entries = buildWorkspaceMap(directory)
+
+        if (!args.name || args.name.trim() === "") {
+          return formatMap(entries, directory)
+        }
+
+        const result = lookupEntry(entries, args.name)
+        if (result.match) {
+          return formatEntry(result.match)
+        }
+        return formatNotFound(args.name, result, entries)
       },
     }),
 

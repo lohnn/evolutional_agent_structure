@@ -122,7 +122,7 @@ export function nextDreamId(directory: string): string {
     for (const f of files) {
       const m = f.match(/^DRM-(\d+)\.yaml$/)
       if (m) {
-        const n = parseInt(m[1], 10)
+        const n = parseInt(m[1]!, 10)
         if (n > max) max = n
       }
     }
@@ -162,7 +162,7 @@ export function parseDreamState(content: string): DreamState {
 
   let i = 0
   while (i < lines.length) {
-    const line = lines[i]
+    const line = lines[i]!
 
     // Skip blank lines and comments
     if (line.trim() === "" || line.trim().startsWith("#")) { i++; continue }
@@ -171,8 +171,8 @@ export function parseDreamState(content: string): DreamState {
     const topMatch = line.match(/^([a-zA-Z_]+):\s*(.*)$/)
     if (!topMatch || line.startsWith(" ") || line.startsWith("\t")) { i++; continue }
 
-    const key = topMatch[1]
-    const rest = topMatch[2].trim()
+    const key = topMatch[1]!
+    const rest = topMatch[2]!.trim()
 
     // Flow array: [A, B, C] or []
     if (rest.startsWith("[") && rest.endsWith("]")) {
@@ -186,26 +186,26 @@ export function parseDreamState(content: string): DreamState {
     if (rest === "") {
       // Peek: is the next non-blank line indented?
       let j = i + 1
-      while (j < lines.length && lines[j].trim() === "") j++
-      if (j < lines.length && (lines[j].startsWith("  ") || lines[j].startsWith("\t"))
-          && lines[j].match(/^\s+[a-zA-Z_]+:\s/)) {
+      while (j < lines.length && lines[j]!.trim() === "") j++
+      if (j < lines.length && (lines[j]!.startsWith("  ") || lines[j]!.startsWith("\t"))
+          && lines[j]!.match(/^\s+[a-zA-Z_]+:\s/)) {
         // Nested mapping
         i++
         const nested: Record<string, unknown> = {}
         while (i < lines.length) {
-          const nLine = lines[i]
+          const nLine = lines[i]!
           if (nLine.trim() === "" || nLine.trim().startsWith("#")) { i++; continue }
           if (!nLine.startsWith(" ") && !nLine.startsWith("\t")) break
           const nm = nLine.match(/^\s+([a-zA-Z_]+):\s*(.*)$/)
           if (nm) {
-            let v: string | number | boolean = nm[2].trim()
+            let v: string | number | boolean = nm[2]!.trim()
             if (v === "true") v = true
             else if (v === "false") v = false
             else {
               const num = Number(v)
               if (!isNaN(num) && v !== "") v = num
             }
-            nested[nm[1]] = v
+            nested[nm[1]!] = v
           }
           i++
         }
@@ -214,16 +214,16 @@ export function parseDreamState(content: string): DreamState {
       }
 
       // Empty rest, but next lines are block-sequence (  - "item")
-      if (j < lines.length && lines[j].match(/^\s+-\s/)) {
+      if (j < lines.length && lines[j]!.match(/^\s+-\s/)) {
         i++
         const items: string[] = []
         while (i < lines.length) {
-          const bLine = lines[i]
+          const bLine = lines[i]!
           if (bLine.trim() === "" || bLine.trim().startsWith("#")) { i++; continue }
           if (!bLine.match(/^\s+-\s/)) break
           const bm = bLine.match(/^\s+-\s+(.*)$/)
           if (bm) {
-            const v = bm[1].trim()
+            const v = bm[1]!.trim()
             if (v.startsWith('"') && v.endsWith('"')) {
               items.push(v.slice(1, -1).replace(/\\"/g, '"').replace(/\\\\/g, "\\"))
             } else if (v.startsWith("'") && v.endsWith("'")) {
@@ -405,7 +405,7 @@ export function completeDream(
   for (const id of allIds) {
     const prefixMatch = id.match(/^([A-Z]+)-\d+$/)
     if (!prefixMatch) { missingArtifacts.push(id); continue }
-    const subdir = prefixToSubdir[prefixMatch[1]]
+    const subdir = prefixToSubdir[prefixMatch[1]!]
     if (!subdir) { missingArtifacts.push(id); continue }
     const p = path.join(artifactsBase, subdir, `${id}.yaml`)
     if (!fs.existsSync(p)) {
