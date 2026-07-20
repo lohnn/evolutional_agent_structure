@@ -534,8 +534,23 @@ Phased so each stage is independently useful (dream I-051: build in phases, real
 - **Phase 4 — Live subtasks.** Hook mirrors owning session's TodoWrite (`session.todo` /
   `todo.updated`) → item subtask lane.
 - **Phase 5 — Done reconciliation.** Detect DRM COMPLETE → auto-move to Done + link artifacts;
-  implement the badged manual escape hatch.
+  implement the badged manual escape hatch. The **one-time back-fill reconciler** (built first)
+  recovers the workspace's real session history — In-Progress cards for live/paused sessions, Done
+  cards for sessions that *provably* dreamt (a `hive_dream_begin`/`hive_dream_complete` tool call in
+  opencode's SQLite transcript **and** the DRM file is `COMPLETE` — belt-and-braces truthfulness,
+  W-030/W-077). See the invocation note below.
 - **Phase 6 — Polish.** Backward moves, drag-and-drop, filtering, energy/health visualization.
+
+> **Reconciler surface — library + slash command, deliberately NOT a registered tool (decided with
+> the user, 2026-07-20).** The tested logic lives in the plugin's `lib/board-reconcile` +
+> `lib/board-reconcile-db` modules (published as subpath exports; the viewer can call
+> `buildLivePlan` → `executeReconcile` for a "Reconcile" affordance). The *trigger* is a
+> `/reconcile` **slash command** (dry-run by default; `/reconcile --write` creates the cards), **not**
+> a registered `hive_board_*` tool. Rationale: a registered tool injects its name + description into
+> standing model context every session forever, but reconciliation is a one-off / occasional
+> **human-initiated** maintenance action (like `/awaken`, `/status`). A slash command costs **zero
+> standing context** and matches the operation's nature. Idempotent (skips already-owned sessions),
+> so re-invocation is safe.
 
 ---
 
