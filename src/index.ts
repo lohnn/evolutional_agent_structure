@@ -20,6 +20,8 @@ import type { Plugin, Hooks, PluginInput } from "@opencode-ai/plugin"
 import { readMdDir } from "./lib/frontmatter.js"
 import { snapshotAgentsMtime } from "./lib/reload.js"
 import { tickEnergy } from "./lib/energy.js"
+import { executeReconcile, formatReconcileReport } from "./lib/board-reconcile.js"
+import { buildLivePlan, defaultDbPath } from "./lib/board-reconcile-db.js"
 import { NervousSystem } from "./lib/nervous-system.js"
 import { createHiveTools } from "./tools.js"
 import {
@@ -205,7 +207,7 @@ export const HivePlugin: Plugin = async function (ctx: PluginInput) {
     },
 
     // ── Commands: hive-setup, tick, reload ──
-    "command.execute.before": async (input, _output) => {
+    "command.execute.before": async (input, output) => {
       if (input.command === "hive-setup") {
         const agentsMdDest = path.join(directory, "AGENTS.md")
         const rulesSource = path.join(RULES_DIR, "delegation.md")
@@ -224,6 +226,38 @@ export const HivePlugin: Plugin = async function (ctx: PluginInput) {
 
       if (input.command === "reload") {
         lastSnapshot = await snapshotAgentsMtime(projectAgentsPath)
+      }
+
+      // /reconcile — one-off human-initiated board back-fill. Dry-run by
+      // default; `--write` actually creates the cards. The heavy lifting is the
+      // tested lib/board-reconcile(-db) modules; here we build the live plan,
+      // optionally execute it, and inject the human-readable report so the
+      // command's model turn relays real data (not a hallucinated table).
+      if (input.command === "reconcile") {
+        // NOTE: executeReconcile's 3rd arg is a POSITIONAL boolean dryRun —
+        // pass `false` to write. (A prior {dryRun:false} object was truthy and
+        // silently dry-ran; this call site passes the boolean directly.)
+        const write = /(^|\s)--write(\s|$)/.test(input.arguments || "")
+        let report: string
+        try {
+          const plan = buildLivePlan(directory, defaultDbPath())
+          const result = await executeReconcile(directory, plan, /* dryRun */ !write)
+          report = formatReconcileReport(plan, result)
+          log("info", write ? "Board reconcile executed" : "Board reconcile dry-run", {
+            planned: plan.cards.length,
+            created: result.created.length,
+            skipped: result.skipped.length,
+            write,
+          })
+        } catch (err) {
+          report = `RECONCILE FAILED to read the transcript DB or write the board: ${String(err)}`
+          log("warn", "[board] reconcile failed", { error: String(err) })
+        }
+        // Inject the computed report as a synthetic text part so the command's
+        // model turn relays real data. ids/sessionID/messageID are assigned by
+        // opencode when the part is materialized; we supply the content shape.
+        const reportPart = { type: "text", text: `RECONCILE RESULT (relay verbatim):\n\n${report}` }
+        output.parts.unshift(reportPart as unknown as (typeof output.parts)[number])
       }
     },
 
