@@ -39,6 +39,7 @@ function makeState(items: WorkItem[]): BoardState {
   return {
     generatedAt: "2026-07-10T12:00:00Z",
     workspaceRoot: "/workspace",
+    buildSha: "testsha",
     guiBaseUrl: "http://studio:3000",
     capabilities: [],
     dreams: {

@@ -7,6 +7,13 @@
  * (its only runtime imports are thresholds.ts + lineage.ts — no node:fs, no
  * board-store), so this bundle contains no server-only code.
  *
+ * The server's build SHA is STAMPED into the bundle at build time via a Bun
+ * `define` replacement (`__BOARD_BUILD_SHA__`). The emitted /client.js therefore
+ * carries the exact SHA it was built against — the client compares that baked-in
+ * value against the server SHA in each /api/state poll to detect a stale tab
+ * (old bundle vs freshly-restarted server). W-061: staleness is caught by an
+ * explicit deterministic comparison, never assumed to self-heal.
+ *
  * If the bundle ever fails to build (e.g. a non-browser-safe import leaks into
  * the render path), we surface it loudly rather than silently shipping a broken
  * page: the /client.js route serves a console.error stub and the server logs.
@@ -19,10 +26,13 @@ export interface ClientBundle {
   error?: string
 }
 
-let cached: ClientBundle | null = null
+// Cache keyed by the SHA it was built with, so a changed SHA forces a rebuild
+// rather than serving a stale-stamped bundle (defensive — SHA is resolved once
+// at startup in practice).
+let cached: { sha: string; bundle: ClientBundle } | null = null
 
-export async function buildClientBundle(): Promise<ClientBundle> {
-  if (cached) return cached
+export async function buildClientBundle(buildSha: string): Promise<ClientBundle> {
+  if (cached && cached.sha === buildSha) return cached.bundle
   const entry = path.join(import.meta.dir, "client.ts")
   try {
     const result = await Bun.build({
@@ -30,19 +40,26 @@ export async function buildClientBundle(): Promise<ClientBundle> {
       target: "browser",
       minify: true,
       format: "esm",
+      define: {
+        // Baked-in build identity: the SHA this client.js was compiled against.
+        __BOARD_BUILD_SHA__: JSON.stringify(buildSha),
+      },
     })
     if (!result.success || result.outputs.length === 0) {
       const msg = result.logs.map((l) => String(l)).join("; ") || "no outputs"
-      cached = { js: stub(msg), ok: false, error: msg }
-      return cached
+      const bundle = { js: stub(msg), ok: false, error: msg }
+      cached = { sha: buildSha, bundle }
+      return bundle
     }
     const js = await result.outputs[0]!.text()
-    cached = { js, ok: true }
-    return cached
+    const bundle = { js, ok: true }
+    cached = { sha: buildSha, bundle }
+    return bundle
   } catch (err) {
     const msg = String(err)
-    cached = { js: stub(msg), ok: false, error: msg }
-    return cached
+    const bundle = { js: stub(msg), ok: false, error: msg }
+    cached = { sha: buildSha, bundle }
+    return bundle
   }
 }
 

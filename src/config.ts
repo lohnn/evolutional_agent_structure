@@ -9,8 +9,17 @@
  * The cwd default walks upward from process.cwd() looking for a `.opencode/`
  * directory (so running from projects/hive-board/ finds /workspace).
  */
+import { execFileSync } from "node:child_process"
 import * as fs from "node:fs"
 import * as path from "node:path"
+
+/**
+ * The running build's identity: a short git SHA (optionally `-dirty`), or the
+ * literal sentinel `"unknown"` when git is unavailable / this isn't a checkout.
+ * Three deterministic states so the version badge can distinguish stale-tab
+ * from fresh from unknowable (I-152) — never a vague "something differs".
+ */
+export type BuildSha = string
 
 export interface BoardConfig {
   /** Workspace root — the directory that CONTAINS `.opencode/`. */
@@ -49,6 +58,43 @@ export interface BoardConfig {
   opencodeUrl: string | null
   /** HTTP Basic password (username is literally "opencode" — Q14). */
   opencodePassword: string | null
+  /**
+   * Short git SHA of the RUNNING build (the board repo HEAD), `-dirty` if the
+   * working tree has uncommitted changes, else the literal `"unknown"`.
+   * Resolved once at startup and threaded into BoardState so the version badge
+   * (and the /api/state poll payload) can surface which bytes are live — and so
+   * the client can detect a stale tab running an OLD /client.js against a
+   * freshly-restarted server. Also a defense against the "am I actually running
+   * the new bytes?" confusion from the copied `file:` dep failure mode (W-079):
+   * the badge makes the running commit VISIBLE instead of assumed.
+   */
+  buildSha: BuildSha
+}
+
+/**
+ * Resolve the board repo's HEAD short SHA + dirty flag, once, at startup.
+ * `dir` is the board project directory (config source lives in the repo, so we
+ * anchor on __dirname's package root, not the workspace root — this must
+ * reflect the BOARD repo HEAD, W-079). Any failure (no git, not a checkout,
+ * detached weirdness) degrades to `"unknown"` rather than throwing.
+ */
+export function resolveBuildSha(dir: string = path.join(import.meta.dir, "..")): BuildSha {
+  try {
+    const sha = execFileSync("git", ["rev-parse", "--short", "HEAD"], {
+      cwd: dir,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim()
+    if (!sha) return "unknown"
+    const porcelain = execFileSync("git", ["status", "--porcelain"], {
+      cwd: dir,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+    return porcelain.trim().length > 0 ? `${sha}-dirty` : sha
+  } catch {
+    return "unknown"
+  }
 }
 
 /** Discover the running opencode server's base URL from $OPENCODE_PID. */
@@ -128,5 +174,6 @@ export function resolveConfig(argv: string[] = process.argv.slice(2)): BoardConf
     boardDir: boardDir ? path.resolve(boardDir) : path.join(opencodeDir, "board"),
     opencodeUrl: opencodeUrl?.replace(/\/+$/, "") ?? null,
     opencodePassword,
+    buildSha: resolveBuildSha(),
   }
 }
