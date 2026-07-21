@@ -30,6 +30,7 @@ import {
   specHash,
   nowIso,
 } from "./board-store.js"
+import { makeDrmCompleteCheck, makeDrmArtifacts } from "./board-reconcile.js"
 
 // ── Result shape ──────────────────────────────────────────────────────────────
 
@@ -37,7 +38,8 @@ export type TransitionOk = {
   ok: true
   /** what happened: created | bound | bound-absorbed | already-bound |
    *  registered | noop-owned | skipped-released | paused | already-paused |
-   *  unpaused | not-paused | demoted | done | started | reattached */
+   *  unpaused | not-paused | demoted | done | started | reattached |
+   *  noop-no-owner | already-done | redefined */
   action: string
   item: WorkItem
   /** on "bound-absorbed": the pristine placeholder WI id that was dissolved (Q15) */
@@ -49,7 +51,7 @@ export type TransitionOk = {
 export type TransitionErr = {
   ok: false
   /** machine-readable refusal: NOT_FOUND | ITEM_OWNED | SESSION_OWNS_OTHER |
-   *  SESSION_RELEASED | NOT_IN_PROGRESS | ALREADY_DONE */
+   *  SESSION_RELEASED | NOT_IN_PROGRESS | ALREADY_DONE | DRM_NOT_COMPLETE */
   reason: string
   /** human-readable explanation for tool output / UI */
   detail: string
@@ -341,6 +343,132 @@ export function markDoneWithoutDream(
       },
     })
     return { ok: true as const, action: "done", item: updated }
+  })
+}
+
+// ── Dream-complete → Done (event-driven, in-session identity — W-064/I-179) ──
+
+/** The `by:` label for a dream-completion done transition, scoped by DRM. */
+export function dreamCompleteBy(drm: string): string {
+  return `board:dream-complete:${drm}`
+}
+
+export interface MarkDoneFromDreamOptions {
+  /**
+   * Belt-and-braces DRM-COMPLETE cross-check (W-077). Defaults to the real
+   * dreams/history/DRM-NNN.yaml reader; tests inject a fake. If it returns
+   * false the helper refuses (a Done must never be stamped from a DRM that is
+   * not genuinely COMPLETE on disk).
+   */
+  drmIsComplete?: (drm: string) => boolean
+  /**
+   * Artifact ids to mirror onto the item (cache mirror, I-144). Defaults to
+   * reading them from the COMPLETE DRM file. The handler already has these from
+   * completeDream's result, but we re-derive from the authoritative DRM by
+   * default so the mirror can never diverge from the archive.
+   */
+  drmArtifacts?: (drm: string) => string[]
+}
+
+/**
+ * Promote the work item OWNED by `sessionID` to Done because that session's
+ * dream `drm` just completed. The event-driven sibling of the reconciler's
+ * back-fill Done path: the reconciler CREATES done cards for un-owned sessions;
+ * this PROMOTES an already-owned in_progress item whose owning session dreamt
+ * (the gap — there is no timer tick, W-064, so the completing process applies
+ * the transition itself). Trigger lives in the hive_dream_complete tool handler
+ * (the only place with trustworthy in-session identity, I-179); this is the ONE
+ * locked write (withBoardLock + editItemUnlocked), never a second writer.
+ *
+ * All decisions are made under the lock against a fresh disk read (idempotency
+ * by explicit marker on the WI — the stamped dream_id and the recorded
+ * transition, never inference-from-absence, W-061/W-079):
+ *
+ *   - no item owned by this session  → clean no-op (action "noop-no-owner").
+ *     The common case: most dreaming sessions don't own a board item.
+ *   - DRM not COMPLETE on disk       → refuse DRM_NOT_COMPLETE (belt & braces).
+ *   - item in_progress               → stamp dream_id + artifacts, clear paused,
+ *     append in_progress→done (action "done").
+ *   - item already done, dream_id == drm → clean no-op (action "already-done").
+ *     Exact re-fire (double completion of the same DRM) double-appends nothing.
+ *   - item already done, different/absent dream_id → RE-STAMP to this DRM
+ *     (action "redefined"): a later dream in a multi-dream session, or an
+ *     upgrade of a done_without_dream escape-hatch item to a real dream basis.
+ *     Follows the reconciler convention (latest COMPLETE is the definer; earlier
+ *     done transitions stay in the log as lineage). Clears done_without_dream —
+ *     an audited state change (the appended transition), never a silent flip.
+ *   - item backlog/todo (owned but not in progress — should not happen) → refuse
+ *     NOT_IN_PROGRESS. Never reopen/clobber; a real reopen is promoteItem's
+ *     audited done→todo, not this path.
+ */
+export function markItemDoneFromDream(
+  directory: string,
+  sessionID: string,
+  drm: string,
+  opts: MarkDoneFromDreamOptions = {}
+): Promise<TransitionResult> {
+  const isComplete = opts.drmIsComplete ?? makeDrmCompleteCheck(directory)
+  const artifactsOf = opts.drmArtifacts ?? makeDrmArtifacts(directory)
+  return withBoardLock(directory, () => {
+    // Re-read inside the lock — no stale in-memory copy (SCHEMA §4a.3).
+    const item = listItems(directory).find((i) => i.owner_session === sessionID)
+    if (!item) {
+      return {
+        ok: true as const,
+        action: "noop-no-owner",
+        // Synthetic empty item keeps the OK shape uniform without a real record.
+        item: undefined as unknown as WorkItem,
+      }
+    }
+
+    // Already done and already defined by THIS dream → exact re-fire, no-op.
+    if (item.status === "done" && item.dream_id === drm) {
+      return { ok: true as const, action: "already-done", item }
+    }
+
+    // Belt-and-braces: only mark Done from a DRM the archive confirms COMPLETE.
+    if (!isComplete(drm)) {
+      return {
+        ok: false as const,
+        reason: "DRM_NOT_COMPLETE",
+        detail: `${drm} is not status COMPLETE in dreams/history/ — refusing to mark ${item.id} done from an incomplete dream.`,
+      }
+    }
+
+    // Owned but parked outside in_progress/done (backlog/todo) — never clobber.
+    if (item.status !== "in_progress" && item.status !== "done") {
+      return {
+        ok: false as const,
+        reason: "NOT_IN_PROGRESS",
+        detail: `${item.id} is ${item.status}; dream-complete Done applies to the in_progress owner only (reopen is promoteItem's audited transition, not this path).`,
+      }
+    }
+
+    const artifacts = artifactsOf(drm)
+    const from = item.status // "in_progress" (happy path) or "done" (re-stamp lineage)
+    const updated = editItemUnlocked(directory, item.id, {
+      set: {
+        status: "done",
+        dream_id: drm,
+        paused: false,
+        // A dream-backed Done is by definition not "without dream"; clearing the
+        // escape-hatch badge here is audited by the appended transition below.
+        done_without_dream: false,
+      },
+      setArtifacts: artifacts,
+      appendTransition: {
+        at: nowIso(),
+        from,
+        to: "done",
+        by: dreamCompleteBy(drm),
+        session: sessionID,
+      },
+    })
+    return {
+      ok: true as const,
+      action: from === "done" ? "redefined" : "done",
+      item: updated,
+    }
   })
 }
 

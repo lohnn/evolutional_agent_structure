@@ -236,6 +236,38 @@ describe("applyEditToContent — text surgery (I-049)", () => {
     expect(parseWorkItem(two).released_sessions).toEqual(["ses_a", "ses_b"])
   })
 
+  test("setArtifacts replaces the whole flow array (cache mirror, I-144)", () => {
+    const empty = serializeWorkItem({ ...fullItem(), artifacts: [] })
+    const one = applyEditToContent(empty, { setArtifacts: ["I-187", "I-188"] })
+    expect(one).toContain("artifacts: [I-187, I-188]")
+    expect(parseWorkItem(one).artifacts).toEqual(["I-187", "I-188"])
+    // whole-replace, not append: a second setArtifacts overwrites
+    const two = applyEditToContent(one, { setArtifacts: ["W-001"] })
+    expect(two).toContain("artifacts: [W-001]")
+    expect(parseWorkItem(two).artifacts).toEqual(["W-001"])
+    // empty clears
+    expect(parseWorkItem(applyEditToContent(one, { setArtifacts: [] })).artifacts).toEqual([])
+  })
+
+  test("Done-stamp combo: status + dream_id + setArtifacts + done transition in one edit", () => {
+    const inProgress = serializeWorkItem({
+      ...fullItem(),
+      status: "in_progress",
+      dream_id: null,
+      artifacts: [],
+    })
+    const done = applyEditToContent(inProgress, {
+      set: { status: "done", dream_id: "DRM-046" },
+      setArtifacts: ["I-187", "I-188"],
+      appendTransition: { at: nowIso(), from: "in_progress", to: "done", by: "board:dream-complete:DRM-046", session: "ses_x" },
+    })
+    const parsed = parseWorkItem(done)
+    expect(parsed.status).toBe("done")
+    expect(parsed.dream_id).toBe("DRM-046")
+    expect(parsed.artifacts).toEqual(["I-187", "I-188"])
+    expect(parsed.transitions[parsed.transitions.length - 1]!.to).toBe("done")
+  })
+
   test("body and unknown hand-added fields survive edits byte-for-byte", () => {
     const withUnknown = original.replace("priority: medium", "priority: medium\nx_custom_field: kept")
     const next = applyEditToContent(withUnknown, {
