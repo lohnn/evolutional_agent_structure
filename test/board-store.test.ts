@@ -17,6 +17,9 @@ import {
   specHash,
   boardDir,
   nowIso,
+  isPlaceholderTitle,
+  refreshOwnerTitle,
+  PLACEHOLDER_TITLE_RE,
 } from "../src/lib/board-store.ts"
 
 let dir: string
@@ -318,5 +321,77 @@ describe("specHash", () => {
     expect(specHash("body")).toBe(specHash("  body \n"))
     expect(specHash("body")).toMatch(/^[0-9a-f]{12}$/)
     expect(specHash("a")).not.toBe(specHash("b"))
+  })
+})
+
+describe("isPlaceholderTitle / PLACEHOLDER_TITLE_RE (the title contract)", () => {
+  test("matches opencode's exact placeholder format", () => {
+    expect(isPlaceholderTitle("New session - 2026-07-20T22:18:00.584Z")).toBe(true)
+    expect(PLACEHOLDER_TITLE_RE.test("New session - 2026-07-20T22:18:00.584Z")).toBe(true)
+    // millis-less variant tolerated (belt-and-braces)
+    expect(isPlaceholderTitle("New session - 2026-07-20T22:18:00Z")).toBe(true)
+  })
+  test("empty / whitespace / null / undefined count as unsettled", () => {
+    expect(isPlaceholderTitle("")).toBe(true)
+    expect(isPlaceholderTitle("   ")).toBe(true)
+    expect(isPlaceholderTitle(null)).toBe(true)
+    expect(isPlaceholderTitle(undefined)).toBe(true)
+  })
+  test("real titles are NOT placeholders", () => {
+    expect(isPlaceholderTitle("hive-board reload flicker and state reset")).toBe(false)
+    // near-misses must not match
+    expect(isPlaceholderTitle("New session about the migration")).toBe(false)
+    expect(isPlaceholderTitle("Old session - 2026-07-20T22:18:00.584Z")).toBe(false)
+  })
+})
+
+describe("refreshOwnerTitle (locked title tracking)", () => {
+  test("patches a placeholder title to the real one for the owning session", async () => {
+    await createItem(dir, {
+      ...fullItem(),
+      owner_session: "ses_own",
+      title: "New session - 2026-07-20T22:18:00.584Z",
+    })
+    const patched = await refreshOwnerTitle(dir, "ses_own", "hive-board reload flicker fix")
+    expect(patched).toBe("WI-001") // createItem assigns the next id, ignoring the passed one
+    expect(findItemByOwner(dir, "ses_own")!.title).toBe("hive-board reload flicker fix")
+  })
+
+  test("no-op when the stored title is already settled (never clobbers)", async () => {
+    await createItem(dir, { ...fullItem(), owner_session: "ses_own", title: "Real settled title" })
+    const patched = await refreshOwnerTitle(dir, "ses_own", "some other title")
+    expect(patched).toBeNull()
+    expect(findItemByOwner(dir, "ses_own")!.title).toBe("Real settled title")
+  })
+
+  test("no-op when the incoming title is itself a placeholder", async () => {
+    await createItem(dir, {
+      ...fullItem(),
+      owner_session: "ses_own",
+      title: "New session - 2026-07-20T22:18:00.584Z",
+    })
+    const patched = await refreshOwnerTitle(dir, "ses_own", "New session - 2026-07-20T22:19:00.000Z")
+    expect(patched).toBeNull()
+    expect(isPlaceholderTitle(findItemByOwner(dir, "ses_own")!.title)).toBe(true)
+  })
+
+  test("no-op when no item owns the session", async () => {
+    await createItem(dir, { ...fullItem(), owner_session: "ses_other", title: "New session - 2026-07-20T22:18:00.584Z" })
+    expect(await refreshOwnerTitle(dir, "ses_nobody", "real title")).toBeNull()
+  })
+
+  test("only patches the frontmatter title field (surgical, other fields untouched)", async () => {
+    await createItem(dir, {
+      ...fullItem(),
+      owner_session: "ses_own",
+      title: "New session - 2026-07-20T22:18:00.584Z",
+      status: "in_progress",
+      dream_id: "DRM-041",
+    })
+    await refreshOwnerTitle(dir, "ses_own", "settled title")
+    const item = findItemByOwner(dir, "ses_own")!
+    expect(item.title).toBe("settled title")
+    expect(item.status).toBe("in_progress")
+    expect(item.dream_id).toBe("DRM-041")
   })
 })

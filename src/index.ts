@@ -21,7 +21,7 @@ import { readMdDir } from "./lib/frontmatter.js"
 import { snapshotAgentsMtime } from "./lib/reload.js"
 import { tickEnergy } from "./lib/energy.js"
 import { executeReconcile, formatReconcileReport } from "./lib/board-reconcile.js"
-import { buildLivePlan, defaultDbPath } from "./lib/board-reconcile-db.js"
+import { buildLivePlan, defaultDbPath, backfillTitlesFromDb } from "./lib/board-reconcile-db.js"
 import { NervousSystem } from "./lib/nervous-system.js"
 import { createHiveTools } from "./tools.js"
 import {
@@ -240,13 +240,25 @@ export const HivePlugin: Plugin = async function (ctx: PluginInput) {
         const write = /(^|\s)--write(\s|$)/.test(input.arguments || "")
         let report: string
         try {
-          const plan = buildLivePlan(directory, defaultDbPath())
+          const dbPath = defaultDbPath()
+          const plan = buildLivePlan(directory, dbPath)
           const result = await executeReconcile(directory, plan, /* dryRun */ !write)
+          // Also retro-correct already-frozen placeholder titles from the DB
+          // (repairs items created before the session.updated title hook). Same
+          // dry-run/write gate; same locked title-write path.
+          const titles = await backfillTitlesFromDb(directory, dbPath, /* dryRun */ !write)
           report = formatReconcileReport(plan, result)
+          if (titles.fixes.length > 0) {
+            const verb = write ? "Corrected" : "Would correct"
+            report +=
+              `\n\nTITLE BACK-FILL — ${verb} ${titles.fixes.length} frozen placeholder title(s):\n` +
+              titles.fixes.map((f) => `  ${f.itemID}: "${f.from}" → "${f.to}"`).join("\n")
+          }
           log("info", write ? "Board reconcile executed" : "Board reconcile dry-run", {
             planned: plan.cards.length,
             created: result.created.length,
             skipped: result.skipped.length,
+            titleFixes: titles.fixes.length,
             write,
           })
         } catch (err) {

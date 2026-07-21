@@ -5,6 +5,8 @@ import {
   buildSessionDreamMap,
   planReconcile,
   formatReconcileReport,
+  planTitleBackfill,
+  backfillTitles,
   type PartRow,
   type SessionInfo,
 } from "../src/lib/board-reconcile.ts"
@@ -278,6 +280,78 @@ describe("executeReconcile (locked writes through board-store)", () => {
       expect(again.created.length).toBe(0)
       expect(listItems(dir).length).toBe(2)
       void readItem
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe("planTitleBackfill (retro-fix frozen placeholder titles)", () => {
+  const wi = (over: Partial<WorkItem>): WorkItem => ({ owner_session: null, title: "", ...over } as unknown as WorkItem)
+  const PLACEHOLDER = "New session - 2026-07-20T22:18:00.584Z"
+
+  test("fixes owned items with a placeholder title when a real one exists", () => {
+    const items = [
+      wi({ id: "WI-035", owner_session: "ses_a", title: PLACEHOLDER }),
+      wi({ id: "WI-036", owner_session: "ses_b", title: "Already real" }), // settled — skip
+      wi({ id: "WI-037", owner_session: null, title: PLACEHOLDER }), // no owner — skip
+    ]
+    const titles: Record<string, string> = { ses_a: "The real title", ses_b: "different" }
+    const fixes = planTitleBackfill(items, (s) => titles[s] ?? null)
+    expect(fixes).toEqual([{ itemID: "WI-035", sessionID: "ses_a", from: PLACEHOLDER, to: "The real title" }])
+  })
+
+  test("skips when the DB title is itself a placeholder or missing (no timestamp-for-timestamp)", () => {
+    const items = [
+      wi({ id: "WI-1", owner_session: "ses_a", title: PLACEHOLDER }),
+      wi({ id: "WI-2", owner_session: "ses_b", title: PLACEHOLDER }),
+    ]
+    const titles: Record<string, string> = { ses_a: "New session - 2026-07-20T23:00:00.000Z" }
+    expect(planTitleBackfill(items, (s) => titles[s] ?? null)).toEqual([]) // ses_a placeholder, ses_b missing
+  })
+
+  test("accepts the ±offset ISO variant board-viewer verified in the DB", () => {
+    const offset = "New session - 2026-07-20T22:18:00+02:00"
+    const items = [wi({ id: "WI-9", owner_session: "ses_a", title: offset })]
+    const fixes = planTitleBackfill(items, () => "Real title")
+    expect(fixes.length).toBe(1)
+  })
+
+  test("backfillTitles dry-run plans without writing; real run patches via the locked path", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "title-backfill-"))
+    try {
+      const { createItem, findItemByOwner } = await import("../src/lib/board-store.ts")
+      await createItem(dir, {
+        title: PLACEHOLDER,
+        status: "in_progress",
+        owner_session: "ses_a",
+        group_id: "ses_a",
+        origin: "session-first",
+        paused: false,
+        spec_hash: null,
+        released_sessions: [],
+        dream_id: null,
+        artifacts: [],
+        priority: "medium",
+        tags: [],
+        done_without_dream: false,
+        subtasks: [],
+        transitions: [],
+        body: "",
+      } as unknown as WorkItem)
+      const lookup = () => "The settled title"
+
+      const dry = await backfillTitles(dir, listItems(dir), lookup, true)
+      expect(dry.fixes.length).toBe(1)
+      expect(findItemByOwner(dir, "ses_a")!.title).toBe(PLACEHOLDER) // unchanged
+
+      const real = await backfillTitles(dir, listItems(dir), lookup, false)
+      expect(real.fixes.length).toBe(1)
+      expect(findItemByOwner(dir, "ses_a")!.title).toBe("The settled title")
+
+      // idempotent: second run finds nothing (title now settled)
+      const again = await backfillTitles(dir, listItems(dir), lookup, false)
+      expect(again.fixes.length).toBe(0)
     } finally {
       fs.rmSync(dir, { recursive: true, force: true })
     }
