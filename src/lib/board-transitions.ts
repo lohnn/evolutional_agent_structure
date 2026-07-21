@@ -90,6 +90,8 @@ export function createIdea(directory: string, init: CreateIdeaInit): Promise<Tra
       tags: init.tags ?? [],
       done_without_dream: false,
       subtasks: [],
+      todo_mirror: [],
+      todo_mirror_updated: null,
       transitions: [birth],
       body: init.body ?? "",
     })
@@ -235,6 +237,8 @@ export function autoRegister(
       tags: [],
       done_without_dream: false,
       subtasks: [],
+      todo_mirror: [],
+      todo_mirror_updated: null,
       transitions: [{ at: nowIso(), from: null, to: "in_progress", by, session: sessionID }],
       body,
     })

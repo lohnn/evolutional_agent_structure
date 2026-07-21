@@ -406,6 +406,8 @@ export async function executeReconcile(
         tags: [],
         done_without_dream: false,
         subtasks: [],
+        todo_mirror: [],
+        todo_mirror_updated: null,
         transitions: transitionsFor(card),
         body: "",
         created: today(),

@@ -22,12 +22,15 @@
  *   - session/DRM/WI ids, dates, enums: bare (unquoted)
  *   - null fields: literal `null`
  *   - artifacts / tags / released_sessions: flow arrays [a, b] or []
- *   - subtasks / transitions: block sequences of flow maps
+ *   - subtasks / todo_mirror / transitions: block sequences of flow maps
  *       - { content: "...", status: completed }
  *       - { at: 2026-07-06T09:00:00Z, from: todo, to: in_progress, by: x, session: ses_... }
+ *   - todo_mirror is a whole-replace cache-mirror (WI-038) preceded by its
+ *     full-precision stamp `todo_mirror_updated` (ISO-8601, NOT date-only)
  *   - transitions is ALWAYS the last frontmatter field (append surgery relies
  *     on finding the block; parser tolerates any order for robustness)
- *   - created/updated: date-only (YYYY-MM-DD); transition `at`: full ISO-8601 Z
+ *   - created/updated: date-only (YYYY-MM-DD); transition `at` &
+ *     todo_mirror_updated: full ISO-8601 Z
  */
 
 import path from "path"
@@ -42,6 +45,19 @@ export type WorkItemPriority = "low" | "medium" | "high"
 export type SubtaskStatus = "pending" | "in_progress" | "completed" | "cancelled"
 
 export interface Subtask {
+  content: string
+  status: SubtaskStatus
+}
+
+/**
+ * One entry of the live TodoWrite mirror (`todo_mirror`). Same shape as a
+ * Subtask (content + the four opencode todo states), but a DISTINCT field:
+ * `todo_mirror` is the live-reconciled cache the board actually writes/reads
+ * (board-viewer WI-038), whereas `subtasks` (SCHEMA §4) was specced for the
+ * same source but never got a writer. Kept separate so board-viewer's
+ * live-read↔mirror reconcile loop owns its own field + full-precision stamp.
+ */
+export interface TodoMirrorEntry {
   content: string
   status: SubtaskStatus
 }
@@ -77,6 +93,21 @@ export interface WorkItem {
   tags: string[]
   done_without_dream: boolean
   subtasks: Subtask[]
+  /**
+   * CACHE-MIRROR of the owning session's live TodoWrite list (WI-038 /
+   * SCHEMA §1a portability). Whole-replace, never append (I-190): it mirrors
+   * the session's COMPLETE current todos. Derived-rebuildable (I-105 /
+   * I-113): reconstructable from the owning session alone, so a throwaway
+   * cache — but stored on the item so the board renders it without the
+   * session present. Empty array when unmirrored.
+   */
+  todo_mirror: TodoMirrorEntry[]
+  /**
+   * FULL-PRECISION ISO-8601 timestamp of the last todo_mirror refresh
+   * (I-191/W-081: never the date-only granularity of `updated`). null until
+   * first mirror write.
+   */
+  todo_mirror_updated: string | null
   transitions: Transition[]
   /** free-form markdown spec/notes (everything after the closing fence) */
   body: string
@@ -214,6 +245,10 @@ function emitSubtask(s: Subtask): string {
   return `{ content: ${q(s.content)}, status: ${s.status} }`
 }
 
+function emitTodoMirror(t: TodoMirrorEntry): string {
+  return `{ content: ${q(t.content)}, status: ${t.status} }`
+}
+
 // ── Serializer (used for CREATION only — existing files are text-edited) ─────
 
 export function serializeWorkItem(item: WorkItem): string {
@@ -241,6 +276,13 @@ export function serializeWorkItem(item: WorkItem): string {
   } else {
     lines.push("subtasks:")
     for (const s of item.subtasks) lines.push(`  - ${emitSubtask(s)}`)
+  }
+  lines.push(`todo_mirror_updated: ${item.todo_mirror_updated ?? "null"}`)
+  if (item.todo_mirror.length === 0) {
+    lines.push("todo_mirror: []")
+  } else {
+    lines.push("todo_mirror:")
+    for (const t of item.todo_mirror) lines.push(`  - ${emitTodoMirror(t)}`)
   }
   // transitions LAST — append surgery relies on canonical placement
   if (item.transitions.length === 0) {
@@ -274,6 +316,7 @@ export function parseWorkItem(content: string): WorkItem {
   const lines = content.split("\n")
   const raw: Record<string, string> = {}
   const subtasks: Subtask[] = []
+  const todoMirror: TodoMirrorEntry[] = []
   const transitions: Transition[] = []
   let body = ""
 
@@ -281,7 +324,7 @@ export function parseWorkItem(content: string): WorkItem {
   // Opening fence
   if (lines[0]?.trim() === "---") i = 1
 
-  let currentList: "subtasks" | "transitions" | null = null
+  let currentList: "subtasks" | "todo_mirror" | "transitions" | null = null
   for (; i < lines.length; i++) {
     const line = lines[i]!
     if (line.trim() === "---") {
@@ -296,6 +339,11 @@ export function parseWorkItem(content: string): WorkItem {
       const m = parseFlowMap(itemMatch[1]!)
       if (currentList === "subtasks") {
         subtasks.push({
+          content: m.content ?? "",
+          status: (m.status as SubtaskStatus) ?? "pending",
+        })
+      } else if (currentList === "todo_mirror") {
+        todoMirror.push({
           content: m.content ?? "",
           status: (m.status as SubtaskStatus) ?? "pending",
         })
@@ -321,7 +369,7 @@ export function parseWorkItem(content: string): WorkItem {
     const key = topMatch[1]!
     const rest = topMatch[2]!.trim()
 
-    if (key === "subtasks" || key === "transitions") {
+    if (key === "subtasks" || key === "todo_mirror" || key === "transitions") {
       currentList = key
       if (rest.startsWith("[") && rest.endsWith("]") && rest.slice(1, -1).trim() === "") {
         // empty flow form — nothing to collect
@@ -357,6 +405,8 @@ export function parseWorkItem(content: string): WorkItem {
     tags: arrays("tags"),
     done_without_dream: raw.done_without_dream === "true",
     subtasks,
+    todo_mirror: todoMirror,
+    todo_mirror_updated: nullable(unq(raw.todo_mirror_updated ?? "null")),
     transitions,
     // Contract: body carries no leading/trailing newlines (serializer re-adds
     // canonical separation), so serialize→parse round-trips are stable.
@@ -595,6 +645,17 @@ export interface ItemEdit {
    * because the DRM is the source of truth for its own artifact set.
    */
   setArtifacts?: string[]
+  /**
+   * Whole-replace the `todo_mirror` block AND stamp `todo_mirror_updated`
+   * (WI-038). This is a CACHE-MIRROR of the owning session's CURRENT
+   * TodoWrite list (I-190: whole-list mirror, not an append log — the live
+   * session is the source of truth for its own todos). `at` is a
+   * full-precision ISO-8601 timestamp (I-191/W-081), NOT the date-only
+   * granularity of `updated`. Identity-free (I-179): the caller already holds
+   * the owning session id, so this routes through the one locked storage
+   * module like any other edit. An empty `todos` clears the mirror to `[]`.
+   */
+  setTodoMirror?: { todos: TodoMirrorEntry[]; at: string }
 }
 
 /**
@@ -673,6 +734,53 @@ export function applyEditToContent(content: string, edit: ItemEdit): string {
       }
       lines.splice(insertAt, 0, rendered)
     }
+  }
+
+  // 2c. todo_mirror whole-block replace + full-precision stamp (WI-038, I-190).
+  //     Cache-mirror of the session's CURRENT todos: rip out any existing
+  //     todo_mirror block + todo_mirror_updated line, then reinsert the fresh
+  //     pair before transitions:/fence. Whole-replace, never append.
+  if (edit.setTodoMirror !== undefined) {
+    const { todos, at } = edit.setTodoMirror
+    // 2c.i — excise the old todo_mirror block (header + its `  - ` entries, or
+    // the empty flow form) and the old todo_mirror_updated scalar line.
+    for (let scan = 0; scan < 2; scan++) {
+      const { start, end } = fmRegion(lines)
+      let removed = false
+      for (let i = start; i < end; i++) {
+        if (/^todo_mirror_updated:/.test(lines[i]!)) {
+          lines.splice(i, 1)
+          removed = true
+          break
+        }
+        if (/^todo_mirror:/.test(lines[i]!)) {
+          let j = i + 1
+          while (j < fmRegion(lines).end && /^\s+-\s/.test(lines[j]!)) j++
+          lines.splice(i, j - i)
+          removed = true
+          break
+        }
+      }
+      if (!removed) break
+    }
+    // 2c.ii — build the fresh lines (block form if non-empty, else empty flow).
+    const fresh: string[] = [`todo_mirror_updated: ${at}`]
+    if (todos.length === 0) {
+      fresh.push("todo_mirror: []")
+    } else {
+      fresh.push("todo_mirror:")
+      for (const t of todos) fresh.push(`  - ${emitTodoMirror(t)}`)
+    }
+    // 2c.iii — insert before transitions:/fence (canonical placement).
+    const { start: s3, end: e3 } = fmRegion(lines)
+    let insertAt = e3
+    for (let i = s3; i < e3; i++) {
+      if (/^transitions:/.test(lines[i]!)) {
+        insertAt = i
+        break
+      }
+    }
+    lines.splice(insertAt, 0, ...fresh)
   }
 
   // 3. transitions append (block surgery — insert after last entry)

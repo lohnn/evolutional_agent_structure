@@ -336,6 +336,8 @@ describe("planTitleBackfill (retro-fix frozen placeholder titles)", () => {
         tags: [],
         done_without_dream: false,
         subtasks: [],
+        todo_mirror: [],
+        todo_mirror_updated: null,
         transitions: [],
         body: "",
       } as unknown as WorkItem)
