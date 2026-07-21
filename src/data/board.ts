@@ -27,8 +27,38 @@ export interface BoardColumns {
   sessionOnly: SessionCard[]
 }
 
-function byUpdatedDesc(a: WorkItem, b: WorkItem): number {
-  return b.updated.localeCompare(a.updated)
+/**
+ * Newest-first sort key for owned columns (In Progress / Done).
+ *
+ * `updated` is DATE-ONLY (`today()` → "2026-07-21"), so every item touched on
+ * the same calendar day collides and JS `sort` falls back to insertion (id)
+ * order — a fresh in_progress item lands mid-cluster instead of on top (the
+ * bug). We sort on the newest `transitions[].at` instead: a full-ISO,
+ * second-precision timestamp written uniformly on every In-Progress/Done code
+ * path (I-189), from the item's own append-only log (I-190) — an in-record key
+ * that respects the portability invariant (I-144), no session/external call.
+ *
+ * The log is NOT assumed sorted — we take the max `at` defensively. An item
+ * with an empty/missing `transitions[]` falls back to the date-only `updated`
+ * (then `id`), so nothing crashes or vanishes.
+ */
+function latestTransitionAt(item: WorkItem): string {
+  let max = ""
+  for (const t of item.transitions) {
+    if (t.at && t.at > max) max = t.at
+  }
+  return max
+}
+
+function byRecencyDesc(a: WorkItem, b: WorkItem): number {
+  const ta = latestTransitionAt(a)
+  const tb = latestTransitionAt(b)
+  // Fall back to date-only `updated` when a transition timestamp is absent, so
+  // an item with no log still slots by best-available recency.
+  const ka = ta || a.updated
+  const kb = tb || b.updated
+  if (ka !== kb) return kb.localeCompare(ka)
+  return b.id.localeCompare(a.id) // stable, deterministic tiebreak (newest id first)
 }
 
 export function buildBoard(items: WorkItem[], mirror: SessionMirror): BoardColumns {
@@ -44,8 +74,8 @@ export function buildBoard(items: WorkItem[], mirror: SessionMirror): BoardColum
   return {
     backlog: sortForColumn(items.filter((i) => i.status === "backlog")),
     todo: sortForColumn(items.filter((i) => i.status === "todo")),
-    inProgress: items.filter((i) => i.status === "in_progress").sort(byUpdatedDesc),
-    done: items.filter((i) => i.status === "done").sort(byUpdatedDesc),
+    inProgress: items.filter((i) => i.status === "in_progress").sort(byRecencyDesc),
+    done: items.filter((i) => i.status === "done").sort(byRecencyDesc),
     sessionOnly: mirror.cards.filter((c) => !claimed.has(c.id)),
   }
 }

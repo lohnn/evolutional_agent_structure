@@ -329,7 +329,26 @@ function kanbanSection(
   ctx: CardCtx,
 ): string {
   const card = (i: WorkItem) => itemCard(i, ctx)
-  const inProgress = [...board.inProgress.map(card), ...board.sessionOnly.map(sessionOnlyCard)]
+  // In Progress interleaves WI cards with session-only cards into ONE
+  // newest-first stream so the whole column reads consistently. Both keys are
+  // comparable full-ISO timestamps: WI cards by their latest transitions[].at
+  // (the same recency key board.ts sorts by — recomputed here to keep render
+  // browser-safe, transitions[] is a WorkItem field), session cards by their
+  // full-ISO `updated`. Ties fall back to a stable id/session-id compare.
+  // `latestAt` mirrors board.ts#latestTransitionAt: NOT assuming the log is
+  // sorted, falling back to date-only `updated` when transitions[] is empty.
+  const latestAt = (i: WorkItem): string => {
+    let max = ""
+    for (const t of i.transitions) if (t.at && t.at > max) max = t.at
+    return max || i.updated
+  }
+  type ProgressEntry = { key: string; tie: string; html: string }
+  const progressEntries: ProgressEntry[] = [
+    ...board.inProgress.map((i) => ({ key: latestAt(i), tie: i.id, html: card(i) })),
+    ...board.sessionOnly.map((s) => ({ key: s.updated, tie: s.id, html: sessionOnlyCard(s) })),
+  ]
+  progressEntries.sort((a, b) => (a.key !== b.key ? b.key.localeCompare(a.key) : b.tie.localeCompare(a.tie)))
+  const inProgress = progressEntries.map((e) => e.html)
   return `<div class="kanban">
     ${column("Backlog", board.backlog.map(card), ctx.writesEnabled ? createForm("backlog") : "")}
     ${column("Todo", board.todo.map(card), ctx.writesEnabled ? createForm("todo") : "")}
