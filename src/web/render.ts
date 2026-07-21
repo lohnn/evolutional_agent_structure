@@ -125,18 +125,26 @@ function sessionPresence(id: string | null, mirror: SessionMirror): SessionPrese
 }
 
 /**
- * "Open session" affordance (SCHEMA §1a): a NAVIGATION link only. Enabled iff
- * the session is persisted here; otherwise disabled gracefully — absence is
- * "unknown", never "deleted", and never changes the card's column.
+ * "Open session" affordance (SCHEMA §1a): a NAVIGATION link only, rendered from
+ * a work item's OWN stamped `owner_session` (its own record — I-143/I-144).
+ *
+ * Enablement trusts the stamped field, NOT the frozen session mirror. Because
+ * bind/start only ever stamp a real, runtime-resolved session id (never a
+ * self-reported one), the presence of `owner_session` is itself sufficient
+ * proof the session exists — so a non-null id always yields a tappable deep
+ * link. This is deliberate: the mirror (data/sessions.ts) is a BOOTSTRAP-ONLY
+ * SQLite snapshot, computed once at startup and never refreshed (I-187/W-061),
+ * and scoped to `directory = workspaceRoot` (excludes cross-project sessions).
+ * Gating the link on that snapshot mis-rendered freshly-started and
+ * cross-project owners as dead spans even though the session genuinely exists.
+ * Reading the live field (SNG-045: the ship's own prow, not the harbormaster's
+ * chalk-board) fixes both flavors without any render-time session-API call.
+ *
+ * The disabled/no-link path is preserved for the genuine no-owner case (`!id`).
  */
-function openSessionHtml(id: string | null, guiBaseUrl: string, mirror: SessionMirror): string {
+function openSessionHtml(id: string | null, guiBaseUrl: string, _mirror: SessionMirror): string {
   if (!id) return ""
-  const presence = sessionPresence(id, mirror)
-  if (presence === "exists") {
-    return `<a class="open-link" href="${esc(`${guiBaseUrl}/?session=${id}`)}" target="_blank" rel="noopener" title="open in web GUI">Open ↗</a>`
-  }
-  const tip = presence === "absent" ? "session not available here" : "session state unknown (enumeration unavailable)"
-  return `<span class="open-link disabled" title="${esc(tip)}">Open ↗</span>`
+  return `<a class="open-link" href="${esc(`${guiBaseUrl}/?session=${id}`)}" target="_blank" rel="noopener" title="open in web GUI">Open ↗</a>`
 }
 
 const SUBTASK_ICON: Record<string, string> = {

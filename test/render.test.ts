@@ -64,8 +64,19 @@ describe("kanban rendering — fixture states", () => {
   })
   test("enabled Open link for resolvable owner (WI-003)", () =>
     expect(html).toContain(`href="${GUI}/?session=ses_0b54b8cf4ffe9RoaO0Ga9OuBBF"`))
-  test("disabled Open link for absent owner (WI-004 fake id)", () =>
-    expect(html).toContain('title="session not available here"'))
+  // Bug fix (I-187/SNG-045): a stamped owner_session is itself proof the
+  // session exists — the frozen, directory-scoped mirror is NOT the gate. So an
+  // owner ABSENT from persistedIds (freshly started, or cross-project) must
+  // STILL render a tappable <a href>, never a dead span.
+  test("enabled Open link for stamped owner absent from mirror (WI-004)", () => {
+    expect(html).toContain(`href="${GUI}/?session=ses_fixture_paused_owner00000"`)
+    // no owner-link disabled span leaks for a stamped owner
+    expect(html).not.toContain('class="open-link disabled"')
+  })
+  // The genuine no-owner case (owner_session: null, e.g. WI-001/002/007) still
+  // renders NO Open link at all.
+  test("no Open link for a work item without owner_session (WI-001)", () =>
+    expect(html).not.toContain(`href="${GUI}/?session=null"`))
   test("lineage line from transitions[] (WI-007)", () => {
     expect(html).toContain("previously attempted in")
     expect(html).toContain("ses_fixture_released_owner00")
@@ -79,12 +90,15 @@ describe("kanban rendering — degraded modes", () => {
     expect(html).toContain("Backlog")
     expect(html).toContain('class="empty">—</div>')
   })
-  test("mirror unavailable: cards render from cache, Open disabled as unknown", () => {
+  test("mirror unavailable: cards render from cache, owner links still trusted from the WI record", () => {
     const html = renderPage(
       makeState(undefined, { available: false, persistedIds: [], error: "db gone" }),
     )
     expect(html).toContain("Implementing HIVE-board") // item content still renders (§1a)
-    expect(html).toContain("session state unknown")
+    // Owner Open link comes from the WI's own stamped owner_session, so it stays
+    // tappable even when the session mirror is entirely unavailable (I-143/I-144).
+    expect(html).toContain(`href="${GUI}/?session=ses_0b54b8cf4ffe9RoaO0Ga9OuBBF"`)
+    // The diagnostics banner still reports the unavailable enumeration.
     expect(html).toContain("session mirror unavailable")
   })
 })
