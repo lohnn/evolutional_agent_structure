@@ -10,9 +10,10 @@ import * as fs from "node:fs"
 import * as path from "node:path"
 import { parseFrontmatter } from "../lib/frontmatter"
 
-/** Energy thresholds from the HIVE lifecycle: dissolve below, split above. */
-export const DISSOLVE_THRESHOLD = 10
-export const SPLIT_THRESHOLD = 90
+// Energy thresholds live in a browser-safe module (thresholds.ts) so the
+// render layer can import them without pulling this file's node:fs. Re-exported
+// here to keep the historical import site (`../data/capabilities`) working.
+export { DISSOLVE_THRESHOLD, SPLIT_THRESHOLD } from "./thresholds"
 
 export interface Capability {
   /** Short-form name, e.g. "proposal-web" — never "capabilities/proposal-web". */

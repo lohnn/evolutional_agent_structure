@@ -10,7 +10,7 @@
     "noEmit": true,
     "skipLibCheck": true,
     "types": ["bun"],
-    "lib": ["ESNext"]
+    "lib": ["ESNext", "DOM", "DOM.Iterable"]
   },
   "include": ["src", "test"]
 }
