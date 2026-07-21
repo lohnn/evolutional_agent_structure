@@ -80,6 +80,7 @@ function makeState(items: WorkItem[], m: SessionMirror): BoardState {
     writesEnabled: true,
     sessionBackend: "unconfigured",
     promoteDecisions: {},
+    todoSubStates: {},
     sessions: m,
   }
 }

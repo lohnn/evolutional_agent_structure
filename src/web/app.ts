@@ -39,11 +39,12 @@ export function createApp(
 
       switch (url.pathname) {
         case "/":
-          return new Response(renderPage(loadBoardState(config, sessionMirror, backend), listNotices()), {
-            headers: { "content-type": "text/html; charset=utf-8" },
-          })
+          return new Response(
+            renderPage(await loadBoardState(config, sessionMirror, backend), listNotices()),
+            { headers: { "content-type": "text/html; charset=utf-8" } },
+          )
         case "/api/state":
-          return Response.json(loadBoardState(config, sessionMirror, backend))
+          return Response.json(await loadBoardState(config, sessionMirror, backend))
         case "/client.js": {
           // Browser client that powers the diff-based live refresh (replaces
           // the old meta-refresh). Bundled once at first request, then cached.

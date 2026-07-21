@@ -58,6 +58,7 @@ function makeState(buildSha: string): BoardState {
     writesEnabled: true,
     sessionBackend: "unconfigured",
     promoteDecisions: {},
+    todoSubStates: {},
     sessions,
   }
 }

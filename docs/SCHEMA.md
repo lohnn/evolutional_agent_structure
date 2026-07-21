@@ -65,6 +65,7 @@ work was, its spec, its subtasks, and what it produced, with zero session access
 |---|---|---|
 | `title` | mirrored from session, **stored on item** | ✅ visible (from cache) |
 | `subtasks` | mirrored from session TodoWrite, **stored on item** | ✅ visible (last snapshot) |
+| `todo_mirror` | live-reconciled mirror of session TodoWrite, **stored on item** (§4b) | ✅ visible (last mirrored snapshot; live read absent ⇒ mirror is the fallback, unknown ≠ empty) |
 | spec/body, `dream_id`, artifact links, `transitions[]` | authored/derived, on item | ✅ visible |
 | "Open session" deep link | `?session=<id>` navigation | ❌ disabled gracefully |
 | "does owner still exist" | `session.get(id)` existence check | ⚠️ unknown (not "deleted") |
@@ -102,6 +103,14 @@ subtasks:                       # CACHED: mirrored from owning session's TodoWri
   - { content: "Read current settings widget", status: completed }
   - { content: "Add opt-out toggle", status: in_progress }
   - { content: "Wire to backend unsubscribe", status: pending }
+todo_mirror_updated: 2026-07-21T21:30:00.123Z   # FULL-PRECISION ISO-8601 stamp of the last
+                                #   todo_mirror refresh (NOT the date-only granularity of `updated`;
+                                #   I-191/W-081). null until first mirror write. Precedes the block.
+todo_mirror:                    # CACHE-MIRROR of the owning session's LIVE TodoWrite list (WI-038).
+                                #   Whole-replace, never append (I-190). Same {content,status} shape
+                                #   as subtasks; stored on item for portability (§1a). See §4b.
+  - { content: "Investigate push API", status: completed }
+  - { content: "Wire opt-out toggle", status: in_progress }
 transitions:                    # APPEND-ONLY audit log (I-049) — never rewrite prior entries
   - { at: 2026-07-06T09:00:00Z, from: todo, to: in_progress, by: hive_board_start, session: ses_10a2... }
 ---
@@ -128,6 +137,7 @@ session's dispatch prompt.
 | `released_sessions[]` | A (append-only) | each true-demote appends the detached sessionID; read by the auto-register hook to skip re-adopting it |
 | `history` (derived) | C | **not a stored field** — the "previously attempted in ses_..." lineage is read from `transitions[]`, which stamps `session` on every entry |
 | `subtasks` | A (cached/mirrored) | mirrored from the owning session's TodoWrite (`session.todo`/`todo.updated`) via hook and **stored on the item** (§1a) — **never hand-edited** |
+| `todo_mirror`, `todo_mirror_updated` | A (cached/mirrored, derived-rebuildable) | whole-replaced from the owning session's live TodoWrite by the board via the shared locked-storage edit (`ItemEdit.setTodoMirror`, identity-free — I-179); `todo_mirror_updated` is a **full-precision ISO-8601** stamp (I-191/W-081). Derived-rebuildable throwaway cache (I-105/I-113). **Never hand-edited** (§4b) |
 | `dream_id` | C (derived) | stamped by the **`hive_dream_begin` handler** — it resolves the calling session (`context.sessionID`), finds the item with matching `owner_session`, writes the new DRM id (DESIGN §5.4). File-scan detection is backfill/integrity fallback only |
 | `artifacts[]` | C (cached) | copied onto the item by the **`hive_dream_complete` handler** (same session→item lookup), so "what it produced" survives migration (§1a) |
 | `done_without_dream` | A | explicit escape-hatch tool call only |
@@ -192,6 +202,49 @@ that is a snapshot, because its source of truth is the live todo list, not the i
 
 > Do not hand-edit `subtasks`. Editing them here does not change the agent's actual todos and would
 > reintroduce exactly the divergence this design exists to prevent (W-030).
+
+---
+
+## 4b. `todo_mirror` — the live-reconciled TodoWrite cache (WI-038)
+
+**Owner:** hive-infra (the field, its serialization, and the `setTodoMirror` edit primitive all live
+in the plugin's `board-store.ts`; board-viewer consumes them). Published contract surface:
+
+| Surface | Shape |
+|---|---|
+| `WorkItem.todo_mirror` | `{ content: string; status: "pending"\|"in_progress"\|"completed"\|"cancelled" }[]` (empty `[]` when unmirrored) |
+| `WorkItem.todo_mirror_updated` | `string \| null` — **full-precision ISO-8601** (e.g. `2026-07-21T21:30:00.123Z`), `null` until first write |
+| `ItemEdit.setTodoMirror` | `{ todos: TodoMirrorEntry[]; at: string }` — **whole-replace** the block AND stamp `todo_mirror_updated: at` in one edit |
+
+**On-disk serialization** (block-sequence-of-flow-maps, same dialect as `subtasks`; the scalar stamp
+precedes the block; both sit **before** `transitions:`):
+
+```yaml
+todo_mirror_updated: 2026-07-21T21:30:00.123Z
+todo_mirror:
+  - { content: "Investigate push API", status: completed }
+  - { content: "Wire opt-out toggle", status: in_progress }
+```
+
+Empty form: `todo_mirror_updated: null` (or a stamp) + `todo_mirror: []`.
+
+**Semantics.** Whole-replace, never append (I-190) — it mirrors the session's COMPLETE current todo
+list, which is itself the source of truth. **Derived-rebuildable** (I-105 / I-113): reconstructable
+from the owning session alone, so a throwaway cache — but persisted on the item so the board renders
+the sub-state without the session present (§1a portability). The write is **identity-free** (I-179):
+the caller already holds `owner_session`, so it routes through the shared locked-storage edit
+(`mutateItem` → `setTodoMirror`), not a second writer and not the plugin-runtime identity path.
+
+**Relationship to `subtasks` (§4).** Both cache the same source (the owning session's TodoWrite), but
+they are **distinct fields on purpose**. `subtasks` was specced in §4 as the mirror but never had a
+writer wired up. `todo_mirror` is the field the board **actually** writes and reads via a live-read↔
+mirror reconcile loop, and it carries its own full-precision `todo_mirror_updated` stamp (the legacy
+`updated` field is date-only and must not be reused for ordering — I-191/W-081). Consumers should
+read `todo_mirror` for the live sub-state. A future consolidation may retire `subtasks` in favor of
+`todo_mirror`; until then, treat `todo_mirror` as authoritative for the live TodoWrite sub-state.
+
+> Do not hand-edit `todo_mirror`/`todo_mirror_updated` — same rationale as `subtasks` (W-030). The
+> board whole-replaces them from live reads; a hand edit is silently overwritten on the next refresh.
 
 ---
 

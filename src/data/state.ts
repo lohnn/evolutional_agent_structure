@@ -1,10 +1,13 @@
 /**
  * Board state assembly — one call gathers everything the Phase-1 viewer renders.
  *
- * Portability discipline (I-144 / SNG-038): every data source in this module
- * is LOCAL ON-DISK state under the configured workspace. No network calls, no
- * SDK calls — and future phases must keep rendered content sourced from disk
- * (external calls may only ever power navigation/existence checks).
+ * Portability discipline (I-144 / SNG-038): every DISPLAYED data source here is
+ * cached in local on-disk state under the configured workspace. The one network
+ * touch — the live todo-sub-state read (WI-038, data/todos.ts) — powers only the
+ * FRESHNESS of content that is ALSO persisted to the item's own todo_mirror; the
+ * mirror remains the portability-invariant fallback (unknown ≠ empty). No other
+ * source calls the network, and none render content sourced solely from a live
+ * call (external calls may otherwise only ever power navigation/existence).
  */
 import { boardDir } from "evolutional-agent-structure/lib/board-store"
 import { reattachInfo, type ReattachDecision } from "evolutional-agent-structure/lib/board-transitions"
@@ -14,6 +17,8 @@ import { loadCapabilities, type Capability } from "./capabilities"
 import { loadDreamVitals, type DreamVitals } from "./dreams"
 import { loadLiveMessages, type HivemindMessage } from "./messages"
 import type { SessionMirror } from "./sessions"
+import { loadTodoSubStates } from "./todos"
+import type { TodoSubState } from "./todo-types"
 import { loadWorkItems, type WorkItem } from "./workitems"
 
 export interface BoardState {
@@ -60,13 +65,23 @@ export interface BoardState {
    * file-backed sources above.
    */
   sessions: SessionMirror
+  /**
+   * Todo sub-state per in-progress item id (WI-038): the owning session's
+   * TodoWrite list, read LIVE per request when reachable and otherwise from the
+   * item's persisted todo_mirror (I-187 two-path reconciliation). Keyed by WI
+   * id; absent key ⇒ no owner/no todos. Render reads this off BoardState — it
+   * never calls the SDK itself (I-192 bundle boundary). This is the ONE data
+   * source in this module that may touch the network, and ONLY to power
+   * freshness of DISPLAYED content that is ALSO mirrored on disk (I-144).
+   */
+  todoSubStates: Record<string, TodoSubState>
 }
 
-export function loadBoardState(
+export async function loadBoardState(
   config: BoardConfig,
   sessions: SessionMirror,
   sessionBackend: "configured" | "unconfigured" = "unconfigured",
-): BoardState {
+): Promise<BoardState> {
   const items = loadWorkItems(config.boardDir)
   const writesEnabled = config.boardDir === boardDir(config.workspaceRoot)
   const promoteDecisions: Record<string, ReattachDecision> = {}
@@ -77,6 +92,10 @@ export function loadBoardState(
       }
     }
   }
+  // Live todo sub-state for in-progress cards (WI-038). Reconciles the live
+  // per-request read with the persisted todo_mirror and refreshes the mirror
+  // when the board owns the write path (writesEnabled).
+  const todoSubStates = await loadTodoSubStates(config, items, writesEnabled)
   return {
     generatedAt: new Date().toISOString(),
     workspaceRoot: config.workspaceRoot,
@@ -91,5 +110,6 @@ export function loadBoardState(
     sessionBackend,
     promoteDecisions,
     sessions,
+    todoSubStates,
   }
 }

@@ -54,6 +54,7 @@ function makeState(items: WorkItem[]): BoardState {
     writesEnabled: true,
     sessionBackend: "unconfigured",
     promoteDecisions: {},
+    todoSubStates: {},
     sessions,
   }
 }

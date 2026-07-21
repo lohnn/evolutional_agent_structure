@@ -9,7 +9,11 @@ import { renderPage } from "../src/web/render"
 const FIXTURES = path.join(import.meta.dir, "..", "fixtures", "board")
 const GUI = "http://studio:3000"
 
-function makeState(items = loadWorkItems(FIXTURES), mirror?: Partial<SessionMirror>): BoardState {
+function makeState(
+  items = loadWorkItems(FIXTURES),
+  mirror?: Partial<SessionMirror>,
+  todoSubStates: BoardState["todoSubStates"] = {},
+): BoardState {
   const sessions: SessionMirror = {
     available: true,
     computedAt: "2026-07-10T12:00:00Z",
@@ -38,9 +42,12 @@ function makeState(items = loadWorkItems(FIXTURES), mirror?: Partial<SessionMirr
     writesEnabled: true,
     sessionBackend: "unconfigured",
     promoteDecisions: {},
+    todoSubStates,
     sessions,
   }
 }
+
+export { makeState }
 
 describe("kanban rendering — fixture states", () => {
   const html = renderPage(makeState())
