@@ -4,10 +4,10 @@
  * CSS and a meta-refresh. Everything on it comes from BoardState (on-disk).
  */
 // Runtime imports here MUST stay browser-safe: render.ts is bundled for the
-// client (src/web/client.ts) to power the diff-based poll refresh. The two
-// runtime deps below resolve to browser-safe modules (thresholds.ts,
-// lineage.ts) — never the barrel files that pull node:fs / board-store.
-// Everything else is `import type`, erased by the bundler.
+// client (src/web/client.ts) to power the diff-based poll refresh. The runtime
+// deps below resolve to browser-safe modules (thresholds.ts, lineage.ts,
+// placeholder-title.ts) — never the barrel files that pull node:fs /
+// board-store. Everything else is `import type`, erased by the bundler.
 import type { BoardState } from "../data/state"
 import type { Capability } from "../data/capabilities"
 import { DISSOLVE_THRESHOLD, SPLIT_THRESHOLD } from "../data/thresholds"
@@ -17,6 +17,7 @@ import type { HivemindMessage } from "../data/messages"
 import type { SessionCard, SessionMirror } from "../data/sessions"
 import type { Subtask, WorkItem } from "../data/workitems"
 import { absorbedLineage, lineageSessions } from "../data/lineage"
+import { displayTitle } from "../data/placeholder-title"
 import type { Notice } from "./notices"
 
 function esc(s: string): string {
@@ -283,10 +284,16 @@ function itemCard(item: WorkItem, ctx: CardCtx): string {
     ? `<details class="spec"><summary>spec</summary><div class="spec-body">${esc(truncate(item.body, 600))}</div></details>`
     : ""
 
+  // BOUNDED stopgap (data/placeholder-title.ts): if the frozen frontmatter
+  // title is still opencode's auto-placeholder AND the owner session has a real
+  // live title in the mirror, show that instead. Narrow fallback only — the WI
+  // record stays authoritative for real titles (I-144). Absent mirror ⇒ no-op.
+  const title = displayTitle(item.title, item.owner_session, mirror.sessionTitles)
+
   return `<div class="card wi ${item.paused ? "paused" : ""}" data-key="wi:${esc(item.id)}">
     <div class="cap-head">
       <span class="mono dim">${esc(item.id)}</span>
-      <span class="cap-name">${esc(truncate(item.title, 90))}</span>
+      <span class="cap-name">${esc(truncate(title, 90))}</span>
       ${openSessionHtml(item.owner_session, guiBaseUrl, mirror)}
     </div>
     <div class="chips">${chips.join(" ")}</div>
