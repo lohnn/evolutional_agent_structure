@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import * as path from "node:path"
 import { buildBoard } from "../src/data/board"
 import type { SessionMirror } from "../src/data/sessions"
-import { loadWorkItems } from "../src/data/workitems"
+import { loadWorkItems, parseWorkItem, type WorkItem } from "../src/data/workitems"
 
 const FIXTURES = path.join(import.meta.dir, "..", "fixtures", "board")
 
@@ -65,5 +65,67 @@ describe("buildBoard — session-mirror merge (keyed on owner_session)", () => {
     expect(board.sessionOnly).toHaveLength(2)
     expect(board.backlog).toEqual([])
     expect(board.inProgress).toEqual([])
+  })
+})
+
+describe("buildBoard — In Progress / Done sort newest-first by transitions[].at", () => {
+  // Build an in_progress item whose latest transition and `updated` can diverge.
+  function ip(id: string, updated: string, transitionAts: string[]): WorkItem {
+    const lines = transitionAts.map(
+      (at) => `  - { at: ${at}, from: todo, to: in_progress, by: t, session: s_${id} }`,
+    )
+    return parseWorkItem(
+      [
+        "---",
+        `id: ${id}`,
+        `title: "${id}"`,
+        "status: in_progress",
+        `owner_session: s_${id}`,
+        `group_id: s_${id}`,
+        "origin: session-first",
+        "paused: false",
+        "spec_hash: null",
+        "released_sessions: []",
+        "dream_id: null",
+        "artifacts: []",
+        "created: 2026-07-21",
+        `updated: ${updated}`,
+        "priority: medium",
+        "tags: []",
+        "done_without_dream: false",
+        "subtasks: []",
+        "transitions:",
+        ...lines,
+        "---",
+        "",
+      ].join("\n"),
+    )
+  }
+
+  test("same calendar day: newest transition wins over ascending id order (the bug)", () => {
+    // All three share updated=2026-07-21 (date-only collision). By id-insertion
+    // order the middle one would sink to the middle; by transition time WI-030
+    // (14:00) must top, WI-010 (13:00) middle, WI-020 (09:00) last.
+    const a = ip("WI-010", "2026-07-21", ["2026-07-21T13:00:00Z"])
+    const b = ip("WI-020", "2026-07-21", ["2026-07-21T09:00:00Z"])
+    const c = ip("WI-030", "2026-07-21", ["2026-07-21T14:00:00Z"])
+    const board = buildBoard([a, b, c], mirror([]))
+    expect(board.inProgress.map((i) => i.id)).toEqual(["WI-030", "WI-010", "WI-020"])
+  })
+
+  test("log is not assumed pre-sorted — max at is taken", () => {
+    const a = ip("WI-010", "2026-07-21", ["2026-07-21T20:00:00Z", "2026-07-21T08:00:00Z"])
+    const b = ip("WI-020", "2026-07-21", ["2026-07-21T09:00:00Z"])
+    const board = buildBoard([a, b], mirror([]))
+    expect(board.inProgress.map((i) => i.id)).toEqual(["WI-010", "WI-020"])
+  })
+
+  test("empty transitions[] falls back to date-only updated, then id — no crash/vanish", () => {
+    const a = ip("WI-010", "2026-07-21", []) // no transitions
+    const b = ip("WI-020", "2026-07-22", []) // newer updated
+    const c = ip("WI-030", "2026-07-21", []) // same-day as a → id tiebreak (newest id first)
+    const board = buildBoard([a, b, c], mirror([]))
+    expect(board.inProgress.map((i) => i.id)).toEqual(["WI-020", "WI-030", "WI-010"])
+    expect(board.inProgress).toHaveLength(3)
   })
 })
