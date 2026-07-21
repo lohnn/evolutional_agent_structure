@@ -23,6 +23,7 @@ function makeState(items = loadWorkItems(FIXTURES), mirror?: Partial<SessionMirr
   return {
     generatedAt: "2026-07-10T12:00:00Z",
     workspaceRoot: "/workspace",
+    buildSha: "f4ff50b",
     guiBaseUrl: GUI,
     capabilities: [],
     dreams: {

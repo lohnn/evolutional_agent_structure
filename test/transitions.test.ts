@@ -42,6 +42,7 @@ beforeAll(() => {
     boardDir: path.join(ws, ".opencode", "board"),
     opencodeUrl: null,
     opencodePassword: null,
+    buildSha: "testsha",
   }
   app = createApp(config, mirror)
 })

@@ -47,7 +47,7 @@ export function createApp(
         case "/client.js": {
           // Browser client that powers the diff-based live refresh (replaces
           // the old meta-refresh). Bundled once at first request, then cached.
-          const bundle = await buildClientBundle()
+          const bundle = await buildClientBundle(config.buildSha)
           return new Response(bundle.js, {
             status: bundle.ok ? 200 : 500,
             headers: {

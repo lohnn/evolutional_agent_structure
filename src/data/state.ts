@@ -19,6 +19,15 @@ import { loadWorkItems, type WorkItem } from "./workitems"
 export interface BoardState {
   generatedAt: string
   workspaceRoot: string
+  /**
+   * Short git SHA of the running server build (`f4ff50b`, `f4ff50b-dirty`, or
+   * the sentinel `"unknown"`). Carried in every /api/state payload so each poll
+   * lets the client compare the server's SHA against the one baked into its own
+   * /client.js bundle — an explicit per-poll staleness check (W-061: staleness
+   * does NOT self-heal, prove it). Also surfaces which bytes are actually live
+   * despite the copied `file:` dep masking upstream edits (W-079).
+   */
+  buildSha: string
   /** GUI base for ?session= deep links (config knob, needed at render time). */
   guiBaseUrl: string
   capabilities: Capability[]
@@ -71,6 +80,7 @@ export function loadBoardState(
   return {
     generatedAt: new Date().toISOString(),
     workspaceRoot: config.workspaceRoot,
+    buildSha: config.buildSha,
     guiBaseUrl: config.guiBaseUrl,
     capabilities: loadCapabilities(config.opencodeDir),
     dreams: loadDreamVitals(config.workspaceRoot),

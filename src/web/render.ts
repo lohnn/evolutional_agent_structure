@@ -37,6 +37,21 @@ function fmtTime(iso: string | null): string {
   return Number.isNaN(d.getTime()) ? iso : d.toISOString().replace("T", " ").slice(0, 16) + "Z"
 }
 
+/**
+ * The build-version badge that sits in the top meta line. Renders the SERVER's
+ * build SHA (`state.buildSha`). The stale verdict is NOT computed here — the
+ * server can't know which bytes the browser's /client.js was built from. The
+ * client (client.ts) reads `data-server-sha` after each poll, compares it to
+ * its own baked-in SHA, and toggles the stale styling deterministically
+ * (W-061). Stable `id="build-badge"` + `data-server-sha` are the client's
+ * handle; keep them stable across renders so the morph reuses this node.
+ */
+function buildBadge(serverSha: string): string {
+  const label = serverSha === "unknown" ? "build unknown" : `build ${esc(serverSha)}`
+  const title = serverSha === "unknown" ? "git unavailable — running build could not be identified" : "server build SHA (board repo HEAD)"
+  return `<span id="build-badge" class="build-badge" data-server-sha="${esc(serverSha)}" title="${esc(title)}">${label}</span>`
+}
+
 // ── Capabilities ─────────────────────────────────────────────────────────────
 
 function energyClass(energy: number | null): string {
@@ -358,6 +373,8 @@ h2 .count { color:#8b949e; font-weight:400; font-size:.85rem; }
 .meta { color:#8b949e; font-size:.8rem; margin-top:.3rem; }
 .mono { font-family:ui-monospace, monospace; font-size:.85em; }
 .dim { color:#8b949e; }
+.build-badge { padding:.02rem .4rem; border-radius:10px; border:1px solid #30363d; background:#161b22; }
+.build-badge.stale { color:#f85149; border-color:#f85149; background:#f8514922; font-weight:600; }
 .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(340px,1fr)); gap:.8rem; }
 .cap { background:#161b22; border:1px solid #21262d; border-radius:8px; padding:.7rem .9rem; }
 .cap-head { display:flex; align-items:baseline; gap:.6rem; }
@@ -490,7 +507,7 @@ export function renderBoardBody(state: BoardState, notices: Notice[] = []): stri
   const messageRows = messages.map(messageRow).join("\n")
 
   return `<h1>hive-board <span class="phase">Phase 1 · read-only HIVE state viewer</span></h1>
-<div class="meta mono">workspace ${esc(state.workspaceRoot)} · generated ${esc(state.generatedAt)} · live refresh 15s</div>
+<div class="meta mono">workspace ${esc(state.workspaceRoot)} · generated ${esc(state.generatedAt)} · live refresh 15s · ${buildBadge(state.buildSha)}</div>
 
 <h2>Board <span class="count">(${state.items.length} items · ${state.board.sessionOnly.length} session-only)</span></h2>
 ${noticesHtml}
