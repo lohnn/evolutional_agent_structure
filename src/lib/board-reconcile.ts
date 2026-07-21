@@ -29,6 +29,8 @@ import {
   listItems,
   today,
   nowIso,
+  isPlaceholderTitle,
+  refreshOwnerTitle,
   type WorkItem,
   type Transition,
 } from "./board-store.js"
@@ -415,4 +417,62 @@ export async function executeReconcile(
   })
 
   return { created, skipped: [...plan.skipped, ...extraSkips], dryRun: false }
+}
+
+// ── Title back-fill (retro-fix already-frozen placeholder titles) ────────────
+
+export interface TitleFix {
+  itemID: string
+  sessionID: string
+  from: string
+  to: string
+}
+
+export interface TitleBackfillResult {
+  fixes: TitleFix[]
+  dryRun: boolean
+}
+
+/**
+ * PURE: which owned items still carry a placeholder title AND have a real title
+ * available from `sessionTitle(sessionID)`. Going forward the session.updated
+ * hook keeps titles fresh; this repairs items frozen BEFORE the hook existed
+ * (e.g. WI-035). No writes — see backfillTitles for execution.
+ */
+export function planTitleBackfill(
+  items: WorkItem[],
+  sessionTitle: (sessionID: string) => string | null
+): TitleFix[] {
+  const fixes: TitleFix[] = []
+  for (const item of items) {
+    if (!item.owner_session) continue
+    if (!isPlaceholderTitle(item.title)) continue
+    const real = sessionTitle(item.owner_session)
+    if (real === null || isPlaceholderTitle(real) || real === item.title) continue
+    fixes.push({ itemID: item.id, sessionID: item.owner_session, from: item.title, to: real })
+  }
+  return fixes
+}
+
+/**
+ * Execute a title back-fill through the SAME locked title-write path the
+ * session.updated hook uses (refreshOwnerTitle) — one owner of the title
+ * contract (I-179/I-180). dryRun=true plans only.
+ */
+export async function backfillTitles(
+  directory: string,
+  items: WorkItem[],
+  sessionTitle: (sessionID: string) => string | null,
+  dryRun: boolean
+): Promise<TitleBackfillResult> {
+  const fixes = planTitleBackfill(items, sessionTitle)
+  if (dryRun) return { fixes, dryRun: true }
+  const applied: TitleFix[] = []
+  for (const fix of fixes) {
+    // refreshOwnerTitle re-checks the placeholder guard under the lock, so a
+    // concurrent settle by the hook can't be clobbered.
+    const patched = await refreshOwnerTitle(directory, fix.sessionID, fix.to)
+    if (patched) applied.push(fix)
+  }
+  return { fixes: applied, dryRun: false }
 }

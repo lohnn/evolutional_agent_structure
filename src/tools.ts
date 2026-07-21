@@ -132,6 +132,12 @@ export function createHiveTools(
             // session.get unavailable — proceed with fallback title (awaken is a
             // user command, virtually always in a top-level chat)
           }
+          // NOTE: at awaken time opencode's title is usually still the
+          // "New session - <ISO>" placeholder (the model hasn't written a real
+          // one yet). We store whatever we have; the session.updated event hook
+          // (hooks.ts) patches it to the real title once opencode settles it —
+          // do NOT try to "fix" the stale title here, the real one doesn't exist
+          // yet at this moment.
           if (!parentID && !ns.isCapabilitySession(context.sessionID)) {
             const groupID = ns.getGroupID(context.sessionID) ?? context.sessionID
             const result = await autoRegister(

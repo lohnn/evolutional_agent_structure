@@ -410,6 +410,57 @@ export function findItemByOwner(directory: string, sessionID: string): WorkItem 
   return null
 }
 
+// ── Title authority (the WI title-write contract — this module OWNS it) ──────
+
+/**
+ * opencode's auto-generated placeholder title, present on a freshly-created
+ * session BEFORE the model writes a descriptive title. Format:
+ *   `New session - <ISO-8601>`
+ * e.g. "New session - 2026-07-20T22:18:00.584Z" (space-hyphen-space separator).
+ * The ISO stamp: `T` separator; timezone is `Z` OR a `±HH:MM`/`±HHMM` offset;
+ * millis optional. An empty/blank title is also treated as unsettled.
+ *
+ * This regex is the PUBLISHED, SHARED contract: board-viewer's stopgap fallback
+ * gates on the SAME pattern for already-frozen historical items (I-180 — one
+ * title-authority contract, not two). It is the superset board-viewer verified
+ * empirically against the live opencode.db (327 sessions), so the two sides
+ * cannot fork on what counts as a placeholder.
+ */
+export const PLACEHOLDER_TITLE_RE =
+  /^\s*New session - \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})\s*$/
+
+/** True if `title` is opencode's auto-placeholder (or empty) — i.e. NOT settled. */
+export function isPlaceholderTitle(title: string | null | undefined): boolean {
+  if (title === null || title === undefined) return true
+  if (title.trim() === "") return true
+  return PLACEHOLDER_TITLE_RE.test(title)
+}
+
+/**
+ * Refresh the owning item's title from the real session title — ONLY when the
+ * stored title is still a placeholder and the incoming one is real. This is the
+ * single locked write path for post-creation title tracking (I-179/I-180); it
+ * never overwrites a title the model/user already settled, and it is a no-op
+ * when there is no owning item or nothing to fix. Returns the item id if
+ * patched, else null.
+ */
+export async function refreshOwnerTitle(
+  directory: string,
+  sessionID: string,
+  incomingTitle: string
+): Promise<string | null> {
+  if (isPlaceholderTitle(incomingTitle)) return null // incoming isn't real yet
+  return withBoardLock(directory, () => {
+    // Re-read inside the lock (SCHEMA §4a.3) — no stale in-memory copy.
+    const item = listItems(directory).find((i) => i.owner_session === sessionID)
+    if (!item) return null
+    if (!isPlaceholderTitle(item.title)) return null // already settled — don't clobber
+    if (item.title === incomingTitle) return null
+    editItemUnlocked(directory, item.id, { set: { title: incomingTitle } })
+    return item.id
+  })
+}
+
 /** The item (if any) whose released_sessions[] tombstones this session. */
 export function findItemReleasing(directory: string, sessionID: string): WorkItem | null {
   for (const item of listItems(directory)) {

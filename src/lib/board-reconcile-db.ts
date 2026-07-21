@@ -19,10 +19,12 @@ import {
   planReconcile,
   makeDrmCompleteCheck,
   makeDrmArtifacts,
+  backfillTitles,
   type PartRow,
   type SessionInfo,
   type SessionDream,
   type ReconcilePlan,
+  type TitleBackfillResult,
 } from "./board-reconcile.js"
 import { listItems } from "./board-store.js"
 
@@ -107,6 +109,35 @@ export function readNervousState(directory: string): { awake: Set<string>; group
     // no state file → nothing awake → empty plan (safe)
   }
   return { awake, groupOf }
+}
+
+/**
+ * A session-title lookup backed by the SQLite session table (per-id, read-only).
+ * Reads all titles once into a map for O(1) lookups during a back-fill pass.
+ */
+export function sessionTitleLookup(dbPath: string): (sessionID: string) => string | null {
+  const db = new Database(dbPath, { readonly: true })
+  const titles = new Map<string, string>()
+  try {
+    const rows = db.query("SELECT id, title FROM session").all() as { id: string; title: string | null }[]
+    for (const r of rows) if (r.title) titles.set(r.id, r.title)
+  } finally {
+    db.close()
+  }
+  return (sessionID: string) => titles.get(sessionID) ?? null
+}
+
+/**
+ * Retro-correct already-frozen placeholder titles from the SQLite session table,
+ * through the locked title-write path. dryRun=true previews. This repairs items
+ * created before the session.updated title-tracking hook existed.
+ */
+export function backfillTitlesFromDb(
+  directory: string,
+  dbPath: string,
+  dryRun: boolean
+): Promise<TitleBackfillResult> {
+  return backfillTitles(directory, listItems(directory), sessionTitleLookup(dbPath), dryRun)
 }
 
 /** Build the full reconcile plan from live DB + files (no writes). */

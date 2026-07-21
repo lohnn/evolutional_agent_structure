@@ -11,6 +11,7 @@ import type { createOpencodeClient } from "@opencode-ai/sdk"
 import { snapshotAgentsMtime, snapshotChanged } from "./lib/reload.js"
 import { tickEnergy, getCapabilitiesSummary } from "./lib/energy.js"
 import { listPendingInboxes } from "./lib/hivemind.js"
+import { refreshOwnerTitle } from "./lib/board-store.js"
 import type { NervousSystem } from "./lib/nervous-system.js"
 
 type Client = ReturnType<typeof createOpencodeClient>
@@ -96,6 +97,33 @@ export function createEventHook(ctx: HooksContext) {
     if (event.type === "file.watcher.updated") {
       const props = event.properties as unknown as { path: string }
       await ns.handleFileChange(props.path)
+    }
+
+    // Board title tracking: when opencode writes a session's real title (it
+    // starts as the "New session - <ISO>" placeholder at creation and is
+    // replaced once the model settles a descriptive one), patch the owning WI's
+    // frontmatter title IF it's still the placeholder. This is what makes the
+    // WI record self-describing (portability invariant, I-144/SNG-046) without a
+    // live session read at render time. The refresh is an EXPLICIT locked patch
+    // through the shared storage module (I-179/I-180) — it does not assume the
+    // placeholder self-heals (W-061/W-079). Best-effort; never throws upward.
+    if (event.type === "session.updated") {
+      const props = event.properties as { info?: { id?: string; title?: string; parentID?: string } }
+      const info = props.info
+      if (info?.id && !info.parentID && typeof info.title === "string") {
+        try {
+          const patchedId = await refreshOwnerTitle(directory, info.id, info.title)
+          if (patchedId) {
+            debugLog("[board] refreshed WI title from settled session title", {
+              itemID: patchedId,
+              sessionID: info.id,
+              title: info.title,
+            })
+          }
+        } catch (err) {
+          log("warn", "[board] title refresh failed", { sessionID: info.id, error: String(err) })
+        }
+      }
     }
   }
 }
