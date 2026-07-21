@@ -63,6 +63,16 @@ export interface SessionMirror {
    * session is present here; absent = unknown, never "deleted").
    */
   persistedIds: string[]
+  /**
+   * id → live session title for ALL persisted sessions (raw, unmassaged — may
+   * itself be empty or an opencode placeholder). Feeds ONLY the bounded
+   * placeholder-title fallback (data/placeholder-title.ts): when a WI card's
+   * frozen frontmatter title is still opencode's auto-placeholder, the card
+   * renders the owner session's real title from here. NOT a general title
+   * source — the WI record stays authoritative for non-placeholder titles
+   * (I-144). Undefined when the mirror is unavailable.
+   */
+  sessionTitles?: Record<string, string>
   error?: string
 }
 
@@ -123,6 +133,12 @@ export function computeSessionMirror(config: BoardConfig): SessionMirror {
   }
 
   const byId = new Map(rows.map((r) => [r.id, r]))
+  // id → raw live title for EVERY persisted session (not just awakened cards).
+  // The placeholder-title fallback keys on owner_session, which may point at a
+  // non-awakened session, so the map must cover all rows. Titles are stored
+  // raw (empty/placeholder included); the fallback decides usability (W-063).
+  const sessionTitles: Record<string, string> = {}
+  for (const r of rows) if (typeof r.title === "string") sessionTitles[r.id] = r.title
   const cards: SessionCard[] = []
   let awakeDeleted = 0
   for (const id of awake) {
@@ -150,5 +166,6 @@ export function computeSessionMirror(config: BoardConfig): SessionMirror {
     awakeDeleted,
     cards,
     persistedIds: rows.map((r) => r.id),
+    sessionTitles,
   }
 }
