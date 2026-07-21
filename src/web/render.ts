@@ -3,14 +3,21 @@
  * No client framework, no build step — one self-contained page with inline
  * CSS and a meta-refresh. Everything on it comes from BoardState (on-disk).
  */
+// Runtime imports here MUST stay browser-safe: render.ts is bundled for the
+// client (src/web/client.ts) to power the diff-based poll refresh. The two
+// runtime deps below resolve to browser-safe modules (thresholds.ts,
+// lineage.ts) — never the barrel files that pull node:fs / board-store.
+// Everything else is `import type`, erased by the bundler.
 import type { BoardState } from "../data/state"
 import type { Capability } from "../data/capabilities"
-import { DISSOLVE_THRESHOLD, SPLIT_THRESHOLD } from "../data/capabilities"
+import { DISSOLVE_THRESHOLD, SPLIT_THRESHOLD } from "../data/thresholds"
 import type { DreamSummary, RecentArtifact } from "../data/dreams"
 import type { BoardColumns } from "../data/board"
 import type { HivemindMessage } from "../data/messages"
 import type { SessionCard, SessionMirror } from "../data/sessions"
-import { absorbedLineage, lineageSessions, type Subtask, type WorkItem } from "../data/workitems"
+import type { Subtask, WorkItem } from "../data/workitems"
+import { absorbedLineage, lineageSessions } from "../data/lineage"
+import type { Notice } from "./notices"
 
 function esc(s: string): string {
   return s
@@ -224,7 +231,10 @@ function actionForms(item: WorkItem, ctx: CardCtx): string {
 }
 
 function createForm(status: "backlog" | "todo"): string {
-  return `<details class="create"><summary>+ new item</summary>
+  // data-key anchors this <details> across polls so the morph reuses the SAME
+  // element — its open/closed state and any typed-in values survive a refresh
+  // (bug #2 / W-034: transient state owned by a stable, non-recreated node).
+  return `<details class="create" data-key="create:${status}"><summary>+ new item</summary>
   <form method="post" action="/transitions/create" class="create-form">
     <input type="hidden" name="status" value="${status}">
     <input name="title" placeholder="title" required>
@@ -258,7 +268,7 @@ function itemCard(item: WorkItem, ctx: CardCtx): string {
     ? `<details class="spec"><summary>spec</summary><div class="spec-body">${esc(truncate(item.body, 600))}</div></details>`
     : ""
 
-  return `<div class="card wi ${item.paused ? "paused" : ""}">
+  return `<div class="card wi ${item.paused ? "paused" : ""}" data-key="wi:${esc(item.id)}">
     <div class="cap-head">
       <span class="mono dim">${esc(item.id)}</span>
       <span class="cap-name">${esc(truncate(item.title, 90))}</span>
@@ -274,7 +284,7 @@ function itemCard(item: WorkItem, ctx: CardCtx): string {
 }
 
 function sessionOnlyCard(s: SessionCard): string {
-  return `<div class="card session-only">
+  return `<div class="card session-only" data-key="ses:${esc(s.id)}">
     <div class="cap-head">
       <span class="cap-name">${esc(truncate(s.title, 80))}</span>
       <a class="open-link" href="${esc(s.openUrl)}" target="_blank" rel="noopener">Open ↗</a>
@@ -285,7 +295,7 @@ function sessionOnlyCard(s: SessionCard): string {
 }
 
 function column(title: string, cardsHtml: string[], extra = ""): string {
-  return `<div class="col">
+  return `<div class="col" data-key="col:${esc(title)}">
     <div class="col-head">${esc(title)} <span class="count">(${cardsHtml.length})</span></div>
     ${extra}
     ${cardsHtml.length === 0 ? '<div class="empty">—</div>' : cardsHtml.join("\n")}
@@ -438,7 +448,15 @@ body > form button, .retry button { background:#238636; color:#fff; border:none;
 details > summary { cursor:pointer; color:#8b949e; font-size:.85rem; margin:.5rem 0; }
 `
 
-export function renderPage(state: BoardState, notices: { at: string; text: string }[] = []): string {
+/**
+ * The mutable board content — everything below the page shell that changes on
+ * a poll. Rendered identically by the server (initial paint) and the client
+ * (each poll → morphed into #board-root, never a full-document rebuild). It is
+ * a PURE function of BoardState (+ transient notices), so the client can call
+ * it with a freshly-fetched /api/state and diff the result. `data-key` markers
+ * anchor the morph's keyed reconciliation to stable regions and cards.
+ */
+export function renderBoardBody(state: BoardState, notices: Notice[] = []): string {
   const caps = state.capabilities
   const { dreams, messages } = state
   const cardCtx: CardCtx = {
@@ -471,18 +489,8 @@ export function renderPage(state: BoardState, notices: { at: string; text: strin
   const recentRows = dreams.recentArtifacts.map(recentArtifactRow).join("\n")
   const messageRows = messages.map(messageRow).join("\n")
 
-  return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="refresh" content="15">
-<title>hive-board — mission control</title>
-<style>${CSS}</style>
-</head>
-<body>
-<h1>hive-board <span class="phase">Phase 1 · read-only HIVE state viewer</span></h1>
-<div class="meta mono">workspace ${esc(state.workspaceRoot)} · generated ${esc(state.generatedAt)} · auto-refresh 15s</div>
+  return `<h1>hive-board <span class="phase">Phase 1 · read-only HIVE state viewer</span></h1>
+<div class="meta mono">workspace ${esc(state.workspaceRoot)} · generated ${esc(state.generatedAt)} · live refresh 15s</div>
 
 <h2>Board <span class="count">(${state.items.length} items · ${state.board.sessionOnly.length} session-only)</span></h2>
 ${noticesHtml}
@@ -528,7 +536,37 @@ ${
 <thead><tr><th>time</th><th>route</th><th>type</th><th>status</th><th>content</th></tr></thead>
 <tbody>${messageRows}</tbody>
 </table>`
+}`
 }
+
+/**
+ * Full document shell. The board content lives in <main id="board-root">, and
+ * a client module (client.js) polls /api/state and morphs that subtree in
+ * place — NO meta-refresh, so no full-document rebuild (the old flicker + form
+ * collapse root cause). The initial BoardState is inlined as a JSON island so
+ * the client's first diff has a baseline without an extra fetch.
+ */
+export function renderPage(state: BoardState, notices: Notice[] = []): string {
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>hive-board — mission control</title>
+<style>${CSS}</style>
+</head>
+<body>
+<main id="board-root">${renderBoardBody(state, notices)}</main>
+<script id="board-state" type="application/json">${jsonIsland(state)}</script>
+<script type="module" src="/client.js"></script>
 </body>
 </html>`
+}
+
+/**
+ * Serialize BoardState for the inline JSON island. `</script` is escaped so a
+ * string value in the state can never break out of the script element.
+ */
+function jsonIsland(state: BoardState): string {
+  return JSON.stringify(state).replaceAll("</", "<\\/")
 }

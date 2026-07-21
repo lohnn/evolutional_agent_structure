@@ -12,6 +12,7 @@ import type { BoardSessionClient } from "evolutional-agent-structure/lib/board-t
 import type { BoardConfig } from "../config"
 import type { SessionMirror } from "../data/sessions"
 import { loadBoardState } from "../data/state"
+import { buildClientBundle } from "./client-bundle"
 import { listNotices } from "./notices"
 import { renderPage } from "./render"
 import { handleTransitionRoute } from "./transitions"
@@ -43,6 +44,18 @@ export function createApp(
           })
         case "/api/state":
           return Response.json(loadBoardState(config, sessionMirror, backend))
+        case "/client.js": {
+          // Browser client that powers the diff-based live refresh (replaces
+          // the old meta-refresh). Bundled once at first request, then cached.
+          const bundle = await buildClientBundle()
+          return new Response(bundle.js, {
+            status: bundle.ok ? 200 : 500,
+            headers: {
+              "content-type": "text/javascript; charset=utf-8",
+              "cache-control": "no-cache",
+            },
+          })
+        }
         case "/healthz":
           return new Response("ok")
         default:
