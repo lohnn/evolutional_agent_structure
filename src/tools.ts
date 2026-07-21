@@ -50,7 +50,7 @@ import {
 } from "./lib/dream-state.js"
 import { rankArtifacts } from "./lib/dream-rank.js"
 import { recordSurfacedEvent } from "./lib/dream-telemetry.js"
-import { bindSession, autoRegister, startItem, sdkSessionClient, type SdkLikeClient } from "./lib/board-transitions.js"
+import { bindSession, autoRegister, startItem, markItemDoneFromDream, sdkSessionClient, type SdkLikeClient } from "./lib/board-transitions.js"
 import path from "path"
 import fs from "fs"
 
@@ -797,6 +797,28 @@ export function createHiveTools(
         if (missingArtifacts.length > 0) {
           lines.push(`  ⚠ Missing artifact files (linked in DRM but not found on disk): ${missingArtifacts.join(", ")}`)
         }
+
+        // Board: if THIS session owns an in-progress work item, promote it to
+        // Done now that its dream is COMPLETE (event-driven — there is no timer
+        // tick, W-064; the completing process must apply the transition). Only
+        // context.sessionID is trustworthy identity (I-179, never agent
+        // self-report). The write is the shared, locked markItemDoneFromDream —
+        // this handler only DETECTS + resolves identity. Best-effort: a board
+        // failure must never fail the dream completion (mirrors the title hook).
+        try {
+          const promo = await markItemDoneFromDream(directory, context.sessionID, dreamId)
+          if (promo.ok && (promo.action === "done" || promo.action === "redefined") && promo.item) {
+            lines.push(
+              `  Board: ${promo.item.id} → done (${promo.action === "redefined" ? "re-stamped from " : ""}${dreamId}, ${promo.item.artifacts.length} artifact(s) mirrored).`
+            )
+            log("info", `[dream_complete] board ${promo.action}`, { itemID: promo.item.id, dreamId, caller })
+          } else if (!promo.ok) {
+            log("warn", "[dream_complete] board promote refused", { reason: promo.reason, detail: promo.detail, dreamId, caller })
+          }
+        } catch (err: unknown) {
+          log("error", "[dream_complete] board promote failed", { err: err instanceof Error ? err.message : String(err), dreamId, caller })
+        }
+
         return lines.join("\n")
       },
     }),

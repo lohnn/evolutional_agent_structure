@@ -11,6 +11,8 @@ import {
   unpauseItem,
   demoteItem,
   markDoneWithoutDream,
+  markItemDoneFromDream,
+  dreamCompleteBy,
   startItem,
   promoteItem,
   reattachInfo,
@@ -578,5 +580,211 @@ describe("composition: the demote→rebind lifecycle", () => {
     // file state sane
     expect(readItem(dir, a.id)!.released_sessions).toEqual(["ses_x"])
     expect(readItem(dir, b.id)!.owner_session).toBe("ses_x")
+  })
+})
+
+describe("markItemDoneFromDream (event-driven Done on dream complete)", () => {
+  // Injected cross-check fakes keep these hermetic (no DRM files needed).
+  const complete = (drm: string) => ({ drmIsComplete: (d: string) => d === drm })
+  const withArts = (drm: string, arts: string[]) => ({
+    drmIsComplete: (d: string) => d === drm,
+    drmArtifacts: () => arts,
+  })
+
+  test("happy path: in_progress owned → done, dream_id + artifacts stamped, audited transition", async () => {
+    const { item } = await createIdea(dir, { title: "Coordinator work", body: "spec" })
+    await bindSession(dir, item.id, "ses_c", "ses_c")
+
+    const r = await markItemDoneFromDream(dir, "ses_c", "DRM-046", withArts("DRM-046", ["I-179", "W-064", "SHADOW-004"]))
+    expect(r.ok && r.action === "done").toBe(true)
+    if (!r.ok) return
+    expect(r.item.status).toBe("done")
+    expect(r.item.dream_id).toBe("DRM-046")
+    expect(r.item.artifacts).toEqual(["I-179", "W-064", "SHADOW-004"])
+    expect(r.item.owner_session).toBe("ses_c") // owner stays (frozen), enables re-attach
+    expect(r.item.done_without_dream).toBe(false)
+
+    const last = r.item.transitions[r.item.transitions.length - 1]!
+    expect(last.from).toBe("in_progress")
+    expect(last.to).toBe("done")
+    expect(last.by).toBe(dreamCompleteBy("DRM-046"))
+    expect(last.session).toBe("ses_c")
+
+    // persisted to disk (not just the returned copy)
+    expect(readItem(dir, item.id)!.dream_id).toBe("DRM-046")
+  })
+
+  test("clears a paused sub-state on the way to done", async () => {
+    const { item } = await createIdea(dir, { title: "Parked", body: "spec" })
+    await bindSession(dir, item.id, "ses_p", "ses_p")
+    await pauseItem(dir, item.id)
+    expect(readItem(dir, item.id)!.paused).toBe(true)
+
+    const r = await markItemDoneFromDream(dir, "ses_p", "DRM-050", complete("DRM-050"))
+    expect(r.ok && r.action === "done").toBe(true)
+    if (!r.ok) return
+    expect(r.item.paused).toBe(false)
+  })
+
+  test("no owning item → clean no-op (the common case: session owns nothing)", async () => {
+    // A board exists but this session owns nothing.
+    await createIdea(dir, { title: "Unrelated" })
+    const r = await markItemDoneFromDream(dir, "ses_nobody", "DRM-001", complete("DRM-001"))
+    expect(r.ok && r.action === "noop-no-owner").toBe(true)
+  })
+
+  test("no board at all → clean no-op, does not throw", async () => {
+    const r = await markItemDoneFromDream(dir, "ses_x", "DRM-001", complete("DRM-001"))
+    expect(r.ok && r.action === "noop-no-owner").toBe(true)
+  })
+
+  test("idempotent: re-firing the SAME DRM no-ops (no double transition)", async () => {
+    const { item } = await createIdea(dir, { title: "Once", body: "spec" })
+    await bindSession(dir, item.id, "ses_1", "ses_1")
+
+    const first = await markItemDoneFromDream(dir, "ses_1", "DRM-060", complete("DRM-060"))
+    expect(first.ok && first.action === "done").toBe(true)
+    const countAfterFirst = readItem(dir, item.id)!.transitions.length
+
+    const again = await markItemDoneFromDream(dir, "ses_1", "DRM-060", complete("DRM-060"))
+    expect(again.ok && again.action === "already-done").toBe(true)
+    // no extra transition appended
+    expect(readItem(dir, item.id)!.transitions.length).toBe(countAfterFirst)
+    expect(readItem(dir, item.id)!.dream_id).toBe("DRM-060")
+  })
+
+  test("multi-dream session: a LATER completed dream re-stamps the definer, preserves lineage", async () => {
+    const { item } = await createIdea(dir, { title: "Two dreams", body: "spec" })
+    await bindSession(dir, item.id, "ses_m", "ses_m")
+
+    await markItemDoneFromDream(dir, "ses_m", "DRM-070", withArts("DRM-070", ["I-100"]))
+    const afterFirst = readItem(dir, item.id)!
+    const countAfterFirst = afterFirst.transitions.length
+    expect(afterFirst.dream_id).toBe("DRM-070")
+
+    // A second dream in the same session completes later.
+    const r = await markItemDoneFromDream(dir, "ses_m", "DRM-071", withArts("DRM-071", ["I-101", "W-200"]))
+    expect(r.ok && r.action === "redefined").toBe(true)
+    if (!r.ok) return
+    // latest COMPLETE is the definer; artifacts mirror the newest DRM
+    expect(r.item.dream_id).toBe("DRM-071")
+    expect(r.item.artifacts).toEqual(["I-101", "W-200"])
+
+    // earlier done transition preserved as lineage; a new one appended
+    const item2 = readItem(dir, item.id)!
+    expect(item2.transitions.length).toBe(countAfterFirst + 1)
+    const doneTs = item2.transitions.filter((t) => t.to === "done")
+    expect(doneTs.map((t) => t.by)).toEqual([dreamCompleteBy("DRM-070"), dreamCompleteBy("DRM-071")])
+    // the lineage entry (first) records the earlier DRM
+    expect(doneTs[doneTs.length - 1]!.from).toBe("done")
+  })
+
+  test("un-owned item (idea, no owner) is untouched — only the OWNING session's item moves", async () => {
+    const { item } = await createIdea(dir, { title: "Idea only", status: "todo" })
+    const r = await markItemDoneFromDream(dir, "ses_none", "DRM-080", complete("DRM-080"))
+    expect(r.ok && r.action === "noop-no-owner").toBe(true)
+    // the idea is still todo, un-owned
+    expect(readItem(dir, item.id)!.status).toBe("todo")
+  })
+
+  test("owned but not in_progress (parked back to todo) → refuses NOT_IN_PROGRESS", async () => {
+    // Force a pathological state: owner set but status todo (never happens via
+    // normal transitions, but the helper must refuse rather than clobber).
+    const { item } = await createIdea(dir, { title: "Weird", body: "spec" })
+    await bindSession(dir, item.id, "ses_w", "ses_w")
+    await mutateItem(dir, item.id, { set: { status: "todo" } })
+
+    const r = await markItemDoneFromDream(dir, "ses_w", "DRM-090", complete("DRM-090"))
+    expect(!r.ok && r.reason === "NOT_IN_PROGRESS").toBe(true)
+    expect(readItem(dir, item.id)!.status).toBe("todo") // untouched
+  })
+
+  test("refuses when the DRM is NOT COMPLETE (belt-and-braces), item untouched", async () => {
+    const { item } = await createIdea(dir, { title: "Incomplete dream", body: "spec" })
+    await bindSession(dir, item.id, "ses_i", "ses_i")
+
+    const r = await markItemDoneFromDream(dir, "ses_i", "DRM-999", { drmIsComplete: () => false })
+    expect(!r.ok && r.reason === "DRM_NOT_COMPLETE").toBe(true)
+    // item stays in_progress, no dream stamped
+    const after = readItem(dir, item.id)!
+    expect(after.status).toBe("in_progress")
+    expect(after.dream_id).toBeNull()
+  })
+
+  test("done_without_dream escape-hatch item: a later real dream UPGRADES it (badge cleared, audited)", async () => {
+    const { item } = await createIdea(dir, { title: "Manual then dreamt", body: "spec" })
+    await bindSession(dir, item.id, "ses_d", "ses_d")
+    await markDoneWithoutDream(dir, item.id)
+    const badged = readItem(dir, item.id)!
+    expect(badged.done_without_dream).toBe(true)
+    expect(badged.dream_id).toBeNull()
+    const countBefore = badged.transitions.length
+
+    // The session's dream later completes — upgrade the unbacked Done.
+    const r = await markItemDoneFromDream(dir, "ses_d", "DRM-110", withArts("DRM-110", ["I-300"]))
+    expect(r.ok && r.action === "redefined").toBe(true)
+    if (!r.ok) return
+    expect(r.item.done_without_dream).toBe(false) // badge cleared
+    expect(r.item.dream_id).toBe("DRM-110")
+    expect(r.item.artifacts).toEqual(["I-300"])
+
+    // the upgrade is an audited transition, not a silent flag flip
+    const after = readItem(dir, item.id)!
+    expect(after.transitions.length).toBe(countBefore + 1)
+    const last = after.transitions[after.transitions.length - 1]!
+    expect(last.from).toBe("done")
+    expect(last.to).toBe("done")
+    expect(last.by).toBe(dreamCompleteBy("DRM-110"))
+  })
+
+  test("default cross-check reads real DRM history files (integration, no injected fakes)", async () => {
+    const { item } = await createIdea(dir, { title: "Real DRM", body: "spec" })
+    await bindSession(dir, item.id, "ses_real", "ses_real")
+
+    // Write a genuine COMPLETE DRM history file the default helpers will read.
+    const histDir = path.join(dir, ".opencode/dreams/history")
+    fs.mkdirSync(histDir, { recursive: true })
+    fs.writeFileSync(
+      path.join(histDir, "DRM-200.yaml"),
+      [
+        "dream_id: DRM-200",
+        "depth: 2",
+        'intention: "test"',
+        "intention_type: CONSOLIDATION",
+        "entry_time: 2026-07-21T00:00:00Z",
+        "exit_time: 2026-07-21T00:10:00Z",
+        "status: COMPLETE",
+        'project_context: "test"',
+        "",
+        "context_signals:",
+        "  contradictions: 0",
+        "  repetitions_detected: false",
+        "  coherence: HIGH",
+        "  threads_active: 1",
+        "",
+        "insights: [I-500, I-501]",
+        "warnings: [W-500]",
+        "songlines: []",
+        "shadows: [SHADOW-050]",
+        "",
+      ].join("\n"),
+      "utf8"
+    )
+
+    const r = await markItemDoneFromDream(dir, "ses_real", "DRM-200")
+    expect(r.ok && r.action === "done").toBe(true)
+    if (!r.ok) return
+    expect(r.item.dream_id).toBe("DRM-200")
+    // artifacts mirror all four buckets read from the real DRM file
+    expect(r.item.artifacts).toEqual(["I-500", "I-501", "W-500", "SHADOW-050"])
+  })
+
+  test("default cross-check refuses when the DRM history file is absent", async () => {
+    const { item } = await createIdea(dir, { title: "Missing DRM", body: "spec" })
+    await bindSession(dir, item.id, "ses_miss", "ses_miss")
+
+    const r = await markItemDoneFromDream(dir, "ses_miss", "DRM-404")
+    expect(!r.ok && r.reason === "DRM_NOT_COMPLETE").toBe(true)
+    expect(readItem(dir, item.id)!.status).toBe("in_progress")
   })
 })

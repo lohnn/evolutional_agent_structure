@@ -587,6 +587,14 @@ export interface ItemEdit {
   appendTransition?: Transition
   /** append one id to the released_sessions flow array (append-only, I-049) */
   appendReleasedSession?: string
+  /**
+   * Replace the whole `artifacts` flow array. This is a CACHE-MIRROR field
+   * (SCHEMA §2 / I-144): the dream's artifact ids are copied onto the item so
+   * "what it produced" survives without the dream archive — a whole-list mirror
+   * of the DRM's linked artifacts, not an append log. Whole-replace is correct
+   * because the DRM is the source of truth for its own artifact set.
+   */
+  setArtifacts?: string[]
 }
 
 /**
@@ -638,6 +646,32 @@ export function applyEditToContent(content: string, edit: ItemEdit): string {
     if (!done) {
       const { end: e2 } = fmRegion(lines)
       lines.splice(e2, 0, `released_sessions: [${sid}]`)
+    }
+  }
+
+  // 2b. artifacts whole-list replace (flow-array surgery — cache mirror, I-144)
+  if (edit.setArtifacts !== undefined) {
+    const rendered = `artifacts: [${edit.setArtifacts.map(token).join(", ")}]`
+    const { start, end } = fmRegion(lines)
+    let done = false
+    for (let i = start; i < end; i++) {
+      if (/^artifacts:/.test(lines[i]!)) {
+        lines[i] = rendered
+        done = true
+        break
+      }
+    }
+    if (!done) {
+      // Field missing — insert before transitions:/fence (same rule as scalars).
+      const { start: s2, end: e2 } = fmRegion(lines)
+      let insertAt = e2
+      for (let i = s2; i < e2; i++) {
+        if (/^transitions:/.test(lines[i]!)) {
+          insertAt = i
+          break
+        }
+      }
+      lines.splice(insertAt, 0, rendered)
     }
   }
 
