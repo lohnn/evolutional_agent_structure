@@ -52,6 +52,11 @@ function fullItem(): WorkItem {
       { content: "Read current settings widget", status: "completed" },
       { content: "Add opt-out toggle, with \"comma, inside\"", status: "in_progress" },
     ],
+    todo_mirror: [
+      { content: "Investigate push API", status: "completed" },
+      { content: "Wire opt-out, with \"comma, inside\"", status: "in_progress" },
+    ],
+    todo_mirror_updated: "2026-07-07T14:32:11.482Z",
     transitions: [
       { at: "2026-07-06T09:00:00Z", from: null, to: "todo", by: "board:create" },
       { at: "2026-07-06T10:00:00Z", from: "todo", to: "in_progress", by: "hive_board_bind", session: "ses_10a2114b3ffe" },
@@ -74,6 +79,8 @@ describe("serialize + parse round-trip", () => {
     expect(s).toContain("artifacts: [I-142, W-061]")
     expect(s).toContain("released_sessions: [ses_dead01, ses_dead02]")
     expect(s).toContain('  - { content: "Read current settings widget", status: completed }')
+    expect(s).toContain("todo_mirror_updated: 2026-07-07T14:32:11.482Z")
+    expect(s).toContain('  - { content: "Investigate push API", status: completed }')
     expect(s).toContain("  - { at: 2026-07-06T09:00:00Z, from: null, to: todo, by: board:create }")
     expect(s).toContain(
       "  - { at: 2026-07-06T10:00:00Z, from: todo, to: in_progress, by: hive_board_bind, session: ses_10a2114b3ffe }"
@@ -85,13 +92,17 @@ describe("serialize + parse round-trip", () => {
   })
 
   test("empty lists serialize as empty flow form", () => {
-    const item = { ...fullItem(), subtasks: [], transitions: [], released_sessions: [], tags: [], artifacts: [] }
+    const item = { ...fullItem(), subtasks: [], todo_mirror: [], todo_mirror_updated: null, transitions: [], released_sessions: [], tags: [], artifacts: [] }
     const s = serializeWorkItem(item)
     expect(s).toContain("subtasks: []")
+    expect(s).toContain("todo_mirror: []")
+    expect(s).toContain("todo_mirror_updated: null")
     expect(s).toContain("transitions: []")
     expect(s).toContain("released_sessions: []")
     const parsed = parseWorkItem(s)
     expect(parsed.subtasks).toEqual([])
+    expect(parsed.todo_mirror).toEqual([])
+    expect(parsed.todo_mirror_updated).toBeNull()
     expect(parsed.transitions).toEqual([])
   })
 
@@ -247,6 +258,83 @@ describe("applyEditToContent — text surgery (I-049)", () => {
     expect(parseWorkItem(two).artifacts).toEqual(["W-001"])
     // empty clears
     expect(parseWorkItem(applyEditToContent(one, { setArtifacts: [] })).artifacts).toEqual([])
+  })
+
+  test("setTodoMirror replaces the whole block + stamps full-precision updated (WI-038, I-190)", () => {
+    const empty = serializeWorkItem({ ...fullItem(), todo_mirror: [], todo_mirror_updated: null })
+    const one = applyEditToContent(empty, {
+      setTodoMirror: {
+        todos: [
+          { content: "step one", status: "completed" },
+          { content: "step, two", status: "in_progress" },
+        ],
+        at: "2026-07-21T21:30:00.123Z",
+      },
+    })
+    expect(one).toContain("todo_mirror_updated: 2026-07-21T21:30:00.123Z")
+    expect(one).toContain('  - { content: "step one", status: completed }')
+    expect(one).toContain('  - { content: "step, two", status: in_progress }')
+    const parsedOne = parseWorkItem(one)
+    expect(parsedOne.todo_mirror).toEqual([
+      { content: "step one", status: "completed" },
+      { content: "step, two", status: "in_progress" },
+    ])
+    expect(parsedOne.todo_mirror_updated).toBe("2026-07-21T21:30:00.123Z")
+
+    // whole-replace, not append: a second setTodoMirror overwrites entirely
+    const two = applyEditToContent(one, {
+      setTodoMirror: { todos: [{ content: "only", status: "pending" }], at: "2026-07-21T22:00:00.000Z" },
+    })
+    const parsedTwo = parseWorkItem(two)
+    expect(parsedTwo.todo_mirror).toEqual([{ content: "only", status: "pending" }])
+    expect(parsedTwo.todo_mirror_updated).toBe("2026-07-21T22:00:00.000Z")
+    // no stale entries lingering from the first mirror
+    expect(two).not.toContain("step one")
+
+    // empty todos clears the mirror to [] while still stamping
+    const cleared = applyEditToContent(two, { setTodoMirror: { todos: [], at: "2026-07-21T23:00:00.000Z" } })
+    expect(cleared).toContain("todo_mirror: []")
+    const parsedCleared = parseWorkItem(cleared)
+    expect(parsedCleared.todo_mirror).toEqual([])
+    expect(parsedCleared.todo_mirror_updated).toBe("2026-07-21T23:00:00.000Z")
+  })
+
+  test("setTodoMirror on an item that already has a populated mirror replaces cleanly", () => {
+    // fullItem() carries a 2-entry mirror + stamp
+    const populated = serializeWorkItem(fullItem())
+    const next = applyEditToContent(populated, {
+      setTodoMirror: { todos: [{ content: "fresh", status: "in_progress" }], at: "2026-07-22T00:00:00.000Z" },
+    })
+    const parsed = parseWorkItem(next)
+    expect(parsed.todo_mirror).toEqual([{ content: "fresh", status: "in_progress" }])
+    expect(parsed.todo_mirror_updated).toBe("2026-07-22T00:00:00.000Z")
+    // transitions block downstream is untouched (still last, entries intact)
+    expect(parsed.transitions.length).toBe(fullItem().transitions.length)
+    // todo_mirror remains before transitions in the frontmatter
+    const fm = next.split("\n---\n")[0]!
+    expect(fm.indexOf("todo_mirror")).toBeLessThan(fm.indexOf("transitions:"))
+  })
+
+  test("setTodoMirror on a hand-written file missing the field inserts it before transitions", () => {
+    const handWritten = [
+      "---",
+      "id: WI-099",
+      'title: "Hand"',
+      "status: in_progress",
+      "subtasks: []",
+      "transitions: []",
+      "---",
+      "",
+      "body",
+    ].join("\n")
+    const next = applyEditToContent(handWritten, {
+      setTodoMirror: { todos: [{ content: "x", status: "pending" }], at: "2026-07-22T01:00:00.000Z" },
+    })
+    const parsed = parseWorkItem(next)
+    expect(parsed.todo_mirror).toEqual([{ content: "x", status: "pending" }])
+    expect(parsed.todo_mirror_updated).toBe("2026-07-22T01:00:00.000Z")
+    const fm = next.split("\n---\n")[0]!
+    expect(fm.indexOf("todo_mirror")).toBeLessThan(fm.indexOf("transitions:"))
   })
 
   test("Done-stamp combo: status + dream_id + setArtifacts + done transition in one edit", () => {
