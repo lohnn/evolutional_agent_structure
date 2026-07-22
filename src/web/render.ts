@@ -483,8 +483,8 @@ h2 .count { color:#8b949e; font-weight:400; font-size:.85rem; }
 .build-badge.stale { color:#f85149; border-color:#f85149; background:#f8514922; font-weight:600; }
 .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(340px,1fr)); gap:.8rem; }
 .cap { background:#161b22; border:1px solid #21262d; border-radius:8px; padding:.7rem .9rem; }
-.cap-head { display:flex; align-items:baseline; gap:.6rem; }
-.cap-name { font-weight:600; }
+.cap-head { display:flex; align-items:baseline; gap:.6rem; flex-wrap:wrap; }
+.cap-name { font-weight:600; min-width:0; overflow-wrap:anywhere; }
 .cap-domain { color:#8b949e; font-size:.75rem; }
 .cap-energy { margin-left:auto; font-family:ui-monospace,monospace; font-size:.85rem; }
 .cap-energy.dissolve { color:#f85149; } .cap-energy.split { color:#a371f7; }
@@ -526,11 +526,10 @@ tr.active-dream td { background:#1c2128; }
 .open-link { margin-left:auto; color:#58a6ff; text-decoration:none; font-size:.8rem; white-space:nowrap; }
 .open-link:hover { text-decoration:underline; }
 .open-link.disabled { color:#484f58; cursor:not-allowed; }
-.kanban { display:grid; grid-template-columns:repeat(4,1fr); gap:.8rem; align-items:start; }
-@media (max-width:1100px) { .kanban { grid-template-columns:repeat(2,1fr); } }
-.col { background:#10141a; border:1px solid #21262d; border-radius:10px; padding:.6rem; min-height:80px; }
+.kanban { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.8rem; align-items:start; }
+.col { background:#10141a; border:1px solid #21262d; border-radius:10px; padding:.6rem; min-height:80px; min-width:0; }
 .col-head { font-weight:600; font-size:.85rem; color:#8b949e; padding:.15rem .3rem .5rem; text-transform:uppercase; letter-spacing:.04em; }
-.card { background:#161b22; border:1px solid #21262d; border-radius:8px; padding:.6rem .8rem; margin-bottom:.6rem; }
+.card { background:#161b22; border:1px solid #21262d; border-radius:8px; padding:.6rem .8rem; margin-bottom:.6rem; min-width:0; overflow-wrap:anywhere; }
 .card.wi { border-left:3px solid #3fb950; }
 .card.wi.paused { opacity:.55; border-left-color:#8b949e; }
 .card.session-only { border-left:3px solid #d29922; border-style:solid solid solid dashed; }
@@ -608,6 +607,67 @@ details > summary { cursor:pointer; color:#8b949e; font-size:.85rem; margin:.5re
 .modal-confirm.warn { background:#da3633; border-color:#f85149; }
 .modal-confirm.warn:hover { background:#f85149; }
 
+/* Dense data tables (dream archive, DRM history, HIVEmind flow) can be wider
+   than a phone; keep the overflow CONTAINED to their own horizontal scroller
+   instead of blowing out the whole page width. -webkit-overflow-scrolling for
+   momentum on iOS Safari. */
+.table-scroll { overflow-x:auto; -webkit-overflow-scrolling:touch; max-width:100%; }
+.table-scroll table { min-width:max-content; }
+
+/* ── Tablet: 641–1024px → 2 columns ─────────────────────────────────────── */
+@media (max-width:1024px) {
+  .kanban { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
+
+/* ── Phone: ≤640px → single stacked column ──────────────────────────────────
+   Vertical stacking (not horizontal column-swipe) is deliberate (task brief /
+   I-186): the board is a keyed-morph polling renderer, and the page's normal
+   VERTICAL scroll already survives a poll tick (morph.ts never detaches the
+   scroll container). A horizontal column scroller would need its scrollLeft
+   preserved across every 15s morph or yank the user back to column 1 — the
+   risk asymmetry isn't worth it. Stacking inherits the already-safe vertical
+   scroll for free. Touch targets are floored to ≥44px and the tiniest labels
+   are floored to ~11px, since this is the width where it actually matters. */
+@media (max-width:640px) {
+  body { font-size:15px; padding:1rem .8rem 3rem; }
+  h1 { font-size:1.2rem; }
+  h2 { margin:1.4rem 0 .7rem; }
+
+  .kanban { grid-template-columns:1fr; gap:.7rem; }
+  .grid { grid-template-columns:1fr; }
+  .col { padding:.6rem .55rem; }
+  .card { padding:.7rem .75rem; }
+
+  /* Comfortable, thumb-tappable interactive controls. 44px min height is the
+     iOS/Android floor. Applies to every write affordance + navigation link. */
+  .act, .act-select, .create-form button, .create-form input,
+  .create-form textarea, .create-form select, body > form button, .retry button,
+  .modal .act {
+    min-height:44px; font-size:.9rem; padding:.5rem .75rem;
+  }
+  .modal { padding:1.1rem; }
+  .modal-actions { gap:.7rem; }
+  .actions { gap:.5rem; }
+  .actions form { gap:.4rem; }
+  /* select carries its own line-height chrome; keep the visible box ≥44px. */
+  .act-select { padding:.45rem .5rem; }
+
+  /* Tap-friendly disclosure toggles: spec, todos, create form, DRM/artifacts. */
+  details > summary, .spec > summary, .todo-list > summary,
+  .create > summary { min-height:44px; display:flex; align-items:center;
+    font-size:.85rem; }
+
+  /* Bigger, easier-to-hit navigation deep links. */
+  .open-link { min-height:44px; display:inline-flex; align-items:center;
+    padding:0 .3rem; font-size:.85rem; }
+
+  /* Floor the very smallest labels so nothing renders below ~11px on a phone. */
+  .cap-domain, .badge, .chip, .todo-label, .todo-count, .todo-cached,
+  .lane-count, .lane ul, .todo-list ul, .lineage, .spec-body,
+  .todo-current, .cap-desc, .meta { font-size:.72rem; }
+  .badge, .chip { padding:.15rem .5rem; }
+  table { font-size:.78rem; }
+}
 `
 
 /**
@@ -680,25 +740,25 @@ ${activeSection}
 ${
   dreams.recentArtifacts.length > 0
     ? `<details open><summary>Recent artifacts</summary>
-<table><thead><tr><th>id</th><th>type</th><th>dream</th><th>summary</th></tr></thead>
-<tbody>${recentRows}</tbody></table></details>`
+<div class="table-scroll"><table><thead><tr><th>id</th><th>type</th><th>dream</th><th>summary</th></tr></thead>
+<tbody>${recentRows}</tbody></table></div></details>`
     : ""
 }
 
 <details><summary>DRM history (${dreams.history.length})</summary>
-<table>
+<div class="table-scroll"><table>
 <thead><tr><th>id</th><th>status</th><th>depth</th><th>type</th><th>intention</th><th>artifacts</th><th>time</th></tr></thead>
 <tbody>${historyRows}</tbody>
-</table></details>
+</table></div></details>
 
 <h2>HIVEmind message flow <span class="count">(${messages.length} pending/delivered)</span></h2>
 ${
   messages.length === 0
     ? '<div class="empty">no live messages — all inboxes clear</div>'
-    : `<table>
+    : `<div class="table-scroll"><table>
 <thead><tr><th>time</th><th>route</th><th>type</th><th>status</th><th>content</th></tr></thead>
 <tbody>${messageRows}</tbody>
-</table>`
+</table></div>`
 }`
 }
 
