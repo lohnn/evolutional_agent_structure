@@ -18,6 +18,7 @@ import type { SessionCard, SessionMirror } from "../data/sessions"
 import type { Subtask, WorkItem } from "../data/workitems"
 import { absorbedLineage, lineageSessions } from "../data/lineage"
 import { displayTitle } from "../data/placeholder-title"
+import { summarizeTodos, type TodoSubState } from "../data/todo-types"
 import type { Notice } from "./notices"
 
 function esc(s: string): string {
@@ -124,18 +125,26 @@ function sessionPresence(id: string | null, mirror: SessionMirror): SessionPrese
 }
 
 /**
- * "Open session" affordance (SCHEMA §1a): a NAVIGATION link only. Enabled iff
- * the session is persisted here; otherwise disabled gracefully — absence is
- * "unknown", never "deleted", and never changes the card's column.
+ * "Open session" affordance (SCHEMA §1a): a NAVIGATION link only, rendered from
+ * a work item's OWN stamped `owner_session` (its own record — I-143/I-144).
+ *
+ * Enablement trusts the stamped field, NOT the frozen session mirror. Because
+ * bind/start only ever stamp a real, runtime-resolved session id (never a
+ * self-reported one), the presence of `owner_session` is itself sufficient
+ * proof the session exists — so a non-null id always yields a tappable deep
+ * link. This is deliberate: the mirror (data/sessions.ts) is a BOOTSTRAP-ONLY
+ * SQLite snapshot, computed once at startup and never refreshed (I-187/W-061),
+ * and scoped to `directory = workspaceRoot` (excludes cross-project sessions).
+ * Gating the link on that snapshot mis-rendered freshly-started and
+ * cross-project owners as dead spans even though the session genuinely exists.
+ * Reading the live field (SNG-045: the ship's own prow, not the harbormaster's
+ * chalk-board) fixes both flavors without any render-time session-API call.
+ *
+ * The disabled/no-link path is preserved for the genuine no-owner case (`!id`).
  */
-function openSessionHtml(id: string | null, guiBaseUrl: string, mirror: SessionMirror): string {
+function openSessionHtml(id: string | null, guiBaseUrl: string, _mirror: SessionMirror): string {
   if (!id) return ""
-  const presence = sessionPresence(id, mirror)
-  if (presence === "exists") {
-    return `<a class="open-link" href="${esc(`${guiBaseUrl}/?session=${id}`)}" target="_blank" rel="noopener" title="open in web GUI">Open ↗</a>`
-  }
-  const tip = presence === "absent" ? "session not available here" : "session state unknown (enumeration unavailable)"
-  return `<span class="open-link disabled" title="${esc(tip)}">Open ↗</span>`
+  return `<a class="open-link" href="${esc(`${guiBaseUrl}/?session=${id}`)}" target="_blank" rel="noopener" title="open in web GUI">Open ↗</a>`
 }
 
 const SUBTASK_ICON: Record<string, string> = {
@@ -155,6 +164,58 @@ function subtaskLane(subtasks: Subtask[]): string {
     )
     .join("")
   return `<div class="lane"><span class="lane-count">${done}/${subtasks.length}</span><ul>${rows}</ul></div>`
+}
+
+const TODO_ICON: Record<string, string> = {
+  completed: "✓",
+  in_progress: "▸",
+  pending: "○",
+  cancelled: "✕",
+}
+
+/**
+ * Todo sub-state lane (WI-038): the finer-grained progress WITHIN an In-Progress
+ * card — the owning session's live TodoWrite list rendered as a mini progress
+ * view. Pure browser-safe render of the `TodoSubState` resolved server-side
+ * (data/todos.ts); this function makes NO SDK call (I-192 bundle boundary).
+ *
+ * Renders a done/total summary bar + the current in-progress todo text, then the
+ * full list. Degrades gracefully:
+ *  - source "none" or empty ⇒ renders nothing (no owner, no todos, or session
+ *    unreachable with no mirror — unknown ≠ wrong, no misleading zero bar).
+ *  - source "mirror" ⇒ a "cached" hint so a lagging snapshot is honest (I-187).
+ * Cancelled todos count toward total but not the completed ratio.
+ */
+function todoSubStateLane(sub: TodoSubState | undefined): string {
+  if (!sub || sub.source === "none" || sub.todos.length === 0) return ""
+  const s = summarizeTodos(sub.todos)
+  // Denominator excludes cancelled work (it's neither done nor pending effort).
+  const denom = s.total - s.cancelled
+  const pct = denom > 0 ? Math.round((s.completed / denom) * 100) : 0
+  const cached =
+    sub.source === "mirror"
+      ? ' <span class="todo-cached" title="session not reachable now — showing the last mirrored snapshot (may lag)">cached</span>'
+      : ""
+  const current = s.current
+    ? `<div class="todo-current" title="${esc(s.current)}"><span class="st-icon">▸</span>${esc(truncate(s.current, 72))}</div>`
+    : s.inProgress === 0 && s.pending > 0
+      ? `<div class="todo-current dim">${s.pending} pending — none in progress</div>`
+      : ""
+  const rows = sub.todos
+    .map(
+      (t) =>
+        `<li class="st st-${esc(t.status)}"><span class="st-icon">${TODO_ICON[t.status] ?? "?"}</span>${esc(truncate(t.content, 70))}</li>`,
+    )
+    .join("")
+  return `<div class="todos" title="owning session TodoWrite progress (WI-038)">
+    <div class="todo-head">
+      <span class="todo-label">activity</span>
+      <span class="todo-count mono">${s.completed}/${denom}</span>${cached}
+      <div class="todo-bar"><div class="todo-bar-fill" style="width:${pct}%"></div></div>
+    </div>
+    ${current}
+    <details class="todo-list"><summary>${sub.todos.length} todo${sub.todos.length === 1 ? "" : "s"}</summary><ul>${rows}</ul></details>
+  </div>`
 }
 
 function lineageHtml(item: WorkItem, guiBaseUrl: string, mirror: SessionMirror): string {
@@ -186,6 +247,8 @@ interface CardCtx {
   writesEnabled: boolean
   sessionBackend: "configured" | "unconfigured"
   decisions: Record<string, import("evolutional-agent-structure/lib/board-transitions").ReattachDecision>
+  /** Todo sub-state per in-progress WI id (WI-038). */
+  todoSubStates: Record<string, TodoSubState>
 }
 
 function shortSes(id: string): string {
@@ -298,6 +361,7 @@ function itemCard(item: WorkItem, ctx: CardCtx): string {
     </div>
     <div class="chips">${chips.join(" ")}</div>
     ${subtaskLane(item.subtasks)}
+    ${todoSubStateLane(ctx.todoSubStates[item.id])}
     ${artifacts}
     ${lineageHtml(item, guiBaseUrl, mirror)}
     ${body}
@@ -468,6 +532,22 @@ tr.active-dream td { background:#1c2128; }
 .lane .st-in_progress { color:#d29922; }
 .lane .st-cancelled { text-decoration:line-through; opacity:.35; }
 .st-icon { display:inline-block; width:1.1em; }
+.todos { margin-top:.5rem; padding-top:.45rem; border-top:1px dashed #21262d; }
+.todo-head { display:flex; align-items:center; gap:.5rem; }
+.todo-label { font-size:.66rem; text-transform:uppercase; letter-spacing:.05em; color:#8b949e; }
+.todo-count { font-size:.72rem; color:#c9d1d9; }
+.todo-cached { font-size:.6rem; padding:.02rem .35rem; border-radius:8px; background:#8b949e22; color:#8b949e; border:1px solid #8b949e44; }
+.todo-bar { flex:1; height:5px; background:#21262d; border-radius:3px; overflow:hidden; min-width:40px; }
+.todo-bar-fill { height:100%; background:#3fb950; border-radius:3px; transition:width .3s; }
+.todo-current { margin-top:.35rem; font-size:.75rem; color:#d29922; }
+.todo-current.dim { color:#8b949e; }
+.todo-current .st-icon { color:#d29922; }
+.todo-list > summary { font-size:.68rem; color:#8b949e; margin:.35rem 0 0; }
+.todo-list ul { list-style:none; margin:.3rem 0 0; padding:0; font-size:.75rem; }
+.todo-list .st { color:#8b949e; }
+.todo-list .st-completed { text-decoration:line-through; opacity:.6; }
+.todo-list .st-in_progress { color:#d29922; }
+.todo-list .st-cancelled { text-decoration:line-through; opacity:.35; }
 .lineage { margin-top:.4rem; font-size:.7rem; color:#484f58; }
 .lineage a { color:#58a6ff88; }
 .spec > summary { font-size:.72rem; margin:.35rem 0 0; }
@@ -508,6 +588,7 @@ export function renderBoardBody(state: BoardState, notices: Notice[] = []): stri
     writesEnabled: state.writesEnabled,
     sessionBackend: state.sessionBackend,
     decisions: state.promoteDecisions,
+    todoSubStates: state.todoSubStates,
   }
   const noticesHtml =
     notices.length === 0
