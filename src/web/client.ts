@@ -127,3 +127,90 @@ stampFreshness(lastGood?.buildSha)
 // The server already painted the initial state; the island is only a diff
 // baseline for the morph (so lastGood is populated). Start polling on interval.
 setInterval(poll, POLL_MS)
+
+// ── Confirmation modal (I-206) ──────────────────────────────────────────────
+//
+// A UX gate purely in FRONT of the already-correct locked write path
+// (I-179/I-212): we intercept submit on the consequential forms, show a styled
+// modal, and let the ORIGINAL form POST proceed on Confirm — no transition
+// logic is duplicated here.
+//
+// Poll-survival (I-186): the modal DOM lives in the page shell OUTSIDE
+// #board-root, so a morph physically cannot touch it while it's open. The
+// forms it gates ARE inside #board-root (re-rendered each poll), so we bind via
+// event DELEGATION on document — a freshly-morphed form is still intercepted
+// without re-binding. The modal's own controls are stable, bound once.
+setupConfirmModal()
+
+function setupConfirmModal(): void {
+  const scrim = document.getElementById("confirm-modal")
+  const titleEl = document.getElementById("confirm-title")
+  const bodyEl = document.getElementById("confirm-body")
+  const okBtn = document.getElementById("confirm-ok") as HTMLButtonElement | null
+  const cancelBtn = document.getElementById("confirm-cancel") as HTMLButtonElement | null
+  // Defensive: if the shell somehow lacks the modal, leave native submit intact
+  // rather than swallowing clicks (unknown ≠ break; SNG-046).
+  if (!scrim || !titleEl || !bodyEl || !okBtn || !cancelBtn) return
+
+  // The form awaiting a decision, and a guard so a confirmed submit can never
+  // fire twice (double-click / re-entrancy).
+  let pendingForm: HTMLFormElement | null = null
+  let submitting = false
+
+  function close(): void {
+    scrim!.setAttribute("hidden", "")
+    pendingForm = null
+    okBtn!.classList.remove("warn")
+  }
+
+  function open(form: HTMLFormElement): void {
+    pendingForm = form
+    const severity = form.getAttribute("data-confirm-severity") === "warn" ? "warn" : "start"
+    titleEl!.textContent = form.getAttribute("data-confirm-title") || "Confirm this action?"
+    bodyEl!.textContent = form.getAttribute("data-confirm-body") || ""
+    okBtn!.classList.toggle("warn", severity === "warn")
+    okBtn!.disabled = false
+    scrim!.removeAttribute("hidden")
+    // Confirm focused on open (a11y / keyboard).
+    okBtn!.focus()
+  }
+
+  // Intercept submits from any gated form, current or future (delegation).
+  document.addEventListener(
+    "submit",
+    (e) => {
+      const target = e.target
+      if (!(target instanceof HTMLFormElement)) return
+      if (target.getAttribute("data-confirm") !== "1") return // ungated → native submit
+      if (submitting) return // already confirmed this one; let it through
+      e.preventDefault()
+      open(target)
+    },
+    true, // capture: run before any default form handling
+  )
+
+  okBtn.addEventListener("click", () => {
+    if (!pendingForm || submitting) return
+    submitting = true
+    okBtn.disabled = true
+    const form = pendingForm
+    close()
+    // Native POST to the same /transitions/* endpoint. form.submit() does NOT
+    // re-dispatch the submit event, so our interceptor won't re-fire — no need
+    // to detach the listener, and the double-submit guard covers re-entrancy.
+    form.submit()
+  })
+
+  cancelBtn.addEventListener("click", close)
+
+  // Scrim click cancels — but only when the click is on the backdrop itself,
+  // not bubbling up from inside the .modal panel.
+  scrim.addEventListener("click", (e) => {
+    if (e.target === scrim) close()
+  })
+
+  // Esc cancels while open.
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !scrim.hasAttribute("hidden")) close()
+  })
+}
