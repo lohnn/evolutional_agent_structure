@@ -16,11 +16,14 @@
  *   2. MIRROR — `todo_mirror` persisted on the WI record: survives viewer restart
  *      and satisfies the portability invariant (I-144: everything DISPLAYED is
  *      cached in the item's own record; the live read powers freshness, not the
- *      sole content source).
- * When a live read succeeds we DISPLAY live AND refresh the mirror (whole-replace,
- * I-190) so the two paths converge. When the live read fails/absent, we fall back
- * to the persisted mirror (unknown ≠ empty — W-061). Absent session is "unknown",
- * never orphaning (SCHEMA §1a portability).
+ *      sole content source). OPTIONAL & history-dependent: WI-026..037 predate it
+ *      (no key), and the owner's parser normalizes those old records to `[]`
+ *      (I-136); we also re-default at our own parse boundary (workitems.ts) as
+ *      belt-and-suspenders (I-191). When a live read succeeds we DISPLAY live AND
+ *      refresh the mirror (whole-replace, I-190) so the two paths converge. When
+ *      the live read fails/absent, we fall back to the persisted mirror
+ *      (unknown ≠ empty — W-061). Absent session is "unknown", never orphaning
+ *      (SCHEMA §1a portability).
  *
  * ── Mirror write is IDENTITY-FREE (I-179) ───────────────────────────────────
  * We already hold the owning session id from the WI record; refreshing the
@@ -29,7 +32,8 @@
  * NOT a second writer. The write is a WHOLE-REPLACE of the mirror field (I-190:
  * a cache-mirror of the session's CURRENT todos, not an append log). The
  * `todo_mirror` / `todo_mirror_updated` schema fields and the `setTodoMirror`
- * edit primitive are the PUBLISHED hive-infra contract (board-store, WI-038).
+ * edit primitive are the PUBLISHED hive-infra contract (board-store, WI-038,
+ * restored on plugin v0.4.38).
  */
 import { mutateItem, type ItemEdit } from "evolutional-agent-structure/lib/board-store"
 import type { BoardConfig } from "../config"
@@ -45,17 +49,24 @@ interface RawTodo {
 }
 
 /**
- * Read the persisted mirror off the WI record. The `todo_mirror` /
- * `todo_mirror_updated` fields are the PUBLISHED hive-infra contract (landed on
- * board-store's WorkItem, 2026-07-21) — no structural stopgap. `todo_mirror` is
- * always present (empty [] when unmirrored); returns null only when there's
- * nothing to fall back to, so callers treat it as "no mirror".
+ * Read the persisted mirror off the WI record.
+ *
+ * `todo_mirror` is an OPTIONAL, history-dependent field: WI-026..037 predate it
+ * and carry no key at all. The owner's parser normalizes those old records to
+ * `[]` (I-136, additive+nullable so old records break nothing), and we
+ * view-normalize to an array again at our parse boundary (workitems.ts
+ * `normalize`) — so it is ALWAYS an array here. We STILL guard inline with
+ * `Array.isArray` (I-191 defensive idiom, defense-in-depth: never assume
+ * presence before `.length`/iteration; the write contract returning does NOT
+ * make this redundant — old records on disk forever predate the field). Returns
+ * null when there's nothing to fall back to, so callers treat it as "no mirror".
  */
 function mirrorOf(item: WorkItem): { todos: TodoItem[]; updatedAt: string | null } | null {
-  if (item.todo_mirror.length === 0) return null
+  const entries = Array.isArray(item.todo_mirror) ? item.todo_mirror : []
+  if (entries.length === 0) return null
   return {
-    todos: item.todo_mirror.map((t) => ({ content: t.content, status: asTodoStatus(t.status) })),
-    updatedAt: item.todo_mirror_updated,
+    todos: entries.map((t) => ({ content: t.content, status: asTodoStatus(t.status) })),
+    updatedAt: item.todo_mirror_updated ?? null,
   }
 }
 
@@ -96,8 +107,8 @@ function todosEqual(a: TodoItem[], b: TodoItem[]): boolean {
  * Persist the whole-replace todo mirror onto the WI record via the shared
  * locked-storage edit module (identity-free — I-179). Best-effort: any failure
  * (lock contention, write error) is swallowed — the mirror is a durability
- * optimization, never a correctness dependency. The LIVE read already drives
- * what the user sees this request.
+ * optimization, never a correctness dependency (I-105/I-113). The LIVE read
+ * already drives what the user sees this request.
  *
  * `writesEnabled` gates this to the REAL workspace board only (never fixtures —
  * mutating fixture files would desync view from writes, matching the existing
