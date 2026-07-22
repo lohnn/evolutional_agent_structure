@@ -98,23 +98,37 @@ function cssEscape(s: string): string {
   return s.replace(/["\\]/g, "\\$&")
 }
 
-/** Morph `from` (live) to look like `to` (freshly rendered), in place. */
+/**
+ * Morph `from` (live) to look like `to` (freshly rendered), in place.
+ *
+ * `from` is the PERSISTENT container the caller keeps a handle to and re-queries
+ * between ticks (e.g. `#board-root`, re-fetched by `getElementById` every poll).
+ * Its OWN identity attributes are therefore treated as structural and are never
+ * stripped — even if the freshly-rendered `to` container lacks them. This is the
+ * fix for the frozen-timer bug: the client renders the diff target with a bare
+ * `document.createElement("main")` (no id), so the old bidirectional attribute
+ * morph removed `id="board-root"` off the live element on the very first tick,
+ * after which `getElementById("board-root")` returned null and every subsequent
+ * paint early-returned — the board updated exactly once, then froze. The root's
+ * attributes are additive-only here (I-186 depends on this container surviving
+ * an unbounded number of morphs). Descendants keep full bidirectional morphing.
+ */
 export function morph(from: Element, to: Element): void {
   const focus = snapshotFocus(from)
-  morphElement(from, to)
+  morphElement(from, to, /* isRoot */ true)
   restoreFocus(from, focus)
 }
 
-function morphElement(from: Element, to: Element): void {
+function morphElement(from: Element, to: Element, isRoot = false): void {
   if (from.tagName !== to.tagName) {
     from.replaceWith(to)
     return
   }
-  morphAttributes(from, to)
+  morphAttributes(from, to, isRoot)
   morphChildren(from, to)
 }
 
-function morphAttributes(from: Element, to: Element): void {
+function morphAttributes(from: Element, to: Element, isRoot = false): void {
   // <details> open is user-owned: never let re-rendered markup toggle it.
   const preserveOpen = from.tagName === "DETAILS"
 
@@ -127,10 +141,16 @@ function morphAttributes(from: Element, to: Element): void {
     if (isField && (attr.name === "value")) continue
     if (from.getAttribute(attr.name) !== attr.value) from.setAttribute(attr.name, attr.value)
   }
-  for (const attr of Array.from(from.attributes)) {
-    if (preserveOpen && attr.name === "open") continue
-    if (isField && attr.name === "value") continue
-    if (!to.hasAttribute(attr.name)) from.removeAttribute(attr.name)
+  // Attribute REMOVAL: skip entirely on the morph root. Its identity (id/class)
+  // is owned by the page shell and re-queried across ticks — stripping it
+  // freezes the whole live refresh (see morph() docstring). We still ADD/UPDATE
+  // root attributes from `to` above; we just never delete the container's own.
+  if (!isRoot) {
+    for (const attr of Array.from(from.attributes)) {
+      if (preserveOpen && attr.name === "open") continue
+      if (isField && attr.name === "value") continue
+      if (!to.hasAttribute(attr.name)) from.removeAttribute(attr.name)
+    }
   }
 
   // A <select> renders its selection via a child <option selected>; leave the

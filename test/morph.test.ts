@@ -153,6 +153,72 @@ describe("live-refresh morph", () => {
     expect(root.textContent).toContain("Backlog")
   })
 
+  // ── Frozen-timer regression (the morph-strips-container-identity bug) ──────
+  //
+  // The live client renders its diff target with a bare
+  // `document.createElement("main")` — NO id — and re-resolves the container by
+  // `getElementById("board-root")` on every poll. The old bidirectional
+  // attribute morph stripped `id="board-root"` off the live element on the very
+  // first tick, after which getElementById returned null and every subsequent
+  // paint early-returned: the board updated exactly once, then froze forever.
+  //
+  // `pollLikeClient` reproduces the client's EXACT access pattern: an id-less
+  // fresh <main> as the diff target, and re-fetching the root by id each tick
+  // (NOT holding the original reference, which is what let the bug hide from the
+  // other tests above).
+  function pollLikeClient(state: BoardState): HTMLElement | null {
+    const root = document.getElementById("board-root")
+    if (!root) return null
+    const next = document.createElement("main") // deliberately id-less, like client.ts
+    next.innerHTML = renderBoardBody(state)
+    morph(root, next)
+    return document.getElementById("board-root")
+  }
+
+  test("morph root keeps its id across a single tick, even vs an id-less target", () => {
+    const items = loadWorkItems(FIXTURES)
+    mount(makeState(items))
+
+    const after = pollLikeClient(makeState(items))
+    expect(after).not.toBeNull() // getElementById must still find it
+    expect(after!.id).toBe("board-root") // id was NOT stripped by the morph
+  })
+
+  test("morph root survives MANY successive ticks (frozen-timer regression)", () => {
+    const items = loadWorkItems(FIXTURES)
+    const original = mount(makeState(items))
+
+    // Simulate a long-running tab: many poll ticks, re-resolving by id each time
+    // exactly as the client does. A single stripped id would null this out.
+    for (let tick = 0; tick < 5; tick++) {
+      const found = pollLikeClient(makeState(items))
+      expect(found).not.toBeNull() // never freezes: getElementById keeps working
+      expect(found!.id).toBe("board-root")
+      expect(found).toBe(original) // same persistent node object, never rebuilt
+    }
+  })
+
+  test("live updates keep applying after multiple ticks (timer not frozen)", () => {
+    // Prove the board actually re-renders changed content on later ticks — the
+    // user-visible symptom was "the generated timestamp never updates".
+    const items = loadWorkItems(FIXTURES)
+    mount(makeState(items))
+
+    const tick1 = makeState(items)
+    tick1.generatedAt = "2026-07-10T12:00:00Z"
+    pollLikeClient(tick1)
+    const root1 = document.getElementById("board-root")
+    expect(root1!.textContent).toContain("2026-07-10T12:00:00Z")
+
+    // A later tick carries a NEW timestamp; it must land in the DOM.
+    const tick2 = makeState(items)
+    tick2.generatedAt = "2026-07-10T12:00:30Z"
+    const after = pollLikeClient(tick2)
+    expect(after).not.toBeNull() // still not frozen
+    expect(after!.textContent).toContain("2026-07-10T12:00:30Z") // update applied
+    expect(after!.textContent).not.toContain("2026-07-10T12:00:00Z")
+  })
+
   test("a keyed card removed mid-list doesn't recreate its siblings", () => {
     const items = loadWorkItems(FIXTURES)
     const root = mount(makeState(items))

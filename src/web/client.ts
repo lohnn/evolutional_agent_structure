@@ -84,6 +84,12 @@ function readIsland(): BoardState | null {
 /** Render the board body into a detached element the morph can diff against. */
 function renderInto(state: BoardState): HTMLElement {
   const next = document.createElement("main")
+  // Match the live container's identity so the morph's attribute diff sees them
+  // as equal. morph() also protects the root's id structurally, but carrying it
+  // here makes the intent explicit at the call site and keeps the diff a no-op
+  // for the container itself (defense in depth against the frozen-timer bug:
+  // a bare id-less <main> used to make morph strip id="board-root" on tick 1).
+  next.id = "board-root"
   next.innerHTML = renderBoardBody(state)
   return next
 }
