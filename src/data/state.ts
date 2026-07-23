@@ -19,6 +19,8 @@ import { loadLiveMessages, type HivemindMessage } from "./messages"
 import type { SessionMirror } from "./sessions"
 import { loadTodoSubStates } from "./todos"
 import type { TodoSubState } from "./todo-types"
+import { loadActionRequired, type ActionRequired } from "./action-required"
+import { loadSessionStatus, type SessionStatusKind } from "./session-status"
 import { loadWorkItems, type WorkItem } from "./workitems"
 
 export interface BoardState {
@@ -75,6 +77,36 @@ export interface BoardState {
    * freshness of DISPLAYED content that is ALSO mirrored on disk (I-144).
    */
   todoSubStates: Record<string, TodoSubState>
+  /**
+   * Action-required per SESSION id (WI-043): which owning sessions are blocked
+   * waiting on the user — a pending question (awaitingQuestion) or a pending
+   * command/permission (awaitingPermission). Read LIVE per request from the two
+   * global opencode endpoints (data/action-required.ts) — NOT through the frozen
+   * sessionMirror, because this flag is time-sensitive and must clear the moment
+   * the prompt is answered (I-187). Keyed by session id (owner_session for WI
+   * cards, the session's own id for session-only cards); a session absent from
+   * the map is unblocked. Render reads this off BoardState only — it never calls
+   * the SDK itself (I-192 bundle boundary). Empty when the backend is
+   * unreachable (graceful degradation, no indicators — never a crash).
+   */
+  actionRequired: Record<string, ActionRequired>
+  /**
+   * Live processing status per SESSION id (WI-044): which owning sessions are
+   * busy (chugging along), retrying after a provider error, or idle. Read LIVE
+   * per request from the single global `GET /session/status` endpoint
+   * (data/session-status.ts) — NOT through the frozen sessionMirror, because
+   * status is time-sensitive and must clear the moment a session goes idle
+   * (I-187). Keyed by session id (owner_session for WI cards, the session's own
+   * id for session-only cards).
+   *
+   * EMPIRICAL CONTRACT (active-only, verified 2026-07-23): the endpoint reports
+   * ONLY non-idle sessions, so a session ABSENT from this map is
+   * "idle-or-unknown", indistinguishable — the renderer treats absence as NO
+   * badge (never a synthesised "idle"; unknown ≠ done, W-030). Render reads this
+   * off BoardState only — it never calls the SDK itself (I-192 bundle boundary).
+   * Empty when the backend is unreachable (graceful degradation, no crash).
+   */
+  sessionStatus: Record<string, SessionStatusKind>
 }
 
 export async function loadBoardState(
@@ -92,10 +124,15 @@ export async function loadBoardState(
       }
     }
   }
-  // Live todo sub-state for in-progress cards (WI-038). Reconciles the live
-  // per-request read with the persisted todo_mirror and refreshes the mirror
-  // when the board owns the write path (writesEnabled).
-  const todoSubStates = await loadTodoSubStates(config, items, writesEnabled)
+  // Live todo sub-state for in-progress cards (WI-038) + action-required per
+  // session (WI-043) — both live, per-request reads over the existing HTTP
+  // transport; run concurrently (independent calls). action-required is two
+  // GLOBAL calls (all sessions), so it's cheap regardless of card count.
+  const [todoSubStates, actionRequired, sessionStatus] = await Promise.all([
+    loadTodoSubStates(config, items, writesEnabled),
+    loadActionRequired(config),
+    loadSessionStatus(config),
+  ])
   return {
     generatedAt: new Date().toISOString(),
     workspaceRoot: config.workspaceRoot,
@@ -111,5 +148,7 @@ export async function loadBoardState(
     promoteDecisions,
     sessions,
     todoSubStates,
+    actionRequired,
+    sessionStatus,
   }
 }
