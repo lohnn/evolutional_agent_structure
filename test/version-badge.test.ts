@@ -59,6 +59,8 @@ function makeState(buildSha: string): BoardState {
     sessionBackend: "unconfigured",
     promoteDecisions: {},
     todoSubStates: {},
+    actionRequired: {},
+    sessionStatus: {},
     sessions,
   }
 }

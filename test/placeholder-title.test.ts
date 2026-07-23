@@ -81,6 +81,8 @@ function makeState(items: WorkItem[], m: SessionMirror): BoardState {
     sessionBackend: "unconfigured",
     promoteDecisions: {},
     todoSubStates: {},
+    actionRequired: {},
+    sessionStatus: {},
     sessions: m,
   }
 }

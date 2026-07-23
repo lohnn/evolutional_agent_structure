@@ -19,6 +19,8 @@ import type { Subtask, WorkItem } from "../data/workitems"
 import { absorbedLineage, lineageSessions } from "../data/lineage"
 import { displayTitle } from "../data/placeholder-title"
 import { summarizeTodos, type TodoSubState } from "../data/todo-types"
+import type { ActionRequired } from "../data/action-required"
+import type { SessionStatusKind } from "../data/session-status"
 import type { Notice } from "./notices"
 
 function esc(s: string): string {
@@ -249,10 +251,90 @@ interface CardCtx {
   decisions: Record<string, import("evolutional-agent-structure/lib/board-transitions").ReattachDecision>
   /** Todo sub-state per in-progress WI id (WI-038). */
   todoSubStates: Record<string, TodoSubState>
+  /** Action-required per SESSION id (WI-043): keyed by owner_session / session id. */
+  actionRequired: Record<string, ActionRequired>
+  /** Live processing status per SESSION id (WI-044): busy/retry/idle. Absent ⇒ unknown. */
+  sessionStatus: Record<string, SessionStatusKind>
 }
 
 function shortSes(id: string): string {
   return id.length > 16 ? id.slice(0, 16) + "…" : id
+}
+
+/**
+ * "Action required" badges (WI-043): the pulsing eye-catchers shown when the
+ * card's owning SESSION is blocked waiting on the user. Keyed by session id
+ * (owner_session for a WI card, the session's own id for a session-only card).
+ *
+ * Two distinct, user-named states — a pending QUESTION needing an answer
+ * ("❓ needs answer") and a pending command/permission needing approval
+ * ("✋ needs approval"). If a session has BOTH, both badges render. Absent
+ * session id, or a session absent from the map, ⇒ nothing (the common,
+ * unblocked case; graceful when the backend was unreachable this tick).
+ *
+ * Pure read off the resolved map — no SDK call here (I-192 bundle boundary).
+ * The badges reuse the `pulse` keyframe (as DREAMING does) so they draw the eye.
+ */
+function actionRequiredBadges(sessionId: string | null, ctx: CardCtx): string {
+  if (!sessionId) return ""
+  const ar = ctx.actionRequired[sessionId]
+  if (!ar) return ""
+  const badges: string[] = []
+  if (ar.awaitingQuestion) {
+    const n = ar.questionCount > 1 ? ` (${ar.questionCount})` : ""
+    const tip = ar.questionHeader
+      ? `the owning session is asking: "${ar.questionHeader}" — answer it in the session (WI-043)`
+      : "the owning session is waiting on an answer to a question (WI-043)"
+    badges.push(
+      `<span class="badge badge-action badge-action-question" title="${esc(tip)}">❓ needs answer${n}</span>`,
+    )
+  }
+  if (ar.awaitingPermission) {
+    const n = ar.permissionCount > 1 ? ` (${ar.permissionCount})` : ""
+    badges.push(
+      `<span class="badge badge-action badge-action-permission" title="the owning session is waiting on a command/permission approval (WI-043)">✋ needs approval${n}</span>`,
+    )
+  }
+  return badges.join(" ")
+}
+
+/**
+ * "Processing status" badge (WI-044): the live busy/retrying/idle indicator for
+ * the card's owning SESSION. Keyed by session id (owner_session for a WI card,
+ * the session's own id for a session-only card).
+ *
+ * ── 4-state precedence (user-confirmed) ─────────────────────────────────────
+ *   1. WAITING-FOR-INPUT WINS. If the session has a pending question/permission
+ *      (action-required), we render NO status badge — the ❓/❗ badges already
+ *      carry that truth. One visual truth per card, and a session blocked on the
+ *      user is typically reported idle by /session/status anyway, so a naive
+ *      "idle" here would actively mislead.
+ *   2. else busy  → "⚙ working" (pulses, to read as live activity).
+ *   3. else retry → "⟳ retrying" (DISTINCT — a provider error being retried is
+ *      neither cleanly busy nor idle; tooltip from the raw message/attempt).
+ *   4. else idle  → "✓ idle" (static). Tooltip says "idle", NEVER "done" — Done
+ *      is DRM/column-driven, never status-driven (W-030).
+ *   else (session id absent from the map / degraded read) → NO badge. Per the
+ *   active-only endpoint finding, absence means idle-OR-unknown, indistinguishable
+ *   — we never synthesise "idle" from absence (unknown ≠ idle, SNG-046).
+ *
+ * Pure read off the resolved maps — no SDK call here (I-192 bundle boundary).
+ */
+function sessionStatusBadge(sessionId: string | null, ctx: CardCtx): string {
+  if (!sessionId) return ""
+  // (1) waiting-for-input wins — suppress the status badge entirely.
+  const ar = ctx.actionRequired[sessionId]
+  if (ar && (ar.awaitingQuestion || ar.awaitingPermission)) return ""
+  const status = ctx.sessionStatus[sessionId]
+  if (!status) return "" // absent ⇒ unknown/idle, indistinguishable → no badge
+  switch (status) {
+    case "busy":
+      return `<span class="badge badge-status badge-status-busy" title="the owning session is actively processing (WI-044)">⚙ working</span>`
+    case "retry":
+      return `<span class="badge badge-status badge-status-retry" title="the owning session hit a provider error and is retrying (WI-044)">⟳ retrying</span>`
+    case "idle":
+      return `<span class="badge badge-status badge-status-idle" title="the owning session is idle — not currently processing (this is NOT 'done'; completion is dream/column-driven) (WI-044)">✓ idle</span>`
+  }
 }
 
 /**
@@ -343,6 +425,14 @@ function createForm(status: "backlog" | "todo"): string {
 function itemCard(item: WorkItem, ctx: CardCtx): string {
   const { guiBaseUrl, mirror, writesEnabled } = ctx
   const chips: string[] = []
+  // Action-required first (WI-043) so the "needs answer / needs approval" badge
+  // leads the chip row and catches the eye. Keyed by the item's owning session.
+  const actionBadges = actionRequiredBadges(item.owner_session, ctx)
+  if (actionBadges) chips.push(actionBadges)
+  // Processing status next (WI-044): busy/retrying/idle. Suppressed by the
+  // helper when action-required is present (one visual truth per card).
+  const statusBadge = sessionStatusBadge(item.owner_session, ctx)
+  if (statusBadge) chips.push(statusBadge)
   if (item.priority) chips.push(`<span class="chip chip-prio-${esc(item.priority)}">${esc(item.priority)}</span>`)
   for (const t of item.tags) chips.push(`<span class="chip">${esc(t)}</span>`)
   if (item.paused) chips.push('<span class="badge badge-paused" title="parked — resume the same session (§5.5)">paused</span>')
@@ -385,12 +475,18 @@ function itemCard(item: WorkItem, ctx: CardCtx): string {
   </div>`
 }
 
-function sessionOnlyCard(s: SessionCard): string {
+function sessionOnlyCard(s: SessionCard, ctx: CardCtx): string {
+  // A bare awakened session (no WI yet) can still be blocked on the user OR be
+  // actively processing; key both badges by the session's OWN id (WI-043/044).
+  const actionBadges = actionRequiredBadges(s.id, ctx)
+  const statusBadge = sessionStatusBadge(s.id, ctx)
+  const chips = [actionBadges, statusBadge].filter(Boolean).join(" ")
   return `<div class="card session-only" data-key="ses:${esc(s.id)}">
     <div class="cap-head">
       <span class="cap-name">${esc(truncate(s.title, 80))}</span>
       <a class="open-link" href="${esc(s.openUrl)}" target="_blank" rel="noopener">Open ↗</a>
     </div>
+    ${chips ? `<div class="chips">${chips}</div>` : ""}
     <div class="cap-desc mono">${esc(s.id)}</div>
     <div class="cap-desc dim">session-only — awakened, no work item yet · updated ${fmtTime(s.updated)}</div>
   </div>`
@@ -425,7 +521,7 @@ function kanbanSection(
   type ProgressEntry = { key: string; tie: string; html: string }
   const progressEntries: ProgressEntry[] = [
     ...board.inProgress.map((i) => ({ key: latestAt(i), tie: i.id, html: card(i) })),
-    ...board.sessionOnly.map((s) => ({ key: s.updated, tie: s.id, html: sessionOnlyCard(s) })),
+    ...board.sessionOnly.map((s) => ({ key: s.updated, tie: s.id, html: sessionOnlyCard(s, ctx) })),
   ]
   progressEntries.sort((a, b) => (a.key !== b.key ? b.key.localeCompare(a.key) : b.tie.localeCompare(a.tie)))
   const inProgress = progressEntries.map((e) => e.html)
@@ -539,6 +635,18 @@ tr.active-dream td { background:#1c2128; }
 .badge-paused { background:#8b949e22; color:#8b949e; border:1px solid #8b949e55; }
 .badge-nodream { background:#d2992222; color:#d29922; border:1px solid #d2992255; }
 .badge-problem { background:#f8514922; color:#f85149; border:1px solid #f8514955; }
+/* Action-required (WI-043): pulses (reusing the DREAMING keyframe) so a session
+   blocked on the user catches the eye. Two distinct states, two colours:
+   question=amber (answer needed), permission=blue (approval needed). */
+.badge-action { animation:pulse 1.6s infinite; font-weight:600; }
+.badge-action-question { background:#d2992222; color:#d29922; border:1px solid #d2992288; }
+.badge-action-permission { background:#58a6ff22; color:#58a6ff; border:1px solid #58a6ff88; }
+/* Processing status (WI-044): live busy/retry/idle. busy & retry pulse (active),
+   idle is static. Suppressed by the renderer when action-required is present. */
+.badge-status { font-weight:600; }
+.badge-status-busy { background:#3fb95022; color:#3fb950; border:1px solid #3fb95088; animation:pulse 1.6s infinite; }
+.badge-status-retry { background:#db6d2822; color:#db6d28; border:1px solid #db6d2888; animation:pulse 1.6s infinite; }
+.badge-status-idle { background:#8b949e22; color:#8b949e; border:1px solid #8b949e55; }
 .lane { margin-top:.45rem; display:flex; gap:.5rem; align-items:baseline; }
 .lane-count { font-family:ui-monospace,monospace; font-size:.72rem; color:#8b949e; white-space:nowrap; }
 .lane ul { list-style:none; margin:0; padding:0; font-size:.75rem; }
@@ -688,6 +796,8 @@ export function renderBoardBody(state: BoardState, notices: Notice[] = []): stri
     sessionBackend: state.sessionBackend,
     decisions: state.promoteDecisions,
     todoSubStates: state.todoSubStates,
+    actionRequired: state.actionRequired,
+    sessionStatus: state.sessionStatus,
   }
   const noticesHtml =
     notices.length === 0

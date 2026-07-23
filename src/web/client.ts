@@ -128,6 +128,47 @@ stampFreshness(lastGood?.buildSha)
 // baseline for the morph (so lastGood is populated). Start polling on interval.
 setInterval(poll, POLL_MS)
 
+// ── Refresh-on-reopen (tab re-focus / bfcache restore) ──────────────────────
+//
+// The interval poll is the steady-state case, but a BACKGROUNDED tab has its
+// setInterval throttled by the browser (often to ≥1/min), so a user returning
+// to the board can stare at stale state for far longer than POLL_MS. Fire an
+// immediate poll() the moment the tab becomes visible again so the board is
+// fresh right away — the interval is untouched and keeps running.
+//
+// poll() is idempotent and self-guarding (holds last-known-good on failure), so
+// an extra invocation here is always safe — no dedup/debounce needed (I-186:
+// the morph won't disturb the open modal or scroll/focus; SHADOW-006: lean on
+// idempotence rather than hand-tuning per-browser). We wire THREE signals for
+// portability across engines, all funnelling into the same refresh:
+//
+//   • visibilitychange → refresh only on the hidden→visible EDGE (the standard
+//     "became visible" pattern). Covers tab switch, unminimize, wake.
+//   • pageshow          → covers a bfcache restore (back/forward into the board),
+//     which does NOT fire visibilitychange but DOES fire pageshow. We refresh on
+//     any pageshow that lands on a visible page (event.persisted is the bfcache
+//     hint, but we don't gate on it — a plain reload's pageshow re-poll is a
+//     harmless no-op given idempotence).
+//   • focus             → belt-and-braces fallback for engines/versions where
+//     visibilitychange is unreliable on navigation (SHADOW-006, iOS/iPadOS
+//     Safari especially). Redundant with the above on well-behaved browsers;
+//     idempotence makes the redundancy free.
+//
+// W-093 caution: the guard below (skip when still hidden) must NOT silently
+// swallow a genuine became-visible transition — it only short-circuits the
+// hidden case, and every visible path reaches poll(). No downstream early-return
+// stands between this trigger and the fetch.
+function refreshIfVisible(): void {
+  // document.hidden is the portable read; visibilityState === "visible" is the
+  // same edge said the other way. Only act when the page is actually visible.
+  if (document.hidden) return
+  void poll()
+}
+
+document.addEventListener("visibilitychange", refreshIfVisible)
+window.addEventListener("pageshow", refreshIfVisible)
+window.addEventListener("focus", refreshIfVisible)
+
 // ── Confirmation modal (I-206) ──────────────────────────────────────────────
 //
 // A UX gate purely in FRONT of the already-correct locked write path
