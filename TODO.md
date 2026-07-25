@@ -65,3 +65,31 @@ feature that was later replaced by the file-watcher path.
 wire a reload/notification action when `snapshotChanged` is true (restoring the original intent).
 Verify first whether `file.watcher.updated` fires reliably in all deployment scenarios (e.g. remote
 mounts), which may be why the session-based snapshot check existed as a fallback.
+
+---
+
+### 4. Cross-project routing wakes the wrong coordinator
+**File:** `src/lib/nervous-system.ts` (`wakeCoordinator`, `getCoordinatorSessionFor`), `src/hooks.ts` (`session.idle` handler)
+**Status:** Observed live. Misroutes cross-thread notifications; no data loss, but noisy and misleading.
+
+When a dormant capability has pending inbox mail, the plugin wakes "a" coordinator via
+`getCoordinatorSessionFor()`, which falls back to *any* non-capability session when the group link
+is missing. In a multi-project workspace this surfaces another project's routing notifications to
+whichever coordinator happens to be active.
+
+Observed: a HIVE-plugin coordinator session repeatedly received "routing needed" wakes for
+`game-systems` and `flutter-web` — capabilities whose pending work belonged to the Rain- and
+kindergarten-planner threads respectively, owned by different coordinator sessions.
+
+The active coordinator cannot act on that mail without pulling another project's work into the
+wrong thread (and results would route back to the wrong coordinator).
+
+**Action:** Make the wake target group-aware. Options:
+- Prefer the capability's own `groupID` coordinator; only fall back to "any coordinator" if that
+  session is genuinely gone. (`getCoordinatorSessionFor` already accepts a child session ID — the
+  `session.idle` path should pass the dormant capability's session so its group is used.)
+- If the owning coordinator is unavailable, consider suppressing the wake entirely rather than
+  waking an unrelated one — the mail is already durable on disk and will be delivered when the
+  owning coordinator next resumes that capability (verified behaviour since the groupID fix).
+- Optionally annotate the wake notification with the owning group/project so a receiving
+  coordinator can tell at a glance that it is not theirs.
