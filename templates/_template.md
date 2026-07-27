@@ -36,6 +36,10 @@ This capability activates when:
 4. Report results
 5. Assess own effectiveness
 
+## Written Deliverables
+
+Match the length of written documents to what the task needs: cover the substance, but do not pad with filler sections, redundant summaries, or boilerplate.
+
 ## Self-Modification Protocol
 
 Monitor your own patterns. If you notice:
@@ -102,6 +106,7 @@ This capability does NOT handle:
 - Actual project work (this is a template)
 - Spawning other capabilities (HIVE does that)
 - Self-preservation (no ego)
+- Delegating to subagents work you could finish yourself in a handful of tool calls — and never spawn one to double-check your own work
 
 ## Evolution History
 
