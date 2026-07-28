@@ -23,6 +23,10 @@
 
 Miss any one and it looks broken. Details below.
 
+Note that (2) and (4) fail with the **same** `Target closed` symptom, and (2) comes back
+on its own every time the container image is rebuilt. When you see `Target closed`, run
+the `ldd` test in *"`Target closed` has two causes"* before restarting anything.
+
 ---
 
 ## Prerequisites
@@ -178,8 +182,81 @@ After restart, the agent should have a `chrome-devtools` tool namespace with
 - `take_screenshot` (to a file under the OS temp dir) → **visual** capture; read
   the PNG back to eyeball the render.
 
-If `navigate_page` throws `Target closed`, you almost certainly missed
-`--chromeArg=--no-sandbox` (root) or the `executablePath` is wrong/stale.
+If `navigate_page` throws `Target closed`, do **not** start restarting things — see the
+next section. That symptom has more than one cause and only one of them is a config
+mistake.
+
+---
+
+## `Target closed` has two causes — diagnose before you act
+
+`Protocol error (Target.setDiscoverTargets): Target closed` on every call is the single
+most misleading failure in this stack, because it is what you get whenever the browser
+process dies at launch — *for any reason*. The MCP server itself stays alive and
+registered, so the tools are present and simply fail. Two independent causes produce a
+byte-identical symptom:
+
+1. **Running as root without `--chromeArg=--no-sandbox`** — a config mistake (Step 3).
+2. **Chromium's system shared libraries are missing** — an *environment* fault, and the
+   nastier one, because the browser binary is still sitting there at full size looking
+   perfectly healthy.
+
+Cause (2) is what a container rebuild does to you. The Playwright browser cache lives on
+a persisted volume (`/root/.cache/ms-playwright/`), so the 466MB
+`chromium-1228/chrome-linux/chrome` binary survives untouched — while the ~20 apt
+packages it dynamically links against are gone with the old image layer: `libglib-2.0`,
+`libnss3`, `libnspr4`, `libatk-bridge`, `libcups`, `libdbus-1`, `libgbm`, `libcairo`,
+`libpango`, `libxkbcommon`, `libasound`, and several X11 libs. Everything you would
+naturally check — is the binary there, is it the right size, is the path right, is the
+MCP registered — passes. (Observed 2026-07-28 on Ubuntu 26.04 aarch64.)
+
+**Discriminating test — run this FIRST, before restarting anything:**
+
+```bash
+ldd /root/.cache/ms-playwright/chromium-*/chrome-linux/chrome | grep 'not found'
+```
+
+Any output means cause (2). Silence means the libs are fine, so look at cause (1) — the
+`--chromeArg=--no-sandbox` flag and the `executablePath`. Executing the binary directly
+(the `LAUNCH FAIL` check in Step 2) tells you the same thing and prints the loader error
+verbatim. Both tests take under a second and are strictly more informative than any
+restart.
+
+**Fix for cause (2):**
+
+```bash
+apt-get update && npx --yes playwright@latest install-deps chromium
+```
+
+Use `playwright@latest` rather than an older pinned Playwright: Ubuntu 24.04+ renamed a
+number of these packages with a `t64` suffix (the 64-bit `time_t` transition), and only
+recent Playwright versions know the new names. An older `install-deps` fails on
+unresolvable package names. The `apt-get update` is not optional on a freshly rebuilt
+image — the package lists are usually empty.
+
+**Durable fix (host-side, cannot be applied from in here):** add to the image build so
+the libs are baked in alongside the cached browser —
+
+```dockerfile
+RUN npx --yes playwright@latest install-deps chromium
+```
+
+The Dockerfile lives outside `/workspace` and is not writable by the agent. Hand this
+line to the user; until it is applied, every container rebuild reintroduces the fault.
+
+> ### Do not kill the MCP server as a speculative fix
+>
+> **opencode does not respawn a killed MCP server.** Killing the `chrome-devtools-mcp`
+> process subtree hoping opencode notices and restarts it converts a *broken* server
+> into an *absent* one — the tools disappear from the toolset entirely, and the only way
+> back is a full opencode restart. Worse, a restart never addresses either cause above,
+> so you spend a user-side restart and land exactly where you started, minus the ability
+> to run the diagnostics. This was the actual cost of the 2026-07-28 incident: the
+> wasted restart, not the missing libs.
+>
+> Restarting opencode is the correct move for exactly one thing: **picking up MCP config
+> changes** (Step 4). It fixes nothing at runtime. Diagnose with `ldd` first; restart
+> only once you know a config edit is what you need to load.
 
 ---
 
@@ -240,6 +317,9 @@ EOF
 | --- | --- | --- |
 | `libglib-2.0.so.0: cannot open shared object file` at launch | System libs missing | `npx playwright install-deps chromium` (Step 2) |
 | `Target.setDiscoverTargets: Target closed` on first navigate | Running as root without `--no-sandbox` | Add `--chromeArg=--no-sandbox` (Step 3) |
+| `Target closed` on **every** call, MCP alive and registered, config unchanged and previously working | System libs vanished on a container rebuild while the cached browser binary survived | `ldd ... \| grep 'not found'` to confirm, then `apt-get update && npx --yes playwright@latest install-deps chromium` |
+| `install-deps` fails on unresolvable package names | Ubuntu 24.04+ `t64` package renames, old pinned Playwright | Use `playwright@latest` for `install-deps` |
+| Killed the MCP process, now the tools are gone entirely | opencode does **not** respawn a killed MCP server | Full opencode restart — so **don't kill it speculatively**; diagnose first |
 | MCP hunts for Chrome, can't find it | No stable Google Chrome installed | `--executablePath` at Playwright's chromium (Step 3) |
 | Config edited but tools absent | MCP registers only at session init | **Restart opencode** (Step 4) |
 | Path breaks after a Playwright upgrade | `chromium-<BUILD>` number changed | Re-resolve path / pin version / symlink (Step 3 caveat) |
@@ -251,7 +331,9 @@ EOF
 
 ## Environment this was validated on
 
-- **Arch:** aarch64 (arm64) Linux
+- **Arch:** aarch64 (arm64) Linux — Ubuntu 26.04 LTS as of the 2026-07-28 re-check
+  (the distro version matters for the `t64` package renames, see the `Target closed`
+  section)
 - **User:** root (hence `--no-sandbox`)
 - **Node:** v22.23.1, **npx:** 10.9.8
 - **Playwright browser:** `chromium-1228` at
