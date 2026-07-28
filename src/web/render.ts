@@ -21,6 +21,14 @@ import { displayTitle } from "../data/placeholder-title"
 import { summarizeTodos, type TodoSubState } from "../data/todo-types"
 import type { ActionRequired } from "../data/action-required"
 import type { SessionStatusKind } from "../data/session-status"
+import {
+  boardTitle,
+  deriveIconState,
+  fullMarkSvg,
+  headIconTags,
+  iconLabel,
+  type IconState,
+} from "./icon"
 import type { Notice } from "./notices"
 
 function esc(s: string): string {
@@ -533,12 +541,49 @@ function kanbanSection(
   </div>`
 }
 
-/** Minimal page shell for transition results (refusals, lock retry, errors). */
+/**
+ * Minimal page shell for transition results (refusals, lock retry, errors).
+ *
+ * It carries the same identity tags as the board — otherwise a POST result page
+ * would flash a blank/default favicon and a light theme-color mid-transition,
+ * and the browser would fire a doomed request for the non-existent
+ * /favicon.ico. This page has no BoardState (it's a write outcome, not a
+ * render of the board), so it uses the neutral dim mark deliberately: claiming
+ * "active" or "dreaming" here would be inventing state, not deriving it.
+ */
+const QUIET_ICON: IconState = { session: "quiet", dreaming: false, count: 0 }
+
 export function renderMessagePage(title: string, fragments: string[]): string {
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>hive-board — ${esc(title)}</title>
+${headIconTags(QUIET_ICON)}
 <style>${CSS}</style></head>
-<body><h1>${esc(title)}</h1>${fragments.join("\n")}</body></html>`
+<body><h1>${headerMark(QUIET_ICON)}${esc(title)}</h1>${fragments.join("\n")}</body></html>`
+}
+
+/**
+ * The full mark, inline, at header size. This is where the richness belongs —
+ * the mesh and the staggered strata are legible here in a way they never are in
+ * a 16px tab, so the header gets the real drawing rather than a scaled favicon.
+ *
+ * `animate: true` emits `class="lit"` / `class="dreaming"` hooks that the page
+ * stylesheet pulses — but only inside a `prefers-reduced-motion: no-preference`
+ * block, so motion is opt-IN and a user who asked for stillness gets a static
+ * mark (see CSS). The favicon is never animated at all (icon.ts header).
+ */
+function headerMark(icon: IconState): string {
+  return `<span class="hb-mark">${fullMarkSvg(icon, {
+    idPrefix: "hdr",
+    animate: true,
+    // 40, not 34: rasterised at true pixel size the mesh nodes only separate
+    // cleanly from ~40px up (34 was legible but crowded, and the bottom stratum
+    // crept into the panel edge). Still small enough to sit on the 1.3rem h1
+    // baseline. The design's "180px+" guidance is about the FULL mark being the
+    // richer drawing, not a hard floor — the floor is where the mesh muddies,
+    // which is why the reduced mark exists for 16/32.
+    size: 40,
+    title: `hive-board — ${iconLabel(icon)}`,
+  })}</span>`
 }
 
 // ── Session mirror diagnostics (Phase 1.5 back-fill) ─────────────────────────
@@ -568,8 +613,21 @@ const CSS = `
 :root { color-scheme: dark; }
 * { box-sizing: border-box; }
 body { background:#0d1117; color:#c9d1d9; font:14px/1.45 system-ui, sans-serif; margin:0; padding:1.5rem 2rem 4rem; }
-h1 { font-size:1.3rem; margin:0; }
+h1 { font-size:1.3rem; margin:0; display:flex; align-items:center; gap:.55rem; flex-wrap:wrap; }
 h1 .phase { color:#8b949e; font-weight:400; font-size:.85rem; margin-left:.6rem; }
+/* The full mark beside the <h1> (icon.ts). Unlike the favicon — which is a
+   static data: URI by decision, since browsers won't animate SVG favicons and
+   background tabs clamp timers to ~1fps — this is a real element in the
+   document, so the lit mesh and a dreaming stratum may breathe. Motion is
+   OPT-IN: everything below sits inside prefers-reduced-motion:no-preference,
+   so a user who asked for stillness gets the identical mark, held still. */
+.hb-mark { display:inline-flex; flex:0 0 auto; line-height:0; }
+.hb-mark svg { display:block; }
+@media (prefers-reduced-motion: no-preference) {
+  .hb-mark svg .lit { animation:mark-breathe 2.4s ease-in-out infinite; }
+  .hb-mark svg g.dreaming { animation:mark-breathe 3.4s ease-in-out infinite; }
+}
+@keyframes mark-breathe { 50% { opacity:.55; } }
 h2 { font-size:1.05rem; margin:2rem 0 .8rem; border-bottom:1px solid #21262d; padding-bottom:.4rem; }
 h2 .count { color:#8b949e; font-weight:400; font-size:.85rem; }
 .meta { color:#8b949e; font-size:.8rem; margin-top:.3rem; }
@@ -822,7 +880,7 @@ export function renderBoardBody(state: BoardState, notices: Notice[] = []): stri
   const recentRows = dreams.recentArtifacts.map(recentArtifactRow).join("\n")
   const messageRows = messages.map(messageRow).join("\n")
 
-  return `<h1>hive-board <span class="phase">Phase 1 · read-only HIVE state viewer</span></h1>
+  return `<h1>${headerMark(deriveIconState(state))}hive-board <span class="phase">Phase 1 · read-only HIVE state viewer</span></h1>
 <div class="meta mono">workspace ${esc(state.workspaceRoot)} · generated ${esc(state.generatedAt)} · live refresh 15s · ${buildBadge(state.buildSha)}</div>
 
 <h2>Board <span class="count">(${state.items.length} items · ${state.board.sessionOnly.length} session-only)</span></h2>
@@ -878,14 +936,23 @@ ${
  * place — NO meta-refresh, so no full-document rebuild (the old flicker + form
  * collapse root cause). The initial BoardState is inlined as a JSON island so
  * the client's first diff has a baseline without an extra fetch.
+ *
+ * The <title> and the favicon are BOTH state-derived on this first paint, so a
+ * tab opened straight into an intervention already shows red + a count without
+ * waiting a poll cycle. client.ts then keeps both in step (they live in the
+ * shell, outside #board-root, so the morph can't reach them). The header mark
+ * needs no such handling — it rides inside renderBoardBody and is re-rendered
+ * by the shared renderer on every morph.
  */
 export function renderPage(state: BoardState, notices: Notice[] = []): string {
+  const icon = deriveIconState(state)
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>hive-board — mission control</title>
+<title>${esc(boardTitle(icon))}</title>
+${headIconTags(icon)}
 <style>${CSS}</style>
 </head>
 <body>

@@ -19,6 +19,7 @@
  */
 import { renderBoardBody } from "./render"
 import { morph } from "./morph"
+import { boardTitle, deriveIconState, faviconHref } from "./icon"
 import type { BoardState } from "../data/state"
 
 const POLL_MS = 15_000
@@ -94,6 +95,37 @@ function renderInto(state: BoardState): HTMLElement {
   return next
 }
 
+/**
+ * Icon identity (favicon + title) — the two channels, restamped every tick.
+ *
+ * These live in <head>, deliberately OUTSIDE <main id="board-root">, which is
+ * the only subtree morph() touches. So unlike the build badge below, they are
+ * not reset by the morph — but they are also not updated by it, which is
+ * exactly why this function exists. Keeping icon markup out of the morph is a
+ * hard rule, not an accident: the morph reconciles attributes bidirectionally,
+ * and letting it near identity attributes is how the live-refresh loop got
+ * frozen on tick 1 once before.
+ *
+ * The derivation is shared with the server render (deriveIconState in icon.ts),
+ * so the first paint and every subsequent poll agree by construction rather
+ * than by two hand-kept-in-sync copies.
+ *
+ * Writes are guarded by an equality check: assigning the same href would make
+ * some browsers re-decode and re-rasterise the icon 4× a minute forever, and
+ * re-assigning document.title needlessly churns the tab strip.
+ */
+function stampIdentity(state: BoardState): void {
+  const icon = deriveIconState(state)
+
+  const title = boardTitle(icon)
+  if (document.title !== title) document.title = title
+
+  const link = document.querySelector<HTMLLinkElement>('link[rel="icon"]')
+  if (!link) return // no icon link in this shell — nothing to swap, not an error
+  const href = faviconHref(icon)
+  if (link.getAttribute("href") !== href) link.setAttribute("href", href)
+}
+
 function paint(state: BoardState): void {
   const root = document.getElementById("board-root")
   if (!root) return
@@ -101,6 +133,10 @@ function paint(state: BoardState): void {
   // The badge lives inside the morphed subtree, so the mismatch verdict must be
   // (re)stamped AFTER every morph — the morph resets it to the server render.
   stampFreshness(state.buildSha)
+  // The favicon/title live OUTSIDE it, so they must be stamped explicitly. Note
+  // the header full mark needs neither: it rides inside #board-root and the
+  // shared renderer redraws it as part of the morph.
+  stampIdentity(state)
 }
 
 let lastGood: BoardState | null = readIsland()
@@ -123,6 +159,13 @@ export async function poll(): Promise<void> {
 // tab that was left open across a server restart flips to "stale" on the very
 // next paint (initial island or first poll), not only after a change lands.
 stampFreshness(lastGood?.buildSha)
+
+// The server already rendered the state-derived favicon + title into <head>, so
+// this is normally a no-op (the equality guards make it free). It matters when
+// the shell and the island disagree — e.g. a cached document restored from
+// bfcache — so the identity matches the state we're actually about to diff
+// against, without waiting a full poll interval.
+if (lastGood) stampIdentity(lastGood)
 
 // The server already painted the initial state; the island is only a diff
 // baseline for the morph (so lastGood is populated). Start polling on interval.
