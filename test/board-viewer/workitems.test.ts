@@ -2,7 +2,12 @@ import { describe, expect, test } from "bun:test"
 import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
-import { lineageSessions, loadWorkItems, parseWorkItem } from "../../src/board-viewer/data/workitems"
+import {
+  lineageSessions,
+  loadWorkItems,
+  parseWorkItem,
+  sortForColumn,
+} from "../../src/board-viewer/data/workitems"
 
 const FIXTURES = path.join(import.meta.dir, "..", "..", "fixtures", "board")
 
@@ -103,6 +108,87 @@ describe("invariant surfacing (W-030 — view-side, on top of owner's parse)", (
   test("unknown status is normalized to backlog by the OWNER's parser (its canon)", () => {
     const i = parseWorkItem("---\nid: WI-097\ntitle: x\nstatus: doing\n---\n")
     expect(i.status).toBe("backlog")
+  })
+})
+
+describe("sortForColumn — full-precision recency (I-191/W-081)", () => {
+  /**
+   * Build an unowned Backlog/Todo item. `updated` is DATE-ONLY on purpose —
+   * that is exactly the field whose coarseness caused the bug.
+   */
+  function item(
+    id: string,
+    priority: "high" | "medium" | "low",
+    updated: string,
+    transitionsAt: string[],
+  ) {
+    return parseWorkItem(
+      [
+        "---",
+        `id: ${id}`,
+        "title: x",
+        "status: backlog",
+        `priority: ${priority}`,
+        `updated: ${updated}`,
+        transitionsAt.length === 0
+          ? "transitions: []"
+          : ["transitions:", ...transitionsAt.map((at) => `  - { at: ${at}, to: backlog, by: t }`)].join(
+              "\n",
+            ),
+        "---",
+        "",
+      ].join("\n"),
+    )
+  }
+
+  const ids = (items: ReturnType<typeof item>[]) => sortForColumn(items).map((i) => i.id)
+
+  test("priority still dominates recency", () => {
+    const older = item("WI-001", "high", "2026-01-01", ["2026-01-01T00:00:00Z"])
+    const newer = item("WI-002", "low", "2026-08-03", ["2026-08-03T12:00:00Z"])
+    expect(ids([newer, older])).toEqual(["WI-001", "WI-002"])
+  })
+
+  test("same-day items order by transitions[].at, not by insertion order", () => {
+    // THE BUG: both `updated: 2026-08-03`. Before the fix these compared equal
+    // and JS sort fell back to the order readdir happened to return.
+    const early = item("WI-051", "high", "2026-08-03", ["2026-08-03T08:00:00Z"])
+    const late = item("WI-052", "high", "2026-08-03", ["2026-08-03T19:30:00Z"])
+    // Newest first, in BOTH input orders — the property insertion order breaks.
+    expect(ids([early, late])).toEqual(["WI-052", "WI-051"])
+    expect(ids([late, early])).toEqual(["WI-052", "WI-051"])
+  })
+
+  test("the log is not assumed sorted — the MAX at wins", () => {
+    const a = item("WI-010", "medium", "2026-08-03", [
+      "2026-08-03T20:00:00Z",
+      "2026-08-03T09:00:00Z", // out of order on purpose
+    ])
+    const b = item("WI-011", "medium", "2026-08-03", ["2026-08-03T12:00:00Z"])
+    expect(ids([b, a])).toEqual(["WI-010", "WI-011"])
+  })
+
+  test("empty transitions[] falls back to date-only `updated`, never crashes", () => {
+    const noLog = item("WI-020", "medium", "2026-08-02", [])
+    const withLog = item("WI-021", "medium", "2026-08-01", ["2026-08-01T23:59:59Z"])
+    expect(ids([withLog, noLog])).toEqual(["WI-020", "WI-021"])
+  })
+
+  test("a genuine tie breaks deterministically on id, never on input order", () => {
+    const a = item("WI-030", "medium", "2026-08-03", ["2026-08-03T10:00:00Z"])
+    const b = item("WI-031", "medium", "2026-08-03", ["2026-08-03T10:00:00Z"])
+    expect(ids([a, b])).toEqual(["WI-031", "WI-030"])
+    expect(ids([b, a])).toEqual(["WI-031", "WI-030"])
+  })
+
+  test("sortForColumn does not mutate its input", () => {
+    const input = [
+      item("WI-040", "low", "2026-08-01", ["2026-08-01T01:00:00Z"]),
+      item("WI-041", "high", "2026-08-01", ["2026-08-01T02:00:00Z"]),
+    ]
+    const before = input.map((i) => i.id)
+    sortForColumn(input)
+    expect(input.map((i) => i.id)).toEqual(before)
   })
 })
 
