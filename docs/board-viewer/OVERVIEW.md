@@ -82,3 +82,29 @@ guard (`test/entrypoint-isolation.test.ts`), which fails if viewer code writes t
 if the plugin entrypoint reaches viewer code, or if server code leaks into the browser bundle.
 
 The work-item schema in [`SCHEMA.md`](SCHEMA.md) remains the contract between the two.
+
+## Reaching the pre-move history
+
+All 23 commits of the viewer's original repo were imported with `git subtree add`, so they are
+genuine ancestors of this repo's HEAD — not a flattened copy:
+
+```sh
+git merge-base --is-ancestor 5231176 HEAD && echo "full history present"
+
+# Browse the imported history. Paths are the PRE-MOVE ones (src/config.ts, not
+# src/board-viewer/config.ts) — the reshape happened in a later, separate commit.
+git log 12ae0c5^2
+git log 12ae0c5^2 -- src/config.ts
+```
+
+**`git log --follow src/board-viewer/<file>` returns nothing, and that is not history loss.**
+History simplification will not traverse a subtree merge, so the `--follow` heuristic stops dead
+at the reshape commit. Use the `12ae0c5^2` form above — it reaches the same commits through the
+merge's second parent. Nobody rediscovers this syntax by guessing; that is why it is written down
+here rather than left to be inferred.
+
+This section was originally `projects/hive-board/MOVED.md`. That directory was deleted on
+2026-08-03 once the container entrypoint was migrated to launch the viewer from this package, so
+this file is now the only record of the incantation. The GitHub remote `lohnn/hive-board` still
+exists and has been pushed an archive commit marking it superseded; it is not deleted, and the
+commits referenced above live here regardless.
