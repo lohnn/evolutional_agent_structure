@@ -4,7 +4,7 @@
  * identity: bind, awaken auto-register) and the hive-board viewer app
  * (board-side: create, pause/unpause, true-demote, manual done).
  *
- * Contract: projects/hive-board/docs/SCHEMA.md v1.0 + DESIGN §5. All writes go
+ * Contract: docs/board-viewer/SCHEMA.md v1.0 + DESIGN §5. All writes go
  * through board-store (locked, temp+rename, append-only — SCHEMA §4a). Session
  * identity is the CALLER's problem: the plugin resolves it from the runtime
  * (context.sessionID, never agent self-report — W-009); the viewer performs
@@ -181,8 +181,19 @@ export function bindSession(
  * Pristine placeholder (Q15): a session-first auto-registered item that has
  * accrued ZERO information since birth — origin session-first, never dreamt,
  * body unchanged since creation (hash equals the creation-time spec_hash
- * stamped by autoRegister), and no subtask mirror recorded. Only such items
+ * stamped by autoRegister), and no `subtasks` authored on it. Only such items
  * may be absorbed; anything else refuses so accrued content is never destroyed.
+ *
+ * IMPORTANT — this is evaluated on the item being DISSOLVED, never on the item
+ * being bound to. An idea-first item carrying an author-written plan is always
+ * the SURVIVOR, so its subtasks are never consulted here and never destroyed.
+ *
+ * The `subtasks.length === 0` condition was written when `subtasks` was
+ * believed to be a TodoWrite mirror; under the 2026-08-03 reclassification
+ * (SCHEMA §4/§4c) it reads as "no authored content accrued on this
+ * placeholder", which is a BETTER fit for this gate's stated purpose than the
+ * meaning it was written with. Re-verified on its hardest inputs — see the
+ * "reclassification:" tests in test/board-transitions.test.ts.
  */
 function isPristinePlaceholder(item: WorkItem): boolean {
   return (

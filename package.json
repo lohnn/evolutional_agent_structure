@@ -1,12 +1,21 @@
 {
   "name": "evolutional-agent-structure",
-  "version": "0.4.41",
+  "version": "0.4.48",
   "description": "HIVE — Evolutional agent structure for OpenCode. Collective intelligence that spawns, merges, splits, mutates, and dissolves capabilities as needed.",
   "main": "src/index.ts",
   "type": "module",
+  "bin": {
+    "hive-board": "./src/board-viewer/server.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "board": "bun run src/board-viewer/server.ts"
+  },
   "exports": {
     ".": "./src/index.ts",
     "./tui": "./src/tui.ts",
+    "./board-viewer": "./src/board-viewer/index.ts",
     "./lib/dream-state": "./src/lib/dream-state.ts",
     "./lib/dream-artifacts": "./src/lib/dream-artifacts.ts",
     "./lib/frontmatter": "./src/lib/frontmatter.ts",
@@ -27,7 +36,10 @@
     "@opencode-ai/sdk": "^1.15.7"
   },
   "devDependencies": {
+    "@happy-dom/global-registrator": "^20.11.1",
+    "@types/bun": "^1.3.14",
     "@types/node": "^25.9.1",
+    "happy-dom": "^20.11.1",
     "typescript": "^6.0.3"
   }
 }

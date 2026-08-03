@@ -106,6 +106,16 @@ process.exit(errors.length ? 1 : 0);
 
 Exit code is `1` on any captured error — wire it into scripts as a hard gate.
 
+### "BUILT bundle" when there is no build directory
+Some targets in this repo have **no `build/`/`dist/` artifact to point at** — the hive-board
+viewer bundles its browser client in memory with `Bun.build` and serves it at `/client.js`
+(there is no build script; `main`/`exports`/`bin` point at `src/*.ts` directly). That does
+**not** exempt them from the gate, and it does not mean "drive the dev source": the emitted
+bundle *is* what the running server hands the browser. So for in-memory bundlers, **the BUILT
+bundle == the running server's output** — start the server and drive `http://127.0.0.1:<port>/`.
+The `/client.js` request appearing `200` in `list_network_requests` is your evidence the
+emitted bundle (not a source file) was executed.
+
 ### Interactive & host-embedded variants
 - **Interactive state** (modal / hover / in-flight edit): after load, drive the interaction
   (`page.click`, `page.hover`, `page.fill`) and screenshot the **OPEN / interactive** state.

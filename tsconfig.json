@@ -1,18 +1,40 @@
 {
+  // ONE tsconfig for the whole package — plugin runtime AND the absorbed board
+  // viewer (src/board-viewer/). There is NO build step: `main`/`exports` point
+  // at `src/*.ts` directly and `dist/` is gitignored and never loaded at
+  // runtime (W-026). `tsc --noEmit` is therefore the ONLY typecheck signal —
+  // do not go looking for a build artifact to prove correctness.
+  //
+  // The settings below are the UNION of what the two merged codebases need,
+  // taking the STRICTER value wherever they disagreed:
+  //   - types: node (plugin) + bun (viewer: Bun.serve/Bun.build, bun:sqlite,
+  //     import.meta.dir). The plugin already required a Bun host anyway —
+  //     src/index.ts transitively imports bun:sqlite via board-reconcile-db.
+  //   - lib DOM: the viewer's browser bundle (web/client.ts, morph.ts) is
+  //     real DOM code compiled for the browser.
+  //   - verbatimModuleSyntax + noUncheckedIndexedAccess came from the viewer
+  //     and are now applied to the plugin source too. That is deliberate:
+  //     I-178 — exported subpaths point at TypeScript SOURCE, so a consumer's
+  //     strictness type-checks OUR source. Holding the whole package to the
+  //     strictest plausible consumer setting is the point, not a side effect.
   "compilerOptions": {
-    "target": "ES2022",
+    "target": "ESNext",
     "module": "ESNext",
     "moduleResolution": "bundler",
+    "moduleDetection": "force",
     "esModuleInterop": true,
+    "verbatimModuleSyntax": true,
     "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noEmit": true,
+    // Plugin tests import sibling source with an explicit `.ts` extension.
+    // Safe under noEmit, and required now that `include` finally covers
+    // test/ — previously the plugin's tests were never type-checked at all.
+    "allowImportingTsExtensions": true,
     "skipLibCheck": true,
-    "outDir": "dist",
-    "rootDir": "src",
-    "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true,
-    "types": ["node"]
+    "types": ["node", "bun"],
+    "lib": ["ESNext", "DOM", "DOM.Iterable"]
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "test/**/*.ts"],
   "exclude": ["node_modules", "dist"]
 }
