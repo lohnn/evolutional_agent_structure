@@ -15,6 +15,7 @@
  * Mirror cards surviving the filter render in the In Progress column as
  * "session-only" cards (awakened session, no work item yet).
  */
+import { recencyKey } from "./recency"
 import type { SessionCard, SessionMirror } from "./sessions"
 import { sortForColumn, type WorkItem } from "./workitems"
 
@@ -28,35 +29,16 @@ export interface BoardColumns {
 }
 
 /**
- * Newest-first sort key for owned columns (In Progress / Done).
+ * Newest-first ordering for the owned columns (In Progress / Done).
  *
- * `updated` is DATE-ONLY (`today()` → "2026-07-21"), so every item touched on
- * the same calendar day collides and JS `sort` falls back to insertion (id)
- * order — a fresh in_progress item lands mid-cluster instead of on top (the
- * bug). We sort on the newest `transitions[].at` instead: a full-ISO,
- * second-precision timestamp written uniformly on every In-Progress/Done code
- * path (I-189), from the item's own append-only log (I-190) — an in-record key
- * that respects the portability invariant (I-144), no session/external call.
- *
- * The log is NOT assumed sorted — we take the max `at` defensively. An item
- * with an empty/missing `transitions[]` falls back to the date-only `updated`
- * (then `id`), so nothing crashes or vanishes.
+ * The recency key itself lives in data/recency.ts — ONE definition shared by
+ * every column and by the render layer's In-Progress interleave. See that
+ * module for why (short version: this logic used to exist in three places, and
+ * the I-191 bug was one of those copies falling behind the others).
  */
-function latestTransitionAt(item: WorkItem): string {
-  let max = ""
-  for (const t of item.transitions) {
-    if (t.at && t.at > max) max = t.at
-  }
-  return max
-}
-
 function byRecencyDesc(a: WorkItem, b: WorkItem): number {
-  const ta = latestTransitionAt(a)
-  const tb = latestTransitionAt(b)
-  // Fall back to date-only `updated` when a transition timestamp is absent, so
-  // an item with no log still slots by best-available recency.
-  const ka = ta || a.updated
-  const kb = tb || b.updated
+  const ka = recencyKey(a)
+  const kb = recencyKey(b)
   if (ka !== kb) return kb.localeCompare(ka)
   return b.id.localeCompare(a.id) // stable, deterministic tiebreak (newest id first)
 }

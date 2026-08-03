@@ -29,6 +29,9 @@ import {
   type WorkItemPriority,
   type WorkItemStatus,
 } from "../../lib/board-store"
+// Recency ordering is defined once, in the browser-safe leaf module recency.ts,
+// so every column and the render layer sort by exactly the same rule.
+import { recencyKey } from "./recency"
 
 export type { Subtask, TodoMirrorEntry, Transition, WorkItemStatus, WorkItemPriority }
 
@@ -115,42 +118,23 @@ export function loadWorkItems(boardDir: string): WorkItem[] {
 const PRIORITY_ORDER: Record<WorkItemPriority, number> = { high: 0, medium: 1, low: 2 }
 
 /**
- * Newest-first recency key — the SAME key board.ts uses for In Progress / Done.
+ * Column ordering for the not-yet-owned columns (Backlog / Todo): priority
+ * first, then recency, then a deterministic id tiebreak so a genuine tie can
+ * never fall through to readdir order (I-191/W-081 — four such tie-groups were
+ * live on the real board on 2026-08-03).
  *
- * `updated` is DATE-ONLY (`today()` → "2026-08-03"), so every item touched on
- * the same calendar day collides and JS `sort` silently degrades to insertion
- * (file-read) order (I-191/W-081). That fix landed for the owned columns but
- * never reached Backlog/Todo, where it is demonstrably live: on 2026-08-03 the
- * real board had FOUR tie-groups inside Backlog resolved by nothing but the
- * order readdir happened to return.
- *
- * So sort on the newest `transitions[].at` — full-ISO, second-precision, from
- * the item's own append-only log (I-190), an in-record key that respects the
- * portability invariant (I-144). The log is NOT assumed sorted; take the max
- * defensively. Empty/missing log falls back to date-only `updated` so nothing
- * crashes or vanishes.
- *
- * Deliberately NOT factored into a shared module with board.ts's identical
- * helper: render.ts carries a third copy for the same reason (I-192) — a module
- * spanning the server/client boundary is exactly what drags board-store into
- * the browser bundle. The duplication is the cheaper defect.
+ * The recency key is data/recency.ts#recencyKey — the SAME definition the owned
+ * columns and the render layer's In-Progress interleave use. Sorting is the one
+ * place where a second, subtly-different copy of that rule is most expensive:
+ * it produces no error, just a quietly wrong order.
  */
-function latestTransitionAt(item: WorkItem): string {
-  let max = ""
-  for (const t of item.transitions) {
-    if (t.at && t.at > max) max = t.at
-  }
-  return max || item.updated
-}
-
-/** Column ordering: not-yet-owned by priority then recency; owned by recency. */
 export function sortForColumn(items: WorkItem[]): WorkItem[] {
   return [...items].sort((a, b) => {
     const pa = PRIORITY_ORDER[a.priority]
     const pb = PRIORITY_ORDER[b.priority]
     if (pa !== pb) return pa - pb
-    const ka = latestTransitionAt(a)
-    const kb = latestTransitionAt(b)
+    const ka = recencyKey(a)
+    const kb = recencyKey(b)
     if (ka !== kb) return kb.localeCompare(ka)
     // Deterministic tiebreak (newest id first) — never insertion order.
     return b.id.localeCompare(a.id)

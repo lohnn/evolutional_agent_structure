@@ -18,6 +18,7 @@ import type { SessionCard, SessionMirror } from "../data/sessions"
 import type { Subtask, WorkItem } from "../data/workitems"
 import { absorbedLineage, lineageSessions } from "../data/lineage"
 import { displayTitle } from "../data/placeholder-title"
+import { recencyKey } from "../data/recency"
 import { summarizeTodos, type TodoSubState } from "../data/todo-types"
 import type { ActionRequired } from "../data/action-required"
 import type { SessionStatusKind } from "../data/session-status"
@@ -515,20 +516,20 @@ function kanbanSection(
   const card = (i: WorkItem) => itemCard(i, ctx)
   // In Progress interleaves WI cards with session-only cards into ONE
   // newest-first stream so the whole column reads consistently. Both keys are
-  // comparable full-ISO timestamps: WI cards by their latest transitions[].at
-  // (the same recency key board.ts sorts by — recomputed here to keep render
-  // browser-safe, transitions[] is a WorkItem field), session cards by their
-  // full-ISO `updated`. Ties fall back to a stable id/session-id compare.
-  // `latestAt` mirrors board.ts#latestTransitionAt: NOT assuming the log is
-  // sorted, falling back to date-only `updated` when transitions[] is empty.
-  const latestAt = (i: WorkItem): string => {
-    let max = ""
-    for (const t of i.transitions) if (t.at && t.at > max) max = t.at
-    return max || i.updated
-  }
+  // comparable timestamps: WI cards by `recencyKey` — the SAME shared
+  // definition data/board.ts sorts the column by, so the interleave can never
+  // disagree with the column it is interleaving into — and session cards by
+  // their full-ISO `updated`. Ties fall back to a stable id/session-id compare.
+  //
+  // recency.ts is a type-only leaf module, so importing it here keeps this file
+  // browser-bundlable (the same arrangement as lineage.ts / placeholder-title.ts
+  // above). The browser-purity guard asserts against the EMITTED bundle, and
+  // this call is reachable from the real entry (client.ts → renderBoardBody →
+  // kanbanSection), so an impure import here fails the build rather than
+  // shipping (I-192).
   type ProgressEntry = { key: string; tie: string; html: string }
   const progressEntries: ProgressEntry[] = [
-    ...board.inProgress.map((i) => ({ key: latestAt(i), tie: i.id, html: card(i) })),
+    ...board.inProgress.map((i) => ({ key: recencyKey(i), tie: i.id, html: card(i) })),
     ...board.sessionOnly.map((s) => ({ key: s.updated, tie: s.id, html: sessionOnlyCard(s, ctx) })),
   ]
   progressEntries.sort((a, b) => (a.key !== b.key ? b.key.localeCompare(a.key) : b.tie.localeCompare(a.tie)))
