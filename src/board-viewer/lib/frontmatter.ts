@@ -1,12 +1,18 @@
 /**
  * Minimal frontmatter parser for HIVE capability files (`agents/capabilities/*.md`).
  *
- * This parser is OWNED BY hive-board and covers exactly the simple
- * `key: value` YAML that capability frontmatter uses (scalars, flow arrays,
- * one level of nested block mapping such as `permission:`). It deliberately
- * does NOT handle the dream/DRM YAML dialect — that format's serialization
- * rules live only in the HIVE plugin's own parsers (SHADOW-005) and are
- * consumed via the owner-published subpath exports, never reimplemented here.
+ * This parser is OWNED BY the board-viewer capability and covers exactly the
+ * simple `key: value` YAML that capability frontmatter uses (scalars, flow
+ * arrays, one level of nested block mapping such as `permission:`). It
+ * deliberately does NOT handle the dream/DRM YAML dialect — that format's
+ * serialization rules live only in hive-infra's own parsers (SHADOW-005),
+ * which this viewer consumes through relative imports of `../../lib/*`, never
+ * by reimplementing the format here.
+ *
+ * Those were cross-package subpath imports until the viewer was absorbed into
+ * the plugin package. The PACKAGE boundary is gone; the OWNERSHIP boundary is
+ * not — a relative import no longer LOOKS foreign, which is precisely why this
+ * file must never grow to cover the dialect it disclaims above.
  */
 
 export type FrontmatterValue = string | number | boolean | string[] | Record<string, string>

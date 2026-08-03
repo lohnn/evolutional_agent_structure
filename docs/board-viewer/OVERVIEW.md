@@ -19,11 +19,13 @@ the work" view HIVE otherwise lacks.
 
 ## Status
 
-**Build phase.** SCHEMA ratified v1.0 (2026-07-10). The canonical design lives in `docs/`:
+**Build phase.** SCHEMA ratified v1.0 (2026-07-10); the board is live and drives transitions. The
+canonical design lives alongside this file in `docs/board-viewer/`:
 
 - [`DESIGN.md`](DESIGN.md) — architecture, data model, lifecycle, write-authority
 - [`SCHEMA.md`](SCHEMA.md) — the work-item contract (frontmatter fields, column↔status map, ID scheme)
-- [`OPEN-QUESTIONS.md`](OPEN-QUESTIONS.md) — unresolved decisions to work through next
+- [`OPEN-QUESTIONS.md`](OPEN-QUESTIONS.md) — the decision LOG: Q1–Q13 are all resolved, and it is
+  kept as the record of what was decided and why, not as a list of open work
 
 Read `DESIGN.md` first. It takes precedence over any assumptions.
 

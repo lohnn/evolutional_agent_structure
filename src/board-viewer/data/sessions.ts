@@ -23,9 +23,27 @@
  * ── Lifecycle (I-143: bootstrap-only, no polling loop) ──────────────────────
  * The mirror is computed ONCE at startup and held in memory (the spec's
  * "computed at startup / ephemeral cache" option). No steady-state
- * enumeration; steady-state discovery arrives with Phase 2's awaken hook.
- * NOTHING is written to disk — board/WI-*.md storage is Phase 2 and belongs
- * to hive-infra's locked storage module.
+ * enumeration — that remains deliberate (DESIGN §6.a), not a gap awaiting a
+ * later phase.
+ *
+ * Steady-state discovery HAS since arrived: hive_awaken calls hive-infra's
+ * `autoRegister`, which creates an owned work item the moment a coordinator
+ * session awakens, so a session created after this viewer booted still reaches
+ * the board — through its WORK ITEM, not through this mirror. (This comment
+ * used to say that discovery "arrives with Phase 2's awaken hook"; it did, and
+ * the future tense outlived it.)
+ *
+ * NOTHING is written to disk here — board/WI-*.md storage belongs to
+ * hive-infra's locked storage module, and the viewer performs zero direct
+ * writes (enforced by test/entrypoint-isolation.test.ts, which replaced the
+ * npm package boundary that used to enforce it).
+ *
+ * The mirror's remaining freshness gap is therefore narrow and specific
+ * (I-187): `sessionTitles` is a boot-time snapshot, so the placeholder-title
+ * fallback cannot resolve a session created after startup. That is left open
+ * on purpose — a title is CONTENT, and I-143/I-144 permit live lookups for
+ * navigation and existence only. The "Open" link and the todo sub-state do NOT
+ * depend on this snapshot; both read the item's own `owner_session` (I-211).
  *
  * ── Stale-id semantics (W-061) ──────────────────────────────────────────────
  * awakeSessions ids never auto-expire and persisted sessions never drop out

@@ -558,15 +558,28 @@ Phased so each stage is independently useful (dream I-051: build in phases, real
 
 - **hive-infra** capability owns the `hive_board_*` tools, the `/awaken` auto-registration hook, and
   any other hook changes inside the HIVE plugin repo (`projects/evolutional_agent_structure/`).
-- The **viewer app** (this repo) owner: TBD — likely a new capability spawned once the framework is
-  chosen (OPEN-QUESTIONS Q4). It must not create/bind sessions itself; it only reads + triggers
-  plugin tools.
+- The **viewer app** is owned by the **board-viewer** capability (spawned 2026-07-10). It must not
+  create/bind sessions itself; it reads, and it triggers transitions through hive-infra's shared
+  module.
+  > **Resolved 2026-08-03 — there is no separate viewer repo.** This section used to say "the viewer
+  > app (this repo), owner: TBD". Both halves are now wrong: the owner exists, and the viewer was
+  > absorbed into `projects/evolutional_agent_structure/` as `src/board-viewer/` so HIVE + board
+  > install as ONE npm dependency. `projects/hive-board/` is frozen (see its `MOVED.md`). **One repo,
+  > two owners** — the merge was packaging, not authority.
 - The **schema contract** (`SCHEMA.md`) is the shared boundary; whoever owns it publishes changes to
   the other side before building against them.
-- **Parser reuse contract (Q4 resolved detail):** the plugin's `package.json` exports map currently
-  exposes only `"."` — the viewer cannot import `lib/dream-state.ts` / `lib/dream-artifacts.ts`
-  through it. Resolution: **hive-infra adds explicit subpath exports** (e.g.
-  `"./lib/dream-state"`, `"./lib/dream-artifacts"`) pointing at the TS source, and the viewer runs
-  under a TS-transparent runtime (**Bun**, already the repo's toolchain). Explicit named exports —
-  not a wildcard, not deep file-path imports — so the shared surface is an intentional, owner-published
+- **Parser reuse contract (Q4 resolved detail):** at the time this was written the plugin's
+  `package.json` exports map exposed only `"."`, so the viewer could not import
+  `lib/dream-state.ts` / `lib/dream-artifacts.ts` through it. Resolution: **hive-infra added explicit
+  subpath exports** (`"./lib/dream-state"`, `"./lib/dream-artifacts"`, …) pointing at the TS source,
+  with the viewer running under a TS-transparent runtime (**Bun**). Explicit named exports — not a
+  wildcard, not deep file-path imports — so the shared surface was an intentional, owner-published
   contract (I-046) that survives internal refactors.
+  > **Superseded in mechanism, not in principle (2026-08-03).** The subpath exports still exist for
+  > external consumers, but the viewer no longer travels through them: absorbed into the same
+  > package, its eight `evolutional-agent-structure/lib/*` imports became relative (`../../lib/*`).
+  > **The package boundary is gone; the ownership boundary is not.** That matters more now, not less
+  > — a relative import does not LOOK foreign, so the discipline the boundary used to make obvious
+  > is held instead by live guards in `test/entrypoint-isolation.test.ts`: the viewer may not call an
+  > fs write API directly, `src/index.ts` may not reach `src/board-viewer/`, and server code may not
+  > leak into the browser bundle. I-046's principle (one owner, one code path) is unchanged.

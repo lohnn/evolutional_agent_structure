@@ -83,6 +83,40 @@ describe("build badge — server render", () => {
     const html = renderBoardBody(makeState("f4ff50b-dirty"))
     expect(html).toContain("build f4ff50b-dirty")
   })
+
+  /**
+   * Post-absorption copy. These parse with happy-dom and read the specific
+   * node/attribute rather than substring-matching renderBoardBody's output —
+   * render.ts inlines its CSS, so a `toContain` here false-matches class names
+   * and any prose sitting in a CSS comment (W-095, two cycles burned on it).
+   */
+  describe("copy asserts one repo, one version (post-absorption)", () => {
+    function bodyDoc(sha: string): Document {
+      const doc = document.implementation.createHTMLDocument("t")
+      doc.body.innerHTML = renderBoardBody(makeState(sha))
+      return doc
+    }
+
+    test("the badge tooltip names the PLUGIN repo — there is no board repo", () => {
+      const title = bodyDoc("f4ff50b").getElementById("build-badge")!.getAttribute("title")!
+      expect(title).toContain("HIVE plugin repo")
+      // The specific stale claim this sweep removed.
+      expect(title).not.toContain("board repo HEAD")
+    })
+
+    test("the git-unavailable tooltip does not claim a repo it could not read", () => {
+      const title = bodyDoc("unknown").getElementById("build-badge")!.getAttribute("title")!
+      expect(title).toContain("git unavailable")
+      expect(title).not.toContain("board repo")
+    })
+
+    test("the header subtitle no longer advertises a read-only viewer", () => {
+      const phase = bodyDoc("f4ff50b").querySelector("h1 .phase")!.textContent!
+      // It drives POST /transitions/* — "read-only" understated what a click does.
+      expect(phase).not.toContain("read-only")
+      expect(phase).toContain("transitions")
+    })
+  })
 })
 
 // ── Client stale-tab detection: execute the REAL bundle in happy-dom ──────────

@@ -1,13 +1,24 @@
 /**
- * Server-side HTML renderer for the Phase-1 read-only viewer.
- * No client framework, no build step — one self-contained page with inline
- * CSS and a meta-refresh. Everything on it comes from BoardState (on-disk).
+ * Server-side HTML renderer for the hive-board viewer.
+ *
+ * No client framework — one self-contained page with inline CSS. Everything it
+ * displays comes from BoardState (read from disk); the board's WRITE
+ * affordances are plain <form> POSTs to /transitions/*, handled server-side by
+ * hive-infra's shared transition module. This renderer itself never writes.
+ *
+ * NOT read-only, and NOT meta-refresh — both were true of the Phase-1 viewer
+ * and are recorded here because the header used to say so: the page now polls
+ * /api/state and morphs the live DOM in place (see client.ts), and the board
+ * drives create / start / pause / demote / done.
  */
 // Runtime imports here MUST stay browser-safe: render.ts is bundled for the
-// client (src/web/client.ts) to power the diff-based poll refresh. The runtime
+// client (web/client.ts) to power the diff-based poll refresh. The runtime
 // deps below resolve to browser-safe modules (thresholds.ts, lineage.ts,
-// placeholder-title.ts) — never the barrel files that pull node:fs /
-// board-store. Everything else is `import type`, erased by the bundler.
+// placeholder-title.ts, recency.ts) — never the barrel files that pull
+// node:fs / board-store. Everything else is `import type`, erased by the
+// bundler. There IS an emit step for this file even though the plugin as a
+// whole has none: client-bundle.ts runs Bun.build over client.ts, and the
+// browser-purity guard asserts against that emitted bundle.
 import type { BoardState } from "../data/state"
 import type { Capability } from "../data/capabilities"
 import { DISSOLVE_THRESHOLD, SPLIT_THRESHOLD } from "../data/thresholds"
@@ -61,7 +72,14 @@ function fmtTime(iso: string | null): string {
  */
 function buildBadge(serverSha: string): string {
   const label = serverSha === "unknown" ? "build unknown" : `build ${esc(serverSha)}`
-  const title = serverSha === "unknown" ? "git unavailable — running build could not be identified" : "server build SHA (board repo HEAD)"
+  // There is no separate board repo any more — the viewer ships inside the HIVE
+  // plugin package, so this is the plugin repo's HEAD, which IS the viewer's
+  // HEAD. One repo, one version. (config.ts#resolveBuildSha anchors on
+  // PACKAGE_ROOT for exactly this reason.)
+  const title =
+    serverSha === "unknown"
+      ? "git unavailable — running build could not be identified"
+      : "server build SHA — HEAD of the HIVE plugin repo, which ships this viewer"
   return `<span id="build-badge" class="build-badge" data-server-sha="${esc(serverSha)}" title="${esc(title)}">${label}</span>`
 }
 
@@ -881,7 +899,11 @@ export function renderBoardBody(state: BoardState, notices: Notice[] = []): stri
   const recentRows = dreams.recentArtifacts.map(recentArtifactRow).join("\n")
   const messageRows = messages.map(messageRow).join("\n")
 
-  return `<h1>${headerMark(deriveIconState(state))}hive-board <span class="phase">Phase 1 · read-only HIVE state viewer</span></h1>
+  // NOT "Phase 1 · read-only" — that was accurate only while the viewer could
+  // do nothing but render. It now executes board transitions (create, start,
+  // pause, demote, done) through hive-infra's shared module via POST
+  // /transitions/*, so the old subtitle understated what a click here does.
+  return `<h1>${headerMark(deriveIconState(state))}hive-board <span class="phase">HIVE state · board transitions</span></h1>
 <div class="meta mono">workspace ${esc(state.workspaceRoot)} · generated ${esc(state.generatedAt)} · live refresh 15s · ${buildBadge(state.buildSha)}</div>
 
 <h2>Board <span class="count">(${state.items.length} items · ${state.board.sessionOnly.length} session-only)</span></h2>

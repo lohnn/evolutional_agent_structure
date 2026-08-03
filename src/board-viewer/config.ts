@@ -74,14 +74,22 @@ export interface BoardConfig {
   /** HTTP Basic password (username is literally "opencode" — Q14). */
   opencodePassword: string | null
   /**
-   * Short git SHA of the RUNNING build (the board repo HEAD), `-dirty` if the
-   * working tree has uncommitted changes, else the literal `"unknown"`.
+   * Short git SHA of the RUNNING build — the HIVE plugin repo's HEAD, which
+   * since the absorption IS the viewer's HEAD (one repo, one version; there is
+   * no separate board repo). `-dirty` when the working tree has uncommitted
+   * changes, else the literal `"unknown"`.
+   *
    * Resolved once at startup and threaded into BoardState so the version badge
    * (and the /api/state poll payload) can surface which bytes are live — and so
    * the client can detect a stale tab running an OLD /client.js against a
-   * freshly-restarted server. Also a defense against the "am I actually running
-   * the new bytes?" confusion from the copied `file:` dep failure mode (W-079):
-   * the badge makes the running commit VISIBLE instead of assumed.
+   * freshly-restarted server.
+   *
+   * It was ALSO introduced as a defense against the "am I actually running the
+   * new bytes?" confusion from the copied `file:../evolutional_agent_structure`
+   * dependency (W-079). That failure mode is gone with the dependency itself —
+   * noted rather than deleted, because the badge can now look like belt-and-
+   * braces to someone who never saw the failure it was built for. The remaining
+   * two jobs above are reason enough to keep it.
    */
   buildSha: BuildSha
 }
