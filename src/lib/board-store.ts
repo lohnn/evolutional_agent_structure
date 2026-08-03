@@ -51,11 +51,22 @@ export interface Subtask {
 
 /**
  * One entry of the live TodoWrite mirror (`todo_mirror`). Same shape as a
- * Subtask (content + the four opencode todo states), but a DISTINCT field:
- * `todo_mirror` is the live-reconciled cache the board actually writes/reads
- * (board-viewer WI-038), whereas `subtasks` (SCHEMA §4) was specced for the
- * same source but never got a writer. Kept separate so board-viewer's
- * live-read↔mirror reconcile loop owns its own field + full-precision stamp.
+ * Subtask (content + the four opencode todo states), but a DISTINCT field with
+ * a DIFFERENT WRITE CLASS — and the class, not the shape, is what matters:
+ *
+ *   `todo_mirror` = Class B, derived-rebuildable. Machine-written cache of an
+ *                   OWNED session's live TodoWrite. Losing it costs a refresh.
+ *   `subtasks`    = Class A, canonical. AUTHOR-WRITTEN plan on an item, and
+ *                   typically an UNOWNED one. Losing it is unrecoverable.
+ *
+ * (SCHEMA §4, reclassified 2026-08-03. This comment previously said `subtasks`
+ * "was specced for the same source but never got a writer" — that was true when
+ * written and is now false: its producer is human authorship, and a census of
+ * all 63 live items found the two fields perfectly disjoint by lifecycle. See
+ * the tombstone in SCHEMA §4b before concluding they should be merged.)
+ *
+ * Kept separate so board-viewer's live-read↔mirror reconcile loop owns its own
+ * field + full-precision stamp.
  */
 export interface TodoMirrorEntry {
   content: string

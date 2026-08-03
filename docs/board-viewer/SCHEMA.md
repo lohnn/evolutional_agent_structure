@@ -50,8 +50,9 @@ work was, its spec, its subtasks, and what it produced, with zero session access
 *link*, never a *dependency*.
 
 **Consequences:**
-- Session-derived data (title, subtasks) is **cached into the item** by the owning session (a writer),
-  and the board always reads the **item**, never the session, for content.
+- Session-derived data (title, `todo_mirror`) is **cached into the item** by the owning session (a
+  writer), and the board always reads the **item**, never the session, for content. (`subtasks` is
+  NOT session-derived — it is authored directly on the item, §4.)
 - On a machine where the owning session is absent: the card **renders normally from cached data**;
   only the "Open session" action is disabled (greyed + tooltip "session not available here").
   Absence = **unknown**, NOT "deleted" — it does not change the card's column/state and does NOT fold
@@ -64,7 +65,7 @@ work was, its spec, its subtasks, and what it produced, with zero session access
 | Field | Origin | On a machine without the session |
 |---|---|---|
 | `title` | mirrored from session, **stored on item** | ✅ visible (from cache) |
-| `subtasks` | mirrored from session TodoWrite, **stored on item** | ✅ visible (last snapshot) |
+| `subtasks` | **authored on the item** — not session-derived at all (§4) | ✅ visible (it never depended on the session) |
 | `todo_mirror` | live-reconciled mirror of session TodoWrite, **stored on item** (§4b) | ✅ visible (last mirrored snapshot; live read absent ⇒ mirror is the fallback, unknown ≠ empty) |
 | spec/body, `dream_id`, artifact links, `transitions[]` | authored/derived, on item | ✅ visible |
 | "Open session" deep link | `?session=<id>` navigation | ❌ disabled gracefully |
@@ -98,8 +99,10 @@ updated: 2026-07-06
 priority: medium                # low | medium | high  (Backlog/Todo ordering hint)
 tags: [frontend, push]          # free-form
 done_without_dream: false       # true ⇒ manual Done escape hatch; renders a 'no-dream' badge
-subtasks:                       # CACHED: mirrored from owning session's TodoWrite; do not hand-edit.
-                                #   Stored on item so it survives migration without the session (§1a)
+subtasks:                       # AUTHOR-WRITTEN plan/decomposition (§4). Class A canonical — the
+                                #   item file IS the source of truth. Hand-authoring is intended.
+                                #   Typically present pre-ownership; see §4 for the disjointness
+                                #   rule vs todo_mirror below.
   - { content: "Read current settings widget", status: completed }
   - { content: "Add opt-out toggle", status: in_progress }
   - { content: "Wire to backend unsubscribe", status: pending }
@@ -136,7 +139,7 @@ session's dispatch prompt.
 | `spec_hash` | A | stamped at bind (provenance) and **re-stamped at true-demote**; on re-promote the live body hash is compared to the **demote-time** stamp to decide re-attach vs fresh session (§5.5, Q13) |
 | `released_sessions[]` | A (append-only) | each true-demote appends the detached sessionID; read by the auto-register hook to skip re-adopting it |
 | `history` (derived) | C | **not a stored field** — the "previously attempted in ses_..." lineage is read from `transitions[]`, which stamps `session` on every entry |
-| `subtasks` | A (cached/mirrored) | mirrored from the owning session's TodoWrite (`session.todo`/`todo.updated`) via hook and **stored on the item** (§1a) — **never hand-edited** |
+| `subtasks` | **A (canonical, authored)** | **author-written plan / decomposition stored on the item** (§4). The item file is its only source of truth — losing it is unrecoverable. Written at creation (`createItemUnlocked`) or hand-authored; **no `ItemEdit` primitive exists** (see §4b before adding one). Hand-authoring is *intended*, unlike every other field in this table |
 | `todo_mirror`, `todo_mirror_updated` | A (cached/mirrored, derived-rebuildable) | whole-replaced from the owning session's live TodoWrite by the board via the shared locked-storage edit (`ItemEdit.setTodoMirror`, identity-free — I-179); `todo_mirror_updated` is a **full-precision ISO-8601** stamp (I-191/W-081). Derived-rebuildable throwaway cache (I-105/I-113). **Never hand-edited** (§4b) |
 | `dream_id` | C (derived) | stamped by the **`hive_dream_begin` handler** — it resolves the calling session (`context.sessionID`), finds the item with matching `owner_session`, writes the new DRM id (DESIGN §5.4). File-scan detection is backfill/integrity fallback only |
 | `artifacts[]` | C (cached) | copied onto the item by the **`hive_dream_complete` handler** (same session→item lookup), so "what it produced" survives migration (§1a) |
@@ -184,24 +187,53 @@ names may differ from status values, but this table binds them.
    created idea-first). Session ⟷ item is 1:1 (see OPEN-QUESTIONS Q7).
 6. **Bind-time absorption (Q15):** if `hive_board_bind` targets an idea item while the session's
    only owned item is a **pristine** session-first placeholder (`origin: session-first`,
-   `dream_id` null, body hash == creation-time `spec_hash`, no subtask progress), the placeholder
+   `dream_id` null, body hash == creation-time `spec_hash`, no `subtasks` authored on it), the placeholder
    is absorbed: its file is deleted (the one sanctioned deletion) and the surviving item's bind
    `transitions[]` entry records `absorbed: WI-NNN`. A non-pristine owned item still refuses
    (`SESSION_OWNS_OTHER`) — absorption never destroys accrued content.
 
 ---
 
-## 4. Subtask mirror format
+## 4. `subtasks` — the author-written plan
 
-Subtasks mirror the owning coordinator session's TodoWrite items 1:1, read via the SDK
-`session.todo({ path: { id } })` call and kept fresh by the `todo.updated` event. Each:
-`{ content, status }` where `status ∈ {pending, in_progress, completed, cancelled}` (matching
-opencode's todo states). The mirror is a **replace-whole-list** operation from the latest snapshot
-(the todo list is itself authoritative and small), NOT an append log — this is the one Class-A field
-that is a snapshot, because its source of truth is the live todo list, not the item file.
+> **Reclassified 2026-08-03** (ratified by hive-infra on board-viewer's census; supersedes the
+> "subtask mirror" reading below). See the tombstone in §4b for what was replaced and why.
 
-> Do not hand-edit `subtasks`. Editing them here does not change the agent's actual todos and would
-> reintroduce exactly the divergence this design exists to prevent (W-030).
+`subtasks` is the **author-written decomposition of a work item** — a human/agent-authored plan
+stored on the item. It is *not* a mirror of anything. Each entry: `{ content, status }` where
+`status ∈ {pending, in_progress, completed, cancelled}` (the same shape as `todo_mirror`, which is
+what made the two confusable — shape similarity is not source similarity).
+
+**`subtasks` and `todo_mirror` are disjoint by lifecycle, not by convention.** Verified against all
+63 live work items on 2026-08-03:
+
+| | `subtasks` | `todo_mirror` (§4b) |
+|---|---|---|
+| Lifecycle phase | **pre-ownership** — the item has no session yet | **post-ownership** — an owning session exists |
+| Written by | a human/agent **authoring the plan** | the board, from the session's live TodoWrite |
+| Source of truth | **the item file itself** | the live session's todo list |
+| Write class (I-105) | **A — canonical** | **B — derived-rebuildable** |
+| If lost | **information is gone forever** | rebuilt on next refresh |
+| Observed live | 3 items, all `backlog`, `owner_session: null` | 11 items, all `in_progress`/`done` |
+| Overlap | **zero** | **zero** |
+
+An unowned item *cannot* hold a TodoWrite mirror — there is no session to mirror. An owned item's
+live sub-state is `todo_mirror`'s job. The fields never compete for the same item at the same time.
+
+**The Class A / Class B split is the load-bearing distinction, not the shape.** A canonical field and
+a derived-rebuildable field must never be consolidated however alike they look, because they have
+**opposite loss semantics**: deleting a Class-B mirror costs a refresh, deleting Class-A authored
+content is unrecoverable data loss. Two fields that look identical but sit in different write classes
+are not duplication — they are two different kinds of thing wearing the same shape.
+
+> **`subtasks` MAY be hand-authored — that is now its purpose.** (This inverts the pre-2026-08-03
+> warning, which forbade exactly what the live board does.) The W-030 divergence hazard does not
+> apply: there is no live source for a hand edit to diverge *from*. The hazard applies to
+> `todo_mirror`, which is still never hand-edited (§4b).
+
+**Producer surface.** `subtasks` is written at item creation (`createItemUnlocked` already serializes
+it) and otherwise hand-authored in the file. Note there is deliberately **no `ItemEdit` primitive**
+for it — see the pre-approved extension point in §4b before adding one.
 
 ---
 
@@ -235,16 +267,87 @@ the sub-state without the session present (§1a portability). The write is **ide
 the caller already holds `owner_session`, so it routes through the shared locked-storage edit
 (`mutateItem` → `setTodoMirror`), not a second writer and not the plugin-runtime identity path.
 
-**Relationship to `subtasks` (§4).** Both cache the same source (the owning session's TodoWrite), but
-they are **distinct fields on purpose**. `subtasks` was specced in §4 as the mirror but never had a
-writer wired up. `todo_mirror` is the field the board **actually** writes and reads via a live-read↔
-mirror reconcile loop, and it carries its own full-precision `todo_mirror_updated` stamp (the legacy
-`updated` field is date-only and must not be reused for ordering — I-191/W-081). Consumers should
-read `todo_mirror` for the live sub-state. A future consolidation may retire `subtasks` in favor of
-`todo_mirror`; until then, treat `todo_mirror` as authoritative for the live TodoWrite sub-state.
+**Relationship to `subtasks` (§4).** They are **disjoint by lifecycle** — see the table in §4.
+`subtasks` is the author-written plan of an *unowned* item (Class A, canonical); `todo_mirror` is the
+machine-written cache of an *owned* session's live TodoWrite (Class B, derived-rebuildable).
+`todo_mirror` carries its own full-precision `todo_mirror_updated` stamp (the legacy `updated` field
+is date-only and must not be reused for ordering — I-191/W-081). **`todo_mirror` remains
+authoritative for the live TodoWrite sub-state** — that part of the original ruling stands unchanged.
 
-> Do not hand-edit `todo_mirror`/`todo_mirror_updated` — same rationale as `subtasks` (W-030). The
-> board whole-replaces them from live reads; a hand edit is silently overwritten on the next refresh.
+> ### ⚰️ Tombstone — "a future consolidation may retire `subtasks` in favor of `todo_mirror`"
+>
+> **Written:** ~2026-07-21 (WI-038). **Withdrawn:** 2026-08-03. **Do not re-derive it.**
+>
+> That line rested on the premise that both fields "cache the same source (the owning session's
+> TodoWrite)" and that `subtasks` "never had a writer wired up" — i.e. that `subtasks` was a dormant
+> duplicate (the I-209/I-213 dormant-field hazard). It was recorded as SHADOW-015.
+>
+> **The premise was falsified by census, not by argument.** All 63 live items were checked on
+> 2026-08-03: the fields are perfectly disjoint, and `subtasks` had acquired a real producer — human
+> authorship — and real content on 3 backlog items. It was never dormant; it had *changed jobs*
+> without anyone recording it. The "same source, same semantics" test that makes a field duplication
+> debt simply no longer returns true.
+>
+> Acting on the withdrawn line would now be **destructive twice over**: it deletes authored planning
+> content that exists nowhere else (Class A — unrecoverable), and it breaks a live consumer in the
+> plugin runtime, `isPristinePlaceholder()` in `board-transitions.ts`, which gates the one sanctioned
+> deletion in the whole model on `subtasks.length === 0`. SHADOW-015's own escape condition ("no other
+> consumer depends on subtasks") was never met.
+>
+> This tombstone exists because a deleted line leaves no trace of *why* — and the next reader,
+> seeing two same-shaped fields, would re-derive the same wrong conclusion from the absence (W-103).
+> The consolidation was **considered and rejected on evidence**, not forgotten.
+
+**Pre-approved extension point — author-written `subtasks` from the board's create form.**
+Ruled 2026-08-03; not yet built. Writing `subtasks` at item creation is **architecturally
+permissible for board-viewer**, because the I-179 test passes: the write is **identity-free** (it
+needs no in-session identity, unlike `todo_mirror` which requires the owning session's TodoWrite and
+must stay plugin-runtime-owned). It must go through the one owner-published module, never a second
+write path. Constraints, binding if it is built:
+
+1. **Creation-time only, via `CreateIdeaInit`.** `createItemUnlocked` already serializes `subtasks`;
+   only `CreateIdeaInit` needs an optional `subtasks?: Subtask[]` (hive-infra's change to make —
+   signal before building the form, so the store change and the form land together rather than
+   leaving dead surface).
+2. **Do NOT reuse `setTodoMirror`'s shape** for any post-creation edit (I-190). It stamps
+   `todo_mirror_updated`, a *cache-freshness* marker — authored content has no freshness, and
+   stamping it would assert something false. More importantly its **whole-replace** semantics are
+   safe only for a Class-B mirror whose truth lives elsewhere; whole-replacing Class-A authored
+   content is a silent lost-update between two editors. A post-creation edit primitive therefore
+   needs its own design (read-inside-lock at minimum), and is **not** approved here.
+3. **`isPristinePlaceholder()` is unaffected** — re-verified on its hardest input, see §4c.
+
+> Do not hand-edit `todo_mirror`/`todo_mirror_updated` (W-030) — the board whole-replaces them from
+> live reads, so a hand edit is silently overwritten on the next refresh. **This warning applies to
+> `todo_mirror` only.** It used to be justified "same rationale as `subtasks`"; since the 2026-08-03
+> reclassification `subtasks` is deliberately hand-authorable (§4) and the shared rationale is gone.
+
+---
+
+## 4c. `isPristinePlaceholder()` under the reclassification
+
+The `subtasks` reclassification changed what an existing gate *means*, so the gate was re-verified
+before the reclassification was ratified (W-113: diff the new rule against the old on the old rule's
+hardest inputs). Recorded here because this gate gates **the one sanctioned deletion in the model**.
+
+`isPristinePlaceholder()` (plugin `board-transitions.ts`) decides whether a session's auto-registered
+placeholder may be dissolved during bind-time absorption (§3 invariant 6 / Q15). One of its five
+conditions is `item.subtasks.length === 0`.
+
+**It survives, and lands on a better rationale than the one it was written with.** The check is
+evaluated on the item being **dissolved** (`owned`), never on the item being bound to. So:
+
+- An idea-first item carrying an author-written plan is always the **survivor**, never the sacrifice —
+  its `subtasks` are never consulted by the gate and never destroyed.
+- The gate's first condition is `origin === "session-first"`, and author-written plans live on
+  `idea-first` items, which can never reach the gate as `owned` regardless of subtasks.
+- Under the old reading the condition meant "no subtask *mirror* recorded". Under the new one it
+  means "no authored content accrued on this placeholder" — which is **exactly** the gate's stated
+  purpose ("anything else refuses so accrued content is never destroyed"). The check was more correct
+  than its author knew.
+
+Pinned by two tests in `test/board-transitions.test.ts` ("reclassification: …") so a future edit
+cannot quietly point the check at the wrong item.
 
 ---
 

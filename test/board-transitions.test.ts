@@ -288,6 +288,68 @@ describe("bind-time absorption (Q15 / SCHEMA §3 invariant 6)", () => {
     expect(readItem(dir, auto.item.id)).not.toBeNull()
   })
 
+  // ── The gate under the 2026-08-03 `subtasks` reclassification ──────────────
+  // `subtasks` is now ratified as an AUTHOR-WRITTEN plan on an unowned item,
+  // not a TodoWrite mirror (SCHEMA §4/§4b). isPristinePlaceholder's
+  // `subtasks.length === 0` check therefore had to be re-verified on its
+  // hardest input before the reclassification could be ratified (W-113), since
+  // a reclassified field can silently change what an old gate means.
+  //
+  // It survives — and lands on a BETTER rationale than the one it was written
+  // with. The check reads the item being DISSOLVED, never the survivor, so
+  // "no subtask mirror recorded" simply becomes "no authored content
+  // accrued" — which is exactly the stated purpose of the gate ("anything
+  // else refuses so accrued content is never destroyed"). These two tests pin
+  // that, so a future edit cannot quietly point the check at the wrong item.
+  test("reclassification: idea-first SURVIVOR keeps author-written subtasks through absorption", async () => {
+    const { item: idea } = await createIdea(dir, { title: "Authored plan" })
+    const p = itemPath(dir, idea.id)
+    fs.writeFileSync(
+      p,
+      fs
+        .readFileSync(p, "utf8")
+        .replace(
+          "subtasks: []",
+          'subtasks:\n  - { content: "Phase 1 — do the thing", status: pending }\n  - { content: "Phase 2 — do the other", status: pending }'
+        )
+    )
+    const auto = await autoRegister(dir, "ses_x", "ses_x", "placeholder")
+
+    const r = await bindSession(dir, idea.id, "ses_x", "ses_x")
+
+    expect(r.ok && r.action).toBe("bound-absorbed")
+    const survivor = readItem(dir, idea.id)!
+    expect(survivor.subtasks.map((s) => s.content)).toEqual([
+      "Phase 1 — do the thing",
+      "Phase 2 — do the other",
+    ])
+    expect(survivor.owner_session).toBe("ses_x")
+    expect(readItem(dir, auto.item.id)).toBeNull()
+  })
+
+  test("reclassification: the gate reads the ABSORBED item's subtasks, never the survivor's", async () => {
+    const { item: idea } = await createIdea(dir, { title: "Authored plan" })
+    const ip = itemPath(dir, idea.id)
+    fs.writeFileSync(
+      ip,
+      fs.readFileSync(ip, "utf8").replace("subtasks: []", 'subtasks:\n  - { content: "authored", status: pending }')
+    )
+    const auto = await autoRegister(dir, "ses_x", "ses_x", "placeholder")
+    const ap = itemPath(dir, auto.item.id)
+    fs.writeFileSync(
+      ap,
+      fs
+        .readFileSync(ap, "utf8")
+        .replace("subtasks: []", 'subtasks:\n  - { content: "accrued on placeholder", status: pending }')
+    )
+
+    const r = await bindSession(dir, idea.id, "ses_x", "ses_x")
+
+    expect(!r.ok && r.reason).toBe("SESSION_OWNS_OTHER")
+    expect(readItem(dir, auto.item.id)).not.toBeNull()
+    expect(readItem(dir, idea.id)!.subtasks).toHaveLength(1)
+  })
+
   test("idea-first owned item is never absorbed (origin guard)", async () => {
     const { item: a } = await createIdea(dir, { title: "A" })
     const { item: b } = await createIdea(dir, { title: "B" })
