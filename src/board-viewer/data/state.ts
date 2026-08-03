@@ -9,8 +9,8 @@
  * source calls the network, and none render content sourced solely from a live
  * call (external calls may otherwise only ever power navigation/existence).
  */
-import { boardDir } from "evolutional-agent-structure/lib/board-store"
-import { reattachInfo, type ReattachDecision } from "evolutional-agent-structure/lib/board-transitions"
+import { boardDir } from "../../lib/board-store"
+import { reattachInfo, type ReattachDecision } from "../../lib/board-transitions"
 import type { BoardConfig } from "../config"
 import { buildBoard, type BoardColumns } from "./board"
 import { loadCapabilities, type Capability } from "./capabilities"

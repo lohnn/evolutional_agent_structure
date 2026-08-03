@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test"
 import * as path from "node:path"
-import { buildBoard } from "../src/data/board"
-import type { SessionMirror } from "../src/data/sessions"
-import { loadWorkItems, parseWorkItem, type WorkItem } from "../src/data/workitems"
+import { buildBoard } from "../../src/board-viewer/data/board"
+import type { SessionMirror } from "../../src/board-viewer/data/sessions"
+import { loadWorkItems, parseWorkItem, type WorkItem } from "../../src/board-viewer/data/workitems"
 
-const FIXTURES = path.join(import.meta.dir, "..", "fixtures", "board")
+const FIXTURES = path.join(import.meta.dir, "..", "..", "fixtures", "board")
 
 function mirror(cards: { id: string; title: string }[]): SessionMirror {
   return {

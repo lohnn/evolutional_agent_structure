@@ -28,7 +28,7 @@ import {
   type WorkItem as StoreWorkItem,
   type WorkItemPriority,
   type WorkItemStatus,
-} from "evolutional-agent-structure/lib/board-store"
+} from "../../lib/board-store"
 
 export type { Subtask, TodoMirrorEntry, Transition, WorkItemStatus, WorkItemPriority }
 

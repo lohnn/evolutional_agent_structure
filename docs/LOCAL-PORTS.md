@@ -20,7 +20,7 @@ that the server responds.
 |---|---|---|---|
 | `3000` | `0.0.0.0` | OpenChamber | published |
 | `4096` | `127.0.0.1` | opencode itself | internal — do not expose |
-| `4400` | `0.0.0.0` | hive-board | published; see `projects/hive-board/deploy/` |
+| `4400` | `0.0.0.0` | hive-board viewer | published; see `projects/evolutional_agent_structure/docs/board-viewer/deploy/`. Ships inside the HIVE plugin package (`src/board-viewer/`) — the old `projects/hive-board/` repo is gone. Binds loopback by DEFAULT; this deployment overrides it with `--host 0.0.0.0` and the server prints an exposure warning, which is expected here. |
 | `4500`–`4504` | `0.0.0.0` | **reserved — throwaway prototypes** | see below |
 | `8096` | `0.0.0.0` | Jellyfin | published; JellyFetch plugin work |
 | *(ephemeral)* | `127.0.0.11` | Docker's embedded DNS | not ours; the port number changes per container start |

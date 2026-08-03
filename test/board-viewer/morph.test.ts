@@ -14,14 +14,14 @@
 import { GlobalRegistrator } from "@happy-dom/global-registrator"
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import * as path from "node:path"
-import { buildBoard } from "../src/data/board"
-import type { SessionMirror } from "../src/data/sessions"
-import type { BoardState } from "../src/data/state"
-import { loadWorkItems, type WorkItem } from "../src/data/workitems"
-import { morph } from "../src/web/morph"
-import { renderBoardBody } from "../src/web/render"
+import { buildBoard } from "../../src/board-viewer/data/board"
+import type { SessionMirror } from "../../src/board-viewer/data/sessions"
+import type { BoardState } from "../../src/board-viewer/data/state"
+import { loadWorkItems, type WorkItem } from "../../src/board-viewer/data/workitems"
+import { morph } from "../../src/board-viewer/web/morph"
+import { renderBoardBody } from "../../src/board-viewer/web/render"
 
-const FIXTURES = path.join(import.meta.dir, "..", "fixtures", "board")
+const FIXTURES = path.join(import.meta.dir, "..", "..", "fixtures", "board")
 
 beforeAll(() => GlobalRegistrator.register())
 afterAll(() => GlobalRegistrator.unregister())

@@ -3,11 +3,16 @@
  *
  * ── Contract (SHADOW-005 / DESIGN §10 / hive-infra, 2026-07-10) ─────────────
  * The DRM/artifact YAML is a hand-rolled dialect whose serialization rules
- * live ONLY in the HIVE plugin. We consume it exclusively through the
- * owner-published subpath exports (confirmed live by hive-infra):
+ * live ONLY in the HIVE plugin. We consume it exclusively through the owner's
+ * modules — never by reimplementing the format (SHADOW-005):
  *
- *   "evolutional-agent-structure/lib/dream-state"
- *   "evolutional-agent-structure/lib/dream-artifacts"
+ *   "../../lib/dream-state"
+ *   "../../lib/dream-artifacts"
+ *
+ * These were `evolutional-agent-structure/lib/*` subpath imports until the
+ * viewer was absorbed into the plugin package; they are now internal relative
+ * imports. The PACKAGE boundary is gone, the OWNERSHIP boundary is not: these
+ * modules are hive-infra's, and this viewer is a read-only consumer of them.
  *
  * Contract semantics we rely on (stated as stable by the owner):
  *  - path-taking functions receive the WORKSPACE root and append
@@ -24,8 +29,8 @@ import {
   readDreamState,
   dreamsBase,
   type DreamState,
-} from "evolutional-agent-structure/lib/dream-state"
-import { listArtifacts, type ArtifactType } from "evolutional-agent-structure/lib/dream-artifacts"
+} from "../../lib/dream-state"
+import { listArtifacts, type ArtifactType } from "../../lib/dream-artifacts"
 import * as fs from "node:fs"
 import * as path from "node:path"
 

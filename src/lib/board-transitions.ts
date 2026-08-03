@@ -4,7 +4,7 @@
  * identity: bind, awaken auto-register) and the hive-board viewer app
  * (board-side: create, pause/unpause, true-demote, manual done).
  *
- * Contract: projects/hive-board/docs/SCHEMA.md v1.0 + DESIGN §5. All writes go
+ * Contract: docs/board-viewer/SCHEMA.md v1.0 + DESIGN §5. All writes go
  * through board-store (locked, temp+rename, append-only — SCHEMA §4a). Session
  * identity is the CALLER's problem: the plugin resolves it from the runtime
  * (context.sessionID, never agent self-report — W-009); the viewer performs

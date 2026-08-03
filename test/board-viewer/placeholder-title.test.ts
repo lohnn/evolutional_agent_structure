@@ -12,16 +12,16 @@
  */
 import { GlobalRegistrator } from "@happy-dom/global-registrator"
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { buildBoard } from "../src/data/board"
+import { buildBoard } from "../../src/board-viewer/data/board"
 import {
   displayTitle,
   isPlaceholderTitle,
   isRealSessionTitle,
-} from "../src/data/placeholder-title"
-import type { SessionMirror } from "../src/data/sessions"
-import type { BoardState } from "../src/data/state"
-import { parseWorkItem, type WorkItem } from "../src/data/workitems"
-import { renderBoardBody } from "../src/web/render"
+} from "../../src/board-viewer/data/placeholder-title"
+import type { SessionMirror } from "../../src/board-viewer/data/sessions"
+import type { BoardState } from "../../src/board-viewer/data/state"
+import { parseWorkItem, type WorkItem } from "../../src/board-viewer/data/workitems"
+import { renderBoardBody } from "../../src/board-viewer/web/render"
 
 beforeAll(() => GlobalRegistrator.register())
 afterAll(() => GlobalRegistrator.unregister())

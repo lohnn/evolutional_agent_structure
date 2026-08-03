@@ -2,12 +2,12 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
-import { listItems, specHash } from "evolutional-agent-structure/lib/board-store"
-import type { BoardSessionClient } from "evolutional-agent-structure/lib/board-transitions"
-import type { BoardConfig } from "../src/config"
-import type { SessionMirror } from "../src/data/sessions"
-import { createApp } from "../src/web/app"
-import { clearNotices } from "../src/web/notices"
+import { listItems, specHash } from "../../src/lib/board-store"
+import type { BoardSessionClient } from "../../src/lib/board-transitions"
+import type { BoardConfig } from "../../src/board-viewer/config"
+import type { SessionMirror } from "../../src/board-viewer/data/sessions"
+import { createApp } from "../../src/board-viewer/web/app"
+import { clearNotices } from "../../src/board-viewer/web/notices"
 
 let ws: string
 let config: BoardConfig
@@ -292,7 +292,7 @@ describe("button labeling from reattachInfo (decision visible BEFORE the click)"
 
 describe("CONFLICT is retryable, not a dead-end (Q16)", () => {
   test("transitionResponse renders a retry form for CONFLICT; dead-end 409 for others", async () => {
-    const { transitionResponse } = await import("../src/web/transitions")
+    const { transitionResponse } = await import("../../src/board-viewer/web/transitions")
     const form = await new Request("http://test/x", {
       method: "POST",
       body: new URLSearchParams({ id: "WI-042" }),

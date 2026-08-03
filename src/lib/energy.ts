@@ -105,7 +105,8 @@ export function tickEnergy(directory: string): { results: TickResult[]; warnings
     const energyMatch = content.match(/^energy:\s*(\d+)/m)
     if (!energyMatch) continue
 
-    let energy = parseInt(energyMatch[1], 10)
+    // Group 1 exists by construction — the regex only matches with it.
+    let energy = parseInt(energyMatch[1]!, 10)
     const uses = sessionsByCapability.get(name)?.size ?? 0
     const wasUsed = uses > 0
     const oldEnergy = energy

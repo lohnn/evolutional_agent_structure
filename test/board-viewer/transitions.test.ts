@@ -2,10 +2,10 @@ import { beforeAll, afterAll, describe, expect, test } from "bun:test"
 import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
-import { listItems } from "evolutional-agent-structure/lib/board-store"
-import type { BoardConfig } from "../src/config"
-import type { SessionMirror } from "../src/data/sessions"
-import { createApp } from "../src/web/app"
+import { listItems } from "../../src/lib/board-store"
+import type { BoardConfig } from "../../src/board-viewer/config"
+import type { SessionMirror } from "../../src/board-viewer/data/sessions"
+import { createApp } from "../../src/board-viewer/web/app"
 
 /** Scratch WORKSPACE (not the real one) — transitions write only here. */
 let ws: string
@@ -214,7 +214,7 @@ describe("affordance visibility (SCHEMA §3-valid ops only)", () => {
 describe("fixture mode — writes disabled", () => {
   test("POST refused with 409; GET hides affordances", async () => {
     const fixtureApp = createApp(
-      { ...config, boardDir: path.join(import.meta.dir, "..", "fixtures", "board") },
+      { ...config, boardDir: path.join(import.meta.dir, "..", "..", "fixtures", "board") },
       mirror,
     )
     const res = await fixtureApp(

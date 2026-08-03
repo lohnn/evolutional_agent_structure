@@ -1,23 +1,29 @@
 ---
-description: A kanban board layer on top of the HIVE plugin — visualizes and drives work items (Backlog → Todo → In Progress → Done) bound to HIVE's on-disk state.
+description: The hive-board viewer — a kanban board layer over HIVE's on-disk state, shipped inside the HIVE plugin package as src/board-viewer/.
 ---
-# hive-board
+# hive-board (the viewer)
 
 > A kanban board layer on top of the HIVE plugin. Visualizes and drives **work items** as they
 > move through Backlog → Todo → In Progress → Done, bound tightly to HIVE's real on-disk state
 > (dreams, capabilities, sessions, HIVEmind messages).
 
 This is a **companion layer to HIVE**, not a replacement for it. HIVE remains the coordination
-brain; hive-board is the *observation + intent surface* on top of it — the glanceable "where is
-the work" view HIVE currently lacks.
+brain; the board is the *observation + intent surface* on top of it — the glanceable "where is
+the work" view HIVE otherwise lacks.
+
+> **This file was `projects/hive-board/AGENTS.md`.** The viewer no longer has its own repo — it
+> was absorbed into the HIVE plugin package on 2026-08-03 so that HIVE + board install as ONE
+> npm dependency. Source now lives at `src/board-viewer/`, tests at `test/board-viewer/`, docs
+> here in `docs/board-viewer/`. Owned by the **board-viewer** capability; the surrounding package
+> is **hive-infra**'s.
 
 ## Status
 
 **Build phase.** SCHEMA ratified v1.0 (2026-07-10). The canonical design lives in `docs/`:
 
-- [`docs/DESIGN.md`](docs/DESIGN.md) — architecture, data model, lifecycle, write-authority
-- [`docs/SCHEMA.md`](docs/SCHEMA.md) — the work-item contract (frontmatter fields, column↔status map, ID scheme)
-- [`docs/OPEN-QUESTIONS.md`](docs/OPEN-QUESTIONS.md) — unresolved decisions to work through next
+- [`DESIGN.md`](DESIGN.md) — architecture, data model, lifecycle, write-authority
+- [`SCHEMA.md`](SCHEMA.md) — the work-item contract (frontmatter fields, column↔status map, ID scheme)
+- [`OPEN-QUESTIONS.md`](OPEN-QUESTIONS.md) — unresolved decisions to work through next
 
 Read `DESIGN.md` first. It takes precedence over any assumptions.
 
@@ -58,9 +64,19 @@ SCHEMA §4a). In-session transitions (bind, awaken auto-register) live in the HI
 extension point as the existing `hive_dream_*` tools — *not* MCP tools). No database.
 Markdown + YAML on disk, matching HIVE conventions exactly.
 
-## Relationship to the HIVE plugin repo
+## Relationship to the HIVE plugin
 
-Transitions that spawn/resume/complete sessions belong in the HIVE plugin
-(`projects/evolutional_agent_structure/`) as `hive_board_*` tools, owned by the **hive-infra**
-capability. The viewer app lives here in `projects/hive-board/`. These are two deliverables with a
-contract (the work-item schema in `docs/SCHEMA.md`) between them.
+One repo, one package, **two owners** — the merge was packaging, not authority.
+
+Transitions that spawn/resume/complete sessions are `hive_board_*` plugin tools owned by
+**hive-infra**, alongside everything under `src/lib/` (the locked store, the shared transition
+module, the dream/YAML parsers). The viewer under `src/board-viewer/` is owned by
+**board-viewer** and is a *caller* of those modules, never a second implementation.
+
+The eight `evolutional-agent-structure/lib/*` subpath imports became relative imports in the
+merge. That changed their shape, not their meaning — and because a relative import no longer
+*looks* foreign, the discipline the package boundary used to make obvious is now held by a live
+guard (`test/entrypoint-isolation.test.ts`), which fails if viewer code writes to disk directly,
+if the plugin entrypoint reaches viewer code, or if server code leaks into the browser bundle.
+
+The work-item schema in [`SCHEMA.md`](SCHEMA.md) remains the contract between the two.

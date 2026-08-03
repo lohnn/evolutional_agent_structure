@@ -1,7 +1,7 @@
 /**
  * hive-board work-item storage — the SINGLE code path for all WI-*.md writes.
  *
- * Contract: projects/hive-board/docs/SCHEMA.md (v1.0, ratified 2026-07-10).
+ * Contract: docs/board-viewer/SCHEMA.md (v1.0, ratified 2026-07-10).
  * Storage layout: <workspace>/.opencode/board/WI-NNN.md — flat dir, markdown
  * with ----fenced YAML frontmatter (same dialect as capability files), the
  * `status` field (not the path) drives the column.

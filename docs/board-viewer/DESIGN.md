@@ -80,7 +80,7 @@ Two deliverables joined by one contract (the work-item schema).
 
 ```
 ┌────────────────────────────────────────────────────────────┐
-│  hive-board web app  (projects/hive-board/)                │
+│  hive-board viewer  (plugin pkg: src/board-viewer/)         │
 │  • RENDERS read-only from .opencode/ + item cache          │
 │  • Renders columns, cards, subtask lanes, dream links      │
 │  • Board-side transitions executed directly via the shared │

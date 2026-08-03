@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test"
 import * as path from "node:path"
-import { buildBoard } from "../src/data/board"
-import type { SessionMirror } from "../src/data/sessions"
-import type { BoardState } from "../src/data/state"
-import { loadWorkItems } from "../src/data/workitems"
-import { renderPage } from "../src/web/render"
+import { buildBoard } from "../../src/board-viewer/data/board"
+import type { SessionMirror } from "../../src/board-viewer/data/sessions"
+import type { BoardState } from "../../src/board-viewer/data/state"
+import { loadWorkItems } from "../../src/board-viewer/data/workitems"
+import { renderPage } from "../../src/board-viewer/web/render"
 
-const FIXTURES = path.join(import.meta.dir, "..", "fixtures", "board")
+const FIXTURES = path.join(import.meta.dir, "..", "..", "fixtures", "board")
 const GUI = "http://studio:3000"
 
 function makeState(

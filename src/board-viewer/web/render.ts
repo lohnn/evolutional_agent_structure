@@ -256,7 +256,7 @@ interface CardCtx {
   mirror: SessionMirror
   writesEnabled: boolean
   sessionBackend: "configured" | "unconfigured"
-  decisions: Record<string, import("evolutional-agent-structure/lib/board-transitions").ReattachDecision>
+  decisions: Record<string, import("../../lib/board-transitions").ReattachDecision>
   /** Todo sub-state per in-progress WI id (WI-038). */
   todoSubStates: Record<string, TodoSubState>
   /** Action-required per SESSION id (WI-043): keyed by owner_session / session id. */

@@ -707,7 +707,7 @@ export function createHiveTools(
         // Single-active invariant
         const active = listActiveDreams(directory)
         if (active.length > 0) {
-          const existing = active[0].replace(".yaml", "")
+          const existing = active[0]!.replace(".yaml", "")
           log("warn", "[dream_begin] refused — active dream already exists", { existing, caller })
           return `Cannot begin a new dream: ${existing} is already active. Complete it first with hive_dream_complete, or check dreams/active/ manually.`
         }
@@ -760,7 +760,8 @@ export function createHiveTools(
         }
 
         // Read active dream to get its ID for the log
-        const activeDream = readDreamState(path.join(directory, ".opencode/dreams/active", active[0]))
+        // Exactly one element — both the 0 and >1 cases returned above.
+        const activeDream = readDreamState(path.join(directory, ".opencode/dreams/active", active[0]!))
         if (process.env.HIVE_DEBUG === "1") {
           log("info", "[dream_complete] completing dream", { dreamId: activeDream.dream_id, caller })
         }

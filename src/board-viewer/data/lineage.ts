@@ -4,7 +4,7 @@
  * board-store) so the render layer can call them from a browser bundle.
  * workitems.ts re-exports them, so its public surface is unchanged.
  */
-import type { Transition, WorkItem } from "evolutional-agent-structure/lib/board-store"
+import type { Transition, WorkItem } from "../../lib/board-store"
 
 /**
  * "Previously attempted in ses_..." lineage (Q3c): every session stamped on

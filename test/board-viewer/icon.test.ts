@@ -21,9 +21,9 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test
 import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
-import type { BoardState } from "../src/data/state"
-import type { SessionMirror } from "../src/data/sessions"
-import { buildClientBundle } from "../src/web/client-bundle"
+import type { BoardState } from "../../src/board-viewer/data/state"
+import type { SessionMirror } from "../../src/board-viewer/data/sessions"
+import { buildClientBundle } from "../../src/board-viewer/web/client-bundle"
 import {
   BASE_TITLE,
   boardTitle,
@@ -33,8 +33,8 @@ import {
   reducedMarkSvg,
   THEME_COLOR,
   type IconSource,
-} from "../src/web/icon"
-import { renderPage } from "../src/web/render"
+} from "../../src/board-viewer/web/icon"
+import { renderPage } from "../../src/board-viewer/web/render"
 
 beforeAll(() => GlobalRegistrator.register())
 afterAll(() => GlobalRegistrator.unregister())

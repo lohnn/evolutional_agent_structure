@@ -38,16 +38,24 @@ already passes to `opencode serve --port`.
 # ── hive-board ── paste into the entrypoint AFTER the `opencode serve` line ──
 OPENCODE_PORT=4096   # ⚠️ EDIT (1/2): the port your entrypoint passes to `opencode serve --port`
 
-HIVE_BOARD_DIR=/workspace/projects/hive-board
+# The viewer ships INSIDE the HIVE plugin package (src/board-viewer/), so this
+# points at the plugin checkout — there is no separate hive-board repo.
+HIVE_DIR=/workspace/projects/evolutional_agent_structure
 HIVE_BOARD_LOG=/var/log/hive-board.log
 
 # deps live in the /workspace volume; idempotent, ~200ms when already installed
-(cd "$HIVE_BOARD_DIR" && bun install) >> "$HIVE_BOARD_LOG" 2>&1
+(cd "$HIVE_DIR" && bun install) >> "$HIVE_BOARD_LOG" 2>&1
 
 # respawn loop — Docker supervises only PID 1; a crashed board must self-restart
+#
+# --host 0.0.0.0 is REQUIRED and deliberate: the viewer defaults to 127.0.0.1
+# (safe-by-default in a published package) and would otherwise be unreachable
+# through the published port. It will print an exposure warning on startup —
+# that warning is expected here, and is why the mapping below should stay on a
+# network you trust.
 (
   while true; do
-    bun run "$HIVE_BOARD_DIR/src/server.ts" \
+    bun run "$HIVE_DIR/src/board-viewer/server.ts" \
       --root /workspace \
       --host 0.0.0.0 \
       --port 4400 \
@@ -122,13 +130,14 @@ That's the whole install.
   `curl | bash`) — it dies on every image rebuild and isn't on `PATH` for
   non-login shells. `COPY --from` of the official image is deterministic (no
   install script, no network fetch beyond the image pull). **To bump the pin:**
-  change the tag, then run hive-board's `bunx tsc --noEmit && bun test` inside
-  the container before trusting it.
-- **Why `bun install` in the entrypoint, not the image:** the board and its
-  `file:../evolutional_agent_structure` dependency live in the `/workspace`
-  volume, not the image. The install is idempotent (~200 ms when populated).
-  After changing the plugin repo itself, run `bun install --force` once — bun
-  *copies* `file:` deps rather than symlinking.
+  change the tag, then run `bunx tsc --noEmit && bun test` in the HIVE plugin
+  repo inside the container before trusting it.
+- **Why `bun install` in the entrypoint, not the image:** the HIVE plugin repo
+  (which now CONTAINS the viewer) lives in the `/workspace` volume, not the
+  image. The install is idempotent (~200 ms when populated). Since the viewer
+  was absorbed into the plugin package there is no longer a
+  `file:../evolutional_agent_structure` dependency to go stale, so the old
+  `bun install --force` dance after editing the plugin is gone (I-214).
 - **Why the respawn loop (step 2):** Docker supervises only PID 1. The board
   once crashed in practice and stayed dead until manually restarted; the loop
   self-restarts it with a 2 s backoff and logs the exit code. Logs append to
@@ -147,6 +156,26 @@ That's the whole install.
   session-*creating* affordances (Start / fresh promote) render disabled, and
   POSTs to them return an honest 409. The exact log lines are in step 4.
 
+## Exposure — read before publishing the port
+
+The viewer has **no authentication**. Anyone who can reach it can read your
+`.opencode/` state (work items, session titles, dream artifacts, HIVEmind
+messages) and `POST /transitions/*` to create, pause, demote and complete work
+items and spawn opencode sessions.
+
+Since the viewer ships inside the public `evolutional-agent-structure` package,
+its bind default is **`127.0.0.1`** — safe on an untrusted network, because
+someone running `npx hive-board` on café wifi did not opt into publishing their
+agent state to that network.
+
+This deployment deliberately overrides that with `--host 0.0.0.0` plus a
+published port, and the server prints a loud exposure warning on startup. That
+is the correct trade **only** when the published port sits on a network you
+trust — a home LAN, a Tailnet, or behind an authenticating reverse proxy. If
+the host is on the public internet, do not publish `4400` directly; put an
+authenticating proxy in front of it, or drop `--host` and reach it over an SSH
+tunnel instead.
+
 ## Config reference
 
 Precedence everywhere: **CLI flag > env var > default.** Read once at startup;
@@ -155,7 +184,7 @@ restart to apply.
 | Flag | Env | Default | Purpose | Same-container | Split-container |
 |---|---|---|---|---|---|
 | `--root` | `HIVE_BOARD_ROOT` | walk up from cwd to the first dir containing `.opencode/` | workspace root (everything else derives from it) | set explicitly in the fragment (`/workspace`) | **mandatory** |
-| `--host` | `HIVE_BOARD_HOST` | `0.0.0.0` | bind address | default is right (reachable via published port) | default |
+| `--host` | `HIVE_BOARD_HOST` | `127.0.0.1` (loopback) | bind address | **must set `0.0.0.0`** — the fragment does; the default is deliberately unreachable from outside the container (see *Exposure*) | **must set `0.0.0.0`** |
 | `--port` | `HIVE_BOARD_PORT` | `4400` | HTTP port (validated: integer 0–65535, fails fast otherwise) | default | default |
 | `--db` | `HIVE_BOARD_OPENCODE_DB` | `~/.local/share/opencode/opencode.db` | opencode's SQLite session DB, read **read-only** (session back-fill + existence checks) | default is right (same filesystem) | **mandatory mount** (see below) |
 | `--gui-url` | `HIVE_BOARD_GUI_URL` | `http://studio:3000` | web-GUI base for `?session=` deep links (pure link rendering, never fetched) | set if your GUI isn't at studio:3000 | same |

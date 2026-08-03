@@ -7,7 +7,7 @@
  *
  * Precedence: CLI arg (--root <path>) > HIVE_BOARD_ROOT env > cwd-derived default.
  * The cwd default walks upward from process.cwd() looking for a `.opencode/`
- * directory (so running from projects/hive-board/ finds /workspace).
+ * directory (so running from anywhere inside the workspace finds its root).
  */
 import { execFileSync } from "node:child_process"
 import * as fs from "node:fs"
@@ -26,7 +26,22 @@ export interface BoardConfig {
   workspaceRoot: string
   /** Convenience: `<workspaceRoot>/.opencode`. */
   opencodeDir: string
-  /** Bind hostname for the viewer (default 0.0.0.0 — reachable over LAN/Tailscale). */
+  /**
+   * Bind hostname for the viewer. Defaults to LOOPBACK (127.0.0.1).
+   *
+   * This viewer serves the contents of `.opencode/` — session titles, dream
+   * artifacts, HIVEmind messages — over plain HTTP with NO authentication,
+   * and exposes `POST /transitions/*`, which can create, pause, demote and
+   * complete work items and spawn opencode sessions. It is an unauthenticated
+   * read+write window onto the operator's agent state.
+   *
+   * While hive-board was a `private: true` repo on one machine, defaulting to
+   * `0.0.0.0` was a reasonable local convenience. Shipping inside a public
+   * MIT package it is not: the default must be safe on an untrusted network,
+   * because the person running `npx hive-board` on café wifi did not opt into
+   * publishing their agent state to that network. Non-loopback binds remain
+   * fully supported, but are now an explicit, warned-about choice.
+   */
   hostname: string
   /** HTTP port for the viewer. */
   port: number
@@ -72,13 +87,20 @@ export interface BoardConfig {
 }
 
 /**
- * Resolve the board repo's HEAD short SHA + dirty flag, once, at startup.
- * `dir` is the board project directory (config source lives in the repo, so we
- * anchor on __dirname's package root, not the workspace root — this must
- * reflect the BOARD repo HEAD, W-079). Any failure (no git, not a checkout,
- * detached weirdness) degrades to `"unknown"` rather than throwing.
+ * Resolve the running build's HEAD short SHA + dirty flag, once, at startup.
+ *
+ * `dir` defaults to PACKAGE_ROOT — resolved RELATIVE TO THIS FILE, never a
+ * hardcoded sibling path (I-173). That is what makes this work identically
+ * whether the package is a git checkout in a workspace or an installed
+ * dependency in someone's node_modules. Since the viewer was absorbed into
+ * the plugin package, PACKAGE_ROOT is the plugin repo — so the badge now
+ * reports the HIVE package's HEAD, which IS the viewer's HEAD (one repo, one
+ * version). Any failure (no git, installed from a tarball, not a checkout)
+ * degrades to the literal `"unknown"` rather than throwing.
  */
-export function resolveBuildSha(dir: string = path.join(import.meta.dir, "..")): BuildSha {
+const PACKAGE_ROOT = path.resolve(import.meta.dir, "..", "..")
+
+export function resolveBuildSha(dir: string = PACKAGE_ROOT): BuildSha {
   try {
     const sha = execFileSync("git", ["rev-parse", "--short", "HEAD"], {
       cwd: dir,
@@ -113,6 +135,46 @@ function discoverOpencodeUrl(): string | null {
   }
 }
 
+/**
+ * A bind address is "loopback" if it can only be reached from this machine.
+ * Everything else — `0.0.0.0`, `::`, a LAN IP, a Tailscale name — publishes
+ * the viewer to at least one other host.
+ */
+export function isLoopbackHost(host: string): boolean {
+  const h = host.trim().toLowerCase().replace(/^\[|\]$/g, "")
+  return h === "localhost" || h === "::1" || /^127\./.test(h)
+}
+
+/**
+ * Print a loud, specific warning when the operator binds somewhere reachable.
+ * Deliberately NOT a hard failure: exposing the board on a trusted LAN or a
+ * Tailnet is a legitimate, documented deployment (docs/board-viewer/deploy/).
+ * The goal is informed consent, not prohibition — so the warning names what
+ * is actually exposed rather than saying a vague "this may be insecure".
+ */
+export function warnIfExposed(hostname: string, port: number): void {
+  if (isLoopbackHost(hostname)) return
+  console.warn(
+    [
+      "",
+      "  ┌─ hive-board: BINDING TO A NON-LOOPBACK ADDRESS ──────────────────",
+      `  │  ${hostname}:${port} is reachable from other machines.`,
+      "  │",
+      "  │  This viewer has NO authentication. Anyone who can reach it can:",
+      "  │    • read your .opencode/ state — work items, session titles,",
+      "  │      dream artifacts, HIVEmind messages",
+      "  │    • POST /transitions/* to create, pause, demote and complete",
+      "  │      work items, and to spawn opencode sessions",
+      "  │",
+      "  │  Only do this on a network you trust (LAN, Tailnet, or behind an",
+      "  │  authenticating reverse proxy). To bind locally instead, drop",
+      "  │  --host / HIVE_BOARD_HOST and it will default to 127.0.0.1.",
+      "  └──────────────────────────────────────────────────────────────────",
+      "",
+    ].join("\n"),
+  )
+}
+
 function findWorkspaceRoot(start: string): string | null {
   let dir = path.resolve(start)
   for (;;) {
@@ -125,7 +187,7 @@ function findWorkspaceRoot(start: string): string | null {
 
 export function resolveConfig(argv: string[] = process.argv.slice(2)): BoardConfig {
   let root: string | undefined
-  let hostname = process.env["HIVE_BOARD_HOST"] ?? "0.0.0.0"
+  let hostname = process.env["HIVE_BOARD_HOST"] ?? "127.0.0.1"
   let port = Number(process.env["HIVE_BOARD_PORT"] ?? 4400)
   let opencodeDbPath =
     process.env["HIVE_BOARD_OPENCODE_DB"] ??

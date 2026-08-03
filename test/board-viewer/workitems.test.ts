@@ -2,9 +2,9 @@ import { describe, expect, test } from "bun:test"
 import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
-import { lineageSessions, loadWorkItems, parseWorkItem } from "../src/data/workitems"
+import { lineageSessions, loadWorkItems, parseWorkItem } from "../../src/board-viewer/data/workitems"
 
-const FIXTURES = path.join(import.meta.dir, "..", "fixtures", "board")
+const FIXTURES = path.join(import.meta.dir, "..", "..", "fixtures", "board")
 
 describe("fixture coverage — every SCHEMA state (via owner's board-store parser)", () => {
   const items = loadWorkItems(FIXTURES)

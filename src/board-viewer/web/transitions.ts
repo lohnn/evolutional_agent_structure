@@ -31,8 +31,8 @@ import {
   unpauseItem,
   type BoardSessionClient,
   type TransitionResult,
-} from "evolutional-agent-structure/lib/board-transitions"
-import { readItem } from "evolutional-agent-structure/lib/board-store"
+} from "../../lib/board-transitions"
+import { readItem } from "../../lib/board-store"
 import type { BoardConfig } from "../config"
 import { addNotice } from "./notices"
 

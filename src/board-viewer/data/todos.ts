@@ -35,7 +35,7 @@
  * edit primitive are the PUBLISHED hive-infra contract (board-store, WI-038,
  * restored on plugin v0.4.38).
  */
-import { mutateItem, type ItemEdit } from "evolutional-agent-structure/lib/board-store"
+import { mutateItem, type ItemEdit } from "../../lib/board-store"
 import type { BoardConfig } from "../config"
 import { asTodoStatus, type TodoItem, type TodoSubState } from "./todo-types"
 import type { WorkItem } from "./workitems"

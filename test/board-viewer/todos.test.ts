@@ -7,12 +7,12 @@
  */
 import { describe, expect, test } from "bun:test"
 import * as path from "node:path"
-import { renderPage } from "../src/web/render"
-import { summarizeTodos, type TodoItem, type TodoSubState } from "../src/data/todo-types"
-import { loadWorkItems } from "../src/data/workitems"
+import { renderPage } from "../../src/board-viewer/web/render"
+import { summarizeTodos, type TodoItem, type TodoSubState } from "../../src/board-viewer/data/todo-types"
+import { loadWorkItems } from "../../src/board-viewer/data/workitems"
 import { makeState } from "./render.test"
 
-const FIXTURES = path.join(import.meta.dir, "..", "fixtures", "board")
+const FIXTURES = path.join(import.meta.dir, "..", "..", "fixtures", "board")
 // WI-003 is the fixture's in_progress card (owner ses_0b54b8cf4ffe9RoaO0Ga9OuBBF).
 const IN_PROGRESS_ID = "WI-003"
 

@@ -7,8 +7,8 @@
  * in production, a fake in tests, null when unconfigured — Start/fresh-promote
  * degrade gracefully; reattach never needs it).
  */
-import { boardDir } from "evolutional-agent-structure/lib/board-store"
-import type { BoardSessionClient } from "evolutional-agent-structure/lib/board-transitions"
+import { boardDir } from "../../lib/board-store"
+import type { BoardSessionClient } from "../../lib/board-transitions"
 import type { BoardConfig } from "../config"
 import type { SessionMirror } from "../data/sessions"
 import { loadBoardState } from "../data/state"
