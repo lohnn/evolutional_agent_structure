@@ -62,7 +62,7 @@ import {
   sdkSessionClient,
   type SdkLikeClient,
 } from "./lib/board-transitions.js"
-import { listRevisions } from "./lib/board-store.js"
+import { listRevisions, listItems } from "./lib/board-store.js"
 import path from "path"
 import fs from "fs"
 
@@ -73,6 +73,33 @@ type LogFn = (level: "info" | "debug" | "error" | "warn", message: string, extra
 // reject undeclared keys (it rejects nothing at runtime), so "refuse, don't
 // strip" has to be an explicit membership test — silently dropping them
 // would teach the caller the wrong call shape worked.
+/**
+ * Advisory near-duplicate check for newly filed items.
+ *
+ * hive_board_create tells the caller they need not read an existing item — and
+ * that read was also, incidentally, the duplicate check. Removing a chore can
+ * remove a safeguard that was riding along on it. This puts the safeguard back
+ * on the MECHANISM instead of the caller: a cheap title-token overlap, surfaced
+ * in the success message. Advisory only — it never blocks a create (similar
+ * titles are often legitimately distinct work), and it lives in the tool layer,
+ * not the module, because it is UX and not write authority.
+ */
+function nearDuplicateTitles(existing: { id: string; title: string }[], title: string): string[] {
+  const words = (t: string) => new Set(t.toLowerCase().match(/[a-z0-9]+/g) ?? [])
+  const a = words(title)
+  if (a.size === 0) return []
+  const hits: string[] = []
+  for (const it of existing) {
+    const b = words(it.title)
+    if (b.size === 0) continue
+    let shared = 0
+    for (const w of a) if (b.has(w)) shared++
+    const jaccard = shared / (a.size + b.size - shared)
+    if (jaccard >= 0.5) hits.push(`${it.id} ("${it.title}")`)
+  }
+  return hits
+}
+
 const FORBIDDEN_CREATE_KEYS = [
   "id",
   "owner_session",
@@ -235,19 +262,27 @@ export function createHiveTools(
 
     hive_board_create: tool({
       description:
-        "Create a hive-board work item (an idea) in .opencode/board/. " +
-        "USE THIS INSTEAD OF HAND-WRITING A WI-*.md FILE — you do not need to read an existing item, look up the frontmatter shape, or find a free id. " +
-        "The id is allocated atomically under the board lock and every birth default is set for you. " +
-        "New items are UN-OWNED and land in backlog (or todo); ownership comes later via hive_board_bind (this session) or hive_board_start (a fresh session). " +
-        "You do NOT pass id, owner_session, group_id, spec_hash, status beyond backlog/todo, or transitions — those belong to the transition module and are REFUSED if supplied, not silently ignored. " +
-        "`subtasks` may be set here at creation time ONLY (an author-written plan); there is deliberately no tool to edit them afterwards.",
+        "File a work item on the hive-board and get back its id. " +
+        "Use this instead of writing a WI-*.md file by hand: it allocates the next id atomically under the board lock, timestamps it, and writes a valid birth transition — nothing to look up, no existing item to copy. " +
+        "New items are UN-OWNED: captured, with no session working them yet. Ownership comes later — hive_board_bind (this session takes it) or hive_board_start (spawn a fresh session for it). " +
+        "Lifecycle fields are not the author's to set: id, ownership, spec_hash, transitions, dream/artifact links, and any status beyond backlog/todo are owned by the transition module and are refused with an explanation if passed.",
       args: {
-        title: tool.schema.string().describe("Short imperative title, e.g. 'Add push opt-out toggle'"),
-        body: tool.schema.string().optional().describe("The spec / notes, markdown. Revise later with hive_board_respec (which preserves what it replaces)."),
-        status: tool.schema.enum(["backlog", "todo"]).optional().describe("Starting column. Default backlog. Anything else is refused — in_progress/done are reached through transitions, never set directly."),
-        priority: tool.schema.enum(["low", "medium", "high"]).optional().describe("Ordering hint within the column. Default medium."),
-        tags: tool.schema.array(tool.schema.string()).optional().describe("Bare tokens (letters/digits/dot/dash/underscore). Editable later with hive_board_tag."),
-        subtasks: tool.schema.array(tool.schema.string()).optional().describe("Author-written plan steps, in order. CREATION-TIME ONLY — they cannot be edited afterwards, so only pass them if the decomposition is already settled."),
+        title: tool.schema.string().describe("Short imperative title, e.g. 'Add push opt-out toggle'."),
+        body: tool.schema.string().optional().describe(
+          "The spec, markdown. Write it for someone picking this up cold: what the problem is, what is in and out of scope, and what 'done' looks like. No house template is enforced. Revise later with hive_board_respec, which preserves the text it replaces."
+        ),
+        status: tool.schema.enum(["backlog", "todo"]).optional().describe(
+          "backlog (default) = captured, not yet queued. todo = triaged and next up. Nothing behaves differently between them — both are un-owned and both can be started at any time; the column is a human queueing signal, not a state machine. When in doubt, backlog."
+        ),
+        priority: tool.schema.enum(["low", "medium", "high"]).optional().describe(
+          "Really does sort: this is the PRIMARY sort key in the Backlog and Todo columns, ahead of recency, so high visibly moves the card to the top. Default medium."
+        ),
+        tags: tool.schema.array(tool.schema.string()).optional().describe(
+          "Free-form labels — there is no controlled vocabulary and no namespacing convention. Rendered as chips; they do not filter anything today. The common pattern is the project or component name (jellyfetch, hive-board, tooling). Bare tokens: letters, digits, dot, dash, underscore. Editable later with hive_board_tag."
+        ),
+        subtasks: tool.schema.array(tool.schema.string()).optional().describe(
+          "An author-written plan: the steps you would take, in order. CREATION-TIME ONLY — not because the plan is meant to be frozen as a record of original intent, but because no safe concurrent-edit primitive for it exists yet: an ordered list of rich records cannot be merged the way a set of tags can, so a whole-replace edit would silently lose a concurrent editor's change. So pass a decomposition you are settled on; to revise the plan later, put the revision in the body. Distinct from todo_mirror, which is the owning session's live TodoWrite and is machine-written."
+        ),
       },
       async execute(args, context) {
         // ── RUNTIME arg validation ────────────────────────────────────────
@@ -287,10 +322,18 @@ export function createHiveTools(
         // nothing at runtime; the module is the guard, and it can say no.
         if (!result.ok) return `Refused (${result.reason}): ${result.detail}`
         const it = result.item
+        const dupes = nearDuplicateTitles(
+          listItems(directory).filter((x) => x.id !== it.id),
+          it.title
+        )
+        const dupeNote =
+          dupes.length > 0
+            ? ` ⚠ Possible duplicate of ${dupes.join(", ")} — check before starting work; there is no delete path, so a duplicate is best resolved by respec/retitle or by closing one.`
+            : ""
         return (
           `Created ${it.id} ("${it.title}") — status ${it.status}, priority ${it.priority}, un-owned. ` +
           `Birth transition appended.${it.subtasks.length > 0 ? ` ${it.subtasks.length} subtask(s) recorded (not editable afterwards).` : ""} ` +
-          `Take ownership with hive_board_bind ${it.id} (this session) or hive_board_start ${it.id} (fresh session).`
+          `Take ownership with hive_board_bind ${it.id} (this session) or hive_board_start ${it.id} (fresh session).${dupeNote}`
         )
       },
     }),
@@ -299,14 +342,15 @@ export function createHiveTools(
 
     hive_board_respec: tool({
       description:
-        "Revise the SPEC BODY of a hive-board work item, preserving the text it replaces. " +
-        "The previous body is NEVER destroyed: it is archived content-addressed under .opencode/board/<id>/ and the revision is appended to the item's transition log with the superseded spec_hash, so history stays readable and attributable. " +
-        "Use this instead of editing a WI-*.md file by hand — a hand edit bypasses the board lock (the viewer writes to the same files) and loses the previous text permanently, since the board is gitignored and has no VCS underneath. " +
-        "REFUSES if the item is owned by a DIFFERENT session: once owned, the spec belongs to the owning session, which accumulates decisions in it. Demote the item first to make it fluid again. " +
-        "Does NOT touch status, ownership, subtasks, todo_mirror or spec_hash — on a demoted item the difference between the live body and the stamped spec_hash is what decides re-attach vs fresh session, so re-stamping it here would silently reattach a session to a spec it never agreed to.",
+        "Rewrite a work item's spec body. The text you replace is never lost — it is archived automatically and the change is recorded in the item's history, so a reader can see that the spec changed, when, and by whom. " +
+        "Use this rather than editing the file: a hand edit bypasses the board lock (the board viewer writes to the same items) and destroys the previous text permanently, since the board has no version control underneath. " +
+        "Touches the body only — status, ownership, subtasks and the live todo mirror are untouched. " +
+        "Refused if a different session owns the item: once work starts, the spec belongs to the session accumulating decisions in it (demote the item first to make it editable again).",
       args: {
-        id: tool.schema.string().describe("Work item id, e.g. WI-064"),
-        body: tool.schema.string().describe("The COMPLETE new spec body (this replaces the whole body, not a patch). Empty is refused — that would discard the spec, not revise it."),
+        id: tool.schema.string().describe("Work item id, e.g. WI-064."),
+        body: tool.schema.string().describe(
+          "The COMPLETE new spec body — this replaces the whole body, it is not a patch, so include everything you want to keep. Markdown. An empty body is refused (that discards a spec rather than revising it); a body identical to the current one is a no-op and records nothing."
+        ),
       },
       async execute(args, context) {
         const id = args.id.trim()
@@ -329,12 +373,11 @@ export function createHiveTools(
 
     hive_board_retitle: tool({
       description:
-        "Change a hive-board work item's title. " +
-        "REFUSES if the item is owned by a different session — once owned, the title is mirrored from that session and stored on the item. " +
-        "For the spec body use hive_board_respec; this touches the title only.",
+        "Change a work item's title. Titles are short and imperative — for the spec itself use hive_board_respec. " +
+        "Refused if a different session owns the item (an owned item's title is mirrored from that session).",
       args: {
-        id: tool.schema.string().describe("Work item id, e.g. WI-064"),
-        title: tool.schema.string().describe("The new title."),
+        id: tool.schema.string().describe("Work item id, e.g. WI-064."),
+        title: tool.schema.string().describe("The new title, short and imperative. Empty is refused."),
       },
       async execute(args, context) {
         const result = await retitleItem(directory, args.id.trim(), args.title, {
@@ -351,16 +394,16 @@ export function createHiveTools(
 
     hive_board_tag: tool({
       description:
-        "Add and/or remove TAGS on a hive-board work item. " +
-        "Pass only what CHANGES — this is a set delta, never a whole-list replace, so a concurrent editor's tags are merged rather than clobbered. " +
-        "Adding a tag that is already present, or removing one that is absent, is a harmless no-op. " +
-        "Naming the same tag in both add and remove is REFUSED rather than guessed. " +
-        "Tags are bare tokens: letters, digits, dot, dash, underscore — no spaces, commas or brackets. " +
-        "Works on owned and un-owned items alike (tags are shared metadata, not part of the spec).",
+        "Add or remove tags on a work item. Pass only what CHANGES — this is a delta, so a concurrent editor's tags are merged rather than overwritten. " +
+        "Works whether or not the item is owned; tags are shared metadata, not part of the spec.",
       args: {
-        id: tool.schema.string().describe("Work item id, e.g. WI-064"),
-        add: tool.schema.array(tool.schema.string()).optional().describe("Tags to add. Only the ones you are adding."),
-        remove: tool.schema.array(tool.schema.string()).optional().describe("Tags to remove. Only the ones you are removing."),
+        id: tool.schema.string().describe("Work item id, e.g. WI-064."),
+        add: tool.schema.array(tool.schema.string()).optional().describe(
+          "Tags to add — only the new ones. Free-form: no controlled vocabulary and no namespacing convention; the common pattern is the project or component name (jellyfetch, hive-board, tooling). Bare tokens: letters, digits, dot, dash, underscore. Adding a tag that is already present is a harmless no-op."
+        ),
+        remove: tool.schema.array(tool.schema.string()).optional().describe(
+          "Tags to remove — only those. Removing an absent tag is a harmless no-op. Naming the same tag in both add and remove is refused rather than guessed."
+        ),
       },
       async execute(args, _context) {
         const result = await editItemTags(
@@ -378,11 +421,11 @@ export function createHiveTools(
       },
     }),
 
-    // ── hive-board: start an idea item in a FRESH coordinator session ────────
+    // ── hive-board: start an un-owned item in a FRESH coordinator session ───
 
     hive_board_start: tool({
       description:
-        "Start a hive-board idea item (backlog/todo, un-owned) in a FRESH top-level HIVE coordinator session: creates the session, stamps it as owner, and triggers /awaken in it seeded with the item's spec. " +
+        "Start an UN-OWNED hive-board work item (one sitting in backlog/todo, with no session on it yet) in a FRESH top-level HIVE coordinator session: creates the session, stamps it as owner, and triggers /awaken in it seeded with the item's spec. " +
         "Use hive_board_bind instead when THIS session should own the item. Done items are reopened via re-attach, not started fresh.",
       args: {
         id: tool.schema.string().describe("Work item id, e.g. WI-007"),
