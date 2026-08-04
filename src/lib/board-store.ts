@@ -84,6 +84,18 @@ export interface Transition {
   session?: string
   /** lineage: the pristine placeholder WI id dissolved into this bind (Q15 / SCHEMA §3 inv. 6) */
   absorbed?: string
+  /**
+   * Spec-revision tombstone (WI-064): the `spec_hash` of the body this edit
+   * REPLACED. The superseded text itself lives at
+   * `board/<id>/<superseded>.md` — this entry is the pointer and the record.
+   *
+   * Its presence is what makes a revision visible in the log without opening
+   * the payload (W-103: a superseded revision is a tombstone, not an absence).
+   * It also MARKS the entry as a revision rather than a work attempt — any
+   * reader that treats a transition's `session` as "someone who worked on
+   * this" must skip entries carrying `superseded` (see SCHEMA §4d).
+   */
+  superseded?: string
 }
 
 export interface WorkItem {
@@ -248,6 +260,7 @@ function emitTransition(t: Transition): string {
     `by: ${token(t.by)}`,
     ...(t.session !== undefined ? [`session: ${token(t.session)}`] : []),
     ...(t.absorbed !== undefined ? [`absorbed: ${token(t.absorbed)}`] : []),
+    ...(t.superseded !== undefined ? [`superseded: ${token(t.superseded)}`] : []),
   ]
   return `{ ${pairs.join(", ")} }`
 }
@@ -366,6 +379,7 @@ export function parseWorkItem(content: string): WorkItem {
           by: m.by ?? "",
           ...(m.session !== undefined && m.session !== "null" ? { session: m.session } : {}),
           ...(m.absorbed !== undefined && m.absorbed !== "null" ? { absorbed: m.absorbed } : {}),
+          ...(m.superseded !== undefined && m.superseded !== "null" ? { superseded: m.superseded } : {}),
         })
       }
       continue
@@ -667,6 +681,47 @@ export interface ItemEdit {
    * module like any other edit. An empty `todos` clears the mirror to `[]`.
    */
   setTodoMirror?: { todos: TodoMirrorEntry[]; at: string }
+  /**
+   * Replace the spec BODY (WI-064). The ONLY primitive that writes outside the
+   * frontmatter region — every other edit here is frontmatter line surgery.
+   *
+   * RETENTION IS STRUCTURAL, NOT OPTIONAL: `editItemUnlocked` writes the body
+   * being replaced to `board/<id>/<old-spec-hash>.md` BEFORE the new content
+   * lands. There is deliberately no flag to skip that. A caller cannot destroy
+   * a spec body through this module even by mistake — which is the entire
+   * point of WI-064 (the WI-055 body was lost precisely because the only
+   * available path was hand text-surgery with no retention).
+   *
+   * Does NOT re-stamp `spec_hash`. That stamp is provenance from bind /
+   * true-demote, and `reattachInfo()` compares it against the LIVE body hash
+   * to decide re-attach vs fresh session ("the edit is the decision", Q13).
+   * Re-stamping here would silently convert spec-changed → spec-unchanged and
+   * re-attach a session to a spec it never agreed to.
+   */
+  setBody?: { body: string }
+  /**
+   * Add and/or remove `tags` as SET DELTAS — never a whole-list replace.
+   *
+   * WRITE CLASS (WI-064): tags are author-written content with no external
+   * source of truth, so on the loss axis they sit with `subtasks` (canonical,
+   * unrecoverable) and NOT with `todo_mirror`/`artifacts` (rebuildable cache
+   * mirrors). Whole-replacing canonical content is a lost update between two
+   * editors — the hazard that got post-creation `subtasks` editing rejected.
+   *
+   * Tags nevertheless GET a safe post-creation path where `subtasks` could
+   * not, and the reason is the data's algebra, not its storage shape: tags are
+   * an unordered SET of opaque tokens, so add/remove are commutative and
+   * idempotent. Two concurrent editors sending `{add:["a"]}` and
+   * `{add:["b"]}` converge on {a,b} in either order, because neither ever
+   * transmits the whole set. `subtasks` is an ORDERED list of rich records
+   * whose edits do not commute (reorder vs in-place content edit), which is
+   * why it still needs its own design and remains unapproved.
+   *
+   * Idempotent (I-212): adding a present tag or removing an absent one is a
+   * no-op. Callers should treat a tag appearing in BOTH add and remove as
+   * malformed and refuse rather than guess an order.
+   */
+  editTags?: { add?: string[]; remove?: string[] }
 }
 
 /**
@@ -794,6 +849,45 @@ export function applyEditToContent(content: string, edit: ItemEdit): string {
     lines.splice(insertAt, 0, ...fresh)
   }
 
+  // 2d. tags set-delta (flow-array surgery). Read the CURRENT value out of the
+  //     text being edited — never from a caller-supplied snapshot — so two
+  //     serialized editors each apply their delta to the other's result
+  //     instead of clobbering it (I-190 / WI-064).
+  if (edit.editTags !== undefined) {
+    const { add = [], remove = [] } = edit.editTags
+    const { start, end } = fmRegion(lines)
+    let idx = -1
+    for (let i = start; i < end; i++) {
+      if (/^tags:/.test(lines[i]!)) {
+        idx = i
+        break
+      }
+    }
+    const current =
+      idx === -1
+        ? []
+        : (lines[idx]!.match(/^tags:\s*\[(.*)\]\s*$/)?.[1] ?? "")
+            .split(",")
+            .map((t) => unq(t.trim()))
+            .filter((t) => t !== "")
+    const removeSet = new Set(remove)
+    const next = current.filter((t) => !removeSet.has(t))
+    for (const t of add) if (!next.includes(t)) next.push(t)
+    const rendered = `tags: [${next.map(token).join(", ")}]`
+    if (idx === -1) {
+      let insertAt = end
+      for (let i = start; i < end; i++) {
+        if (/^transitions:/.test(lines[i]!)) {
+          insertAt = i
+          break
+        }
+      }
+      lines.splice(insertAt, 0, rendered)
+    } else {
+      lines[idx] = rendered
+    }
+  }
+
   // 3. transitions append (block surgery — insert after last entry)
   if (edit.appendTransition) {
     const entryLine = `  - ${emitTransition(edit.appendTransition)}`
@@ -817,6 +911,25 @@ export function applyEditToContent(content: string, edit: ItemEdit): string {
       while (insertAt < fmRegion(lines).end && /^\s+-\s/.test(lines[insertAt]!)) insertAt++
       lines.splice(insertAt, 0, entryLine)
     }
+  }
+
+  // 4. BODY replacement — the ONLY step that writes outside fmRegion.
+  //
+  //    Done LAST, deliberately: every step above addresses lines by index
+  //    inside the frontmatter region, and rewriting the tail first would leave
+  //    those indexes describing a document that no longer exists. Keeping the
+  //    body edit terminal means the frontmatter surgery above is byte-for-byte
+  //    unaffected by it — unknown fields, comments and hand edits still
+  //    round-trip exactly as before (I-049).
+  //
+  //    Reproduces serializeWorkItem's tail contract exactly: fence, blank
+  //    line, body with leading/trailing newlines stripped, single trailing
+  //    newline; empty body collapses to just the blank line.
+  if (edit.setBody !== undefined) {
+    const { end } = fmRegion(lines)
+    const body = edit.setBody.body.replace(/^\n+/, "").replace(/\n+$/, "")
+    const head = lines.slice(0, end + 1) // frontmatter + closing fence
+    lines = body === "" ? [...head, "", ""] : [...head, "", ...body.split("\n"), ""]
   }
 
   return lines.join("\n")
@@ -864,6 +977,14 @@ export function deleteItemUnlocked(directory: string, id: string): void {
 export function editItemUnlocked(directory: string, id: string, edit: ItemEdit): WorkItem {
   const p = itemPath(directory, id)
   const content = fs.readFileSync(p, "utf8") // re-read inside the lock
+  // Retention BEFORE replacement (WI-064). Deliberately unconditional and
+  // unskippable: if a body is being replaced, the old one is durable first.
+  // Content-addressed, so a no-op "revision" back to a previous text costs
+  // nothing and re-writing the same revision is idempotent.
+  if (edit.setBody !== undefined) {
+    const prior = parseWorkItem(content).body
+    if (prior.trim() !== "") writeRevisionUnlocked(directory, id, prior)
+  }
   const withUpdated: ItemEdit = {
     ...edit,
     set: { updated: today(), ...(edit.set ?? {}) },
@@ -871,6 +992,61 @@ export function editItemUnlocked(directory: string, id: string, edit: ItemEdit):
   const next = applyEditToContent(content, withUpdated)
   atomicWrite(directory, id, next)
   return parseWorkItem(next)
+}
+
+// ── Spec revision archive (WI-064) ────────────────────────────────────────────
+
+/**
+ * Per-item revision directory: `.opencode/board/<id>/`.
+ *
+ * Safe alongside item files because `listItemsInDir` filters on
+ * /^WI-\d+\.md$/ — a bare directory name never matches, so revisions are
+ * invisible to enumeration and cost the board nothing to parse.
+ */
+export function revisionDir(directory: string, id: string): string {
+  return path.join(boardDir(directory), id)
+}
+
+/**
+ * Persist a superseded body, content-addressed by its own `specHash`.
+ *
+ * Write-once and never mutated: the filename IS the hash of the contents, so a
+ * reader can verify the pointer by re-hashing, identical bodies dedupe for
+ * free, and re-running the same revision is idempotent (I-212). Never pruned —
+ * the board is gitignored, so there is no VCS underneath to recover from.
+ * MUST be called inside withBoardLock.
+ */
+export function writeRevisionUnlocked(directory: string, id: string, body: string): string {
+  const hash = specHash(body)
+  const dir = revisionDir(directory, id)
+  fs.mkdirSync(dir, { recursive: true })
+  const rp = path.join(dir, `${hash}.md`)
+  if (!fs.existsSync(rp)) fs.writeFileSync(rp, body.replace(/\n+$/, "") + "\n", "utf8")
+  return hash
+}
+
+/** Hashes of every archived revision of an item (unordered — order via transitions[]). */
+export function listRevisions(directory: string, id: string): string[] {
+  try {
+    return fs
+      .readdirSync(revisionDir(directory, id))
+      .filter((f) => /^[0-9a-f]{12}\.md$/.test(f))
+      .map((f) => f.slice(0, -3))
+      .sort()
+  } catch {
+    return []
+  }
+}
+
+/** Read one archived revision by hash, or null. Verifies the content still hashes to its name. */
+export function readRevision(directory: string, id: string, hash: string): string | null {
+  try {
+    const text = fs.readFileSync(path.join(revisionDir(directory, id), `${hash}.md`), "utf8")
+    const body = text.replace(/^\n+/, "").replace(/\s+$/, "")
+    return specHash(body) === hash ? body : null
+  } catch {
+    return null
+  }
 }
 
 // ── Locked convenience wrappers ───────────────────────────────────────────────

@@ -50,12 +50,44 @@ import {
 } from "./lib/dream-state.js"
 import { rankArtifacts } from "./lib/dream-rank.js"
 import { recordSurfacedEvent } from "./lib/dream-telemetry.js"
-import { bindSession, autoRegister, startItem, markItemDoneFromDream, sdkSessionClient, type SdkLikeClient } from "./lib/board-transitions.js"
+import {
+  bindSession,
+  autoRegister,
+  startItem,
+  markItemDoneFromDream,
+  createIdea,
+  respecItem,
+  retitleItem,
+  editItemTags,
+  sdkSessionClient,
+  type SdkLikeClient,
+} from "./lib/board-transitions.js"
+import { listRevisions } from "./lib/board-store.js"
 import path from "path"
 import fs from "fs"
 
 type Client = ReturnType<typeof createOpencodeClient>
 type LogFn = (level: "info" | "debug" | "error" | "warn", message: string, extra?: Record<string, unknown>) => void
+
+// Keys a caller must never supply to hive_board_create. The schema does not
+// reject undeclared keys (it rejects nothing at runtime), so "refuse, don't
+// strip" has to be an explicit membership test — silently dropping them
+// would teach the caller the wrong call shape worked.
+const FORBIDDEN_CREATE_KEYS = [
+  "id",
+  "owner_session",
+  "group_id",
+  "spec_hash",
+  "transitions",
+  "dream_id",
+  "artifacts",
+  "todo_mirror",
+  "released_sessions",
+  "origin",
+  "paused",
+  "done_without_dream",
+]
+
 
 export function createHiveTools(
   ns: NervousSystem,
@@ -196,6 +228,153 @@ export function createHiveTools(
             ? ` Pristine auto-registered placeholder ${result.absorbed} was absorbed (dissolved; lineage recorded on the bind transition).`
             : ""
         return `Bound ${result.item.id} ("${result.item.title}") to this session (${context.sessionID}). Status: in_progress; owner_session + group_id stamped together; spec_hash stamped; transition appended.${absorbedNote}`
+      },
+    }),
+
+    // ── hive-board: author a new work item ───────────────────────────────────
+
+    hive_board_create: tool({
+      description:
+        "Create a hive-board work item (an idea) in .opencode/board/. " +
+        "USE THIS INSTEAD OF HAND-WRITING A WI-*.md FILE — you do not need to read an existing item, look up the frontmatter shape, or find a free id. " +
+        "The id is allocated atomically under the board lock and every birth default is set for you. " +
+        "New items are UN-OWNED and land in backlog (or todo); ownership comes later via hive_board_bind (this session) or hive_board_start (a fresh session). " +
+        "You do NOT pass id, owner_session, group_id, spec_hash, status beyond backlog/todo, or transitions — those belong to the transition module and are REFUSED if supplied, not silently ignored. " +
+        "`subtasks` may be set here at creation time ONLY (an author-written plan); there is deliberately no tool to edit them afterwards.",
+      args: {
+        title: tool.schema.string().describe("Short imperative title, e.g. 'Add push opt-out toggle'"),
+        body: tool.schema.string().optional().describe("The spec / notes, markdown. Revise later with hive_board_respec (which preserves what it replaces)."),
+        status: tool.schema.enum(["backlog", "todo"]).optional().describe("Starting column. Default backlog. Anything else is refused — in_progress/done are reached through transitions, never set directly."),
+        priority: tool.schema.enum(["low", "medium", "high"]).optional().describe("Ordering hint within the column. Default medium."),
+        tags: tool.schema.array(tool.schema.string()).optional().describe("Bare tokens (letters/digits/dot/dash/underscore). Editable later with hive_board_tag."),
+        subtasks: tool.schema.array(tool.schema.string()).optional().describe("Author-written plan steps, in order. CREATION-TIME ONLY — they cannot be edited afterwards, so only pass them if the decomposition is already settled."),
+      },
+      async execute(args, context) {
+        // ── RUNTIME arg validation ────────────────────────────────────────
+        // `tool()` is the identity function and `tool.schema` is re-exported
+        // zod that nothing invokes: the declarations above describe the tool
+        // to the model and infer TypeScript types, but reject NOTHING at
+        // runtime. Anything the model emits arrives here as-is — including
+        // values outside a declared enum, and keys not declared at all.
+        // Verified the hard way: a live call with status:"in_progress" wrote
+        // WI-065 to disk. Everything a description advertises as refused must
+        // be refused HERE, imperatively (or in the module, for shared paths).
+        const forbidden = FORBIDDEN_CREATE_KEYS.filter((k) => k in (args as Record<string, unknown>))
+        if (forbidden.length > 0) {
+          return (
+            `Refused (TRANSITION_MODULE_FIELD): ${forbidden.join(", ")} ${forbidden.length === 1 ? "is" : "are"} owned by the transition module, not the author. ` +
+            `Ownership (owner_session/group_id) is stamped by hive_board_bind / hive_board_start; spec_hash by bind and true-demote; ` +
+            `transitions are appended by the operation that caused them; the id is allocated here. Drop ${forbidden.length === 1 ? "it" : "them"} and retry.`
+          )
+        }
+        const title = args.title.trim()
+        if (title === "") return "Refused (EMPTY_TITLE): title is required and cannot be empty."
+        const result = await createIdea(directory, {
+          title,
+          ...(args.body !== undefined ? { body: args.body } : {}),
+          ...(args.status !== undefined ? { status: args.status } : {}),
+          ...(args.priority !== undefined ? { priority: args.priority } : {}),
+          ...(args.tags !== undefined ? { tags: args.tags } : {}),
+          ...(args.subtasks !== undefined
+            ? { subtasks: args.subtasks.map((content) => ({ content, status: "pending" as const })) }
+            : {}),
+          by: `hive_board_create:${ns.resolveAgent(context.sessionID, context.agent) ?? "session"}`,
+        })
+        // NEVER assume the module cannot refuse. The previous version of this
+        // line asserted createIdea "returns TransitionOk unconditionally — the
+        // only rejectable inputs are gated by schema", and that belief put an
+        // in_progress un-owned item on disk (WI-065). tool.schema validates
+        // nothing at runtime; the module is the guard, and it can say no.
+        if (!result.ok) return `Refused (${result.reason}): ${result.detail}`
+        const it = result.item
+        return (
+          `Created ${it.id} ("${it.title}") — status ${it.status}, priority ${it.priority}, un-owned. ` +
+          `Birth transition appended.${it.subtasks.length > 0 ? ` ${it.subtasks.length} subtask(s) recorded (not editable afterwards).` : ""} ` +
+          `Take ownership with hive_board_bind ${it.id} (this session) or hive_board_start ${it.id} (fresh session).`
+        )
+      },
+    }),
+
+    // ── hive-board: revise a spec body (history-preserving) ──────────────────
+
+    hive_board_respec: tool({
+      description:
+        "Revise the SPEC BODY of a hive-board work item, preserving the text it replaces. " +
+        "The previous body is NEVER destroyed: it is archived content-addressed under .opencode/board/<id>/ and the revision is appended to the item's transition log with the superseded spec_hash, so history stays readable and attributable. " +
+        "Use this instead of editing a WI-*.md file by hand — a hand edit bypasses the board lock (the viewer writes to the same files) and loses the previous text permanently, since the board is gitignored and has no VCS underneath. " +
+        "REFUSES if the item is owned by a DIFFERENT session: once owned, the spec belongs to the owning session, which accumulates decisions in it. Demote the item first to make it fluid again. " +
+        "Does NOT touch status, ownership, subtasks, todo_mirror or spec_hash — on a demoted item the difference between the live body and the stamped spec_hash is what decides re-attach vs fresh session, so re-stamping it here would silently reattach a session to a spec it never agreed to.",
+      args: {
+        id: tool.schema.string().describe("Work item id, e.g. WI-064"),
+        body: tool.schema.string().describe("The COMPLETE new spec body (this replaces the whole body, not a patch). Empty is refused — that would discard the spec, not revise it."),
+      },
+      async execute(args, context) {
+        const id = args.id.trim()
+        const result = await respecItem(directory, id, args.body, {
+          session: context.sessionID,
+          by: `hive_board_respec:${ns.resolveAgent(context.sessionID, context.agent) ?? "session"}`,
+        })
+        if (!result.ok) return `Refused (${result.reason}): ${result.detail}`
+        if (result.action === "respec-noop") return `${id}: body is byte-identical to the current spec — no revision recorded.`
+        const revs = listRevisions(directory, id)
+        return (
+          `Revised ${id}'s spec. Previous body archived at .opencode/board/${id}/ ` +
+          `(${revs.length} revision${revs.length === 1 ? "" : "s"} retained; recover with the superseded hash on the transition entry). ` +
+          `spec_hash deliberately NOT re-stamped.`
+        )
+      },
+    }),
+
+    // ── hive-board: retitle ─────────────────────────────────────────────────
+
+    hive_board_retitle: tool({
+      description:
+        "Change a hive-board work item's title. " +
+        "REFUSES if the item is owned by a different session — once owned, the title is mirrored from that session and stored on the item. " +
+        "For the spec body use hive_board_respec; this touches the title only.",
+      args: {
+        id: tool.schema.string().describe("Work item id, e.g. WI-064"),
+        title: tool.schema.string().describe("The new title."),
+      },
+      async execute(args, context) {
+        const result = await retitleItem(directory, args.id.trim(), args.title, {
+          session: context.sessionID,
+          by: "hive_board_retitle",
+        })
+        if (!result.ok) return `Refused (${result.reason}): ${result.detail}`
+        if (result.action === "retitle-noop") return `${args.id.trim()}: title unchanged — no write.`
+        return `Retitled ${result.item.id} to "${result.item.title}".`
+      },
+    }),
+
+    // ── hive-board: edit tags (set deltas) ───────────────────────────────────
+
+    hive_board_tag: tool({
+      description:
+        "Add and/or remove TAGS on a hive-board work item. " +
+        "Pass only what CHANGES — this is a set delta, never a whole-list replace, so a concurrent editor's tags are merged rather than clobbered. " +
+        "Adding a tag that is already present, or removing one that is absent, is a harmless no-op. " +
+        "Naming the same tag in both add and remove is REFUSED rather than guessed. " +
+        "Tags are bare tokens: letters, digits, dot, dash, underscore — no spaces, commas or brackets. " +
+        "Works on owned and un-owned items alike (tags are shared metadata, not part of the spec).",
+      args: {
+        id: tool.schema.string().describe("Work item id, e.g. WI-064"),
+        add: tool.schema.array(tool.schema.string()).optional().describe("Tags to add. Only the ones you are adding."),
+        remove: tool.schema.array(tool.schema.string()).optional().describe("Tags to remove. Only the ones you are removing."),
+      },
+      async execute(args, _context) {
+        const result = await editItemTags(
+          directory,
+          args.id.trim(),
+          {
+            ...(args.add !== undefined ? { add: args.add } : {}),
+            ...(args.remove !== undefined ? { remove: args.remove } : {}),
+          },
+          { by: "hive_board_tag" }
+        )
+        if (!result.ok) return `Refused (${result.reason}): ${result.detail}`
+        if (result.action === "tags-noop") return `${args.id.trim()}: tags already in that state — no write.`
+        return `${result.item.id} tags: [${result.item.tags.join(", ")}]`
       },
     }),
 

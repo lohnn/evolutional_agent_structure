@@ -21,6 +21,7 @@ import {
   type WorkItemStatus,
   type WorkItemPriority,
   type Transition,
+  type Subtask,
   withBoardLock,
   listItems,
   readItem,
@@ -67,16 +68,84 @@ export interface CreateIdeaInit {
   status?: Extract<WorkItemStatus, "backlog" | "todo">
   priority?: WorkItemPriority
   tags?: string[]
+  /**
+   * Author-written plan/decomposition, CREATION-TIME ONLY (SCHEMA §4,
+   * ratified 2026-08-03). `subtasks` is canonical authored content, so there
+   * is deliberately no post-creation edit path: unlike `tags` (an unordered
+   * set whose add/remove deltas commute), subtasks is an ordered list of rich
+   * records whose concurrent edits do not commute, and a whole-replace
+   * primitive would be a lost-update generator. Setting it at birth is safe
+   * because there is no prior value to lose.
+   */
+  subtasks?: Subtask[]
   /** audit label for the birth transition, e.g. "board:create" */
   by?: string
 }
 
-export function createIdea(directory: string, init: CreateIdeaInit): Promise<TransitionOk> {
+/** Column values an idea may be BORN into. in_progress/done are reached only via transitions. */
+const CREATABLE_STATUS = new Set(["backlog", "todo"])
+const VALID_PRIORITY = new Set(["low", "medium", "high"])
+/** Bare tokens only — letters, digits, dot, dash, underscore. */
+export const TAG_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
+
+/**
+ * Validate creation input AT RUNTIME.
+ *
+ * This lives in the module, not in the tool, for two reasons. First, the module
+ * is the single owner-published write path (I-179) and board-viewer's create
+ * form calls it directly — a guard in the plugin tool would leave the viewer
+ * able to write the same illegal state. Second, and the reason this function
+ * exists at all: the plugin's `tool()` is the IDENTITY function and
+ * `tool.schema` is just re-exported zod that nothing ever invokes, so
+ * `tool.schema.enum([...])` describes intent to the model and infers a
+ * TypeScript type — but performs NO runtime rejection. A live call passing
+ * `status: "in_progress"` reached disk and created an in_progress item with no
+ * owner (WI-065, 2026-08-04). TypeScript had narrowed the value to the enum
+ * and thereby argued that this check was redundant. It was not.
+ */
+function validateCreateInit(init: CreateIdeaInit): TransitionErr | null {
+  if (init.title.trim() === "") {
+    return { ok: false as const, reason: "EMPTY_TITLE", detail: "A work item needs a title." }
+  }
+  if (init.status !== undefined && !CREATABLE_STATUS.has(init.status)) {
+    return {
+      ok: false as const,
+      reason: "INVALID_STATUS",
+      detail:
+        `Cannot create an item with status "${init.status}". Ideas are born backlog or todo only — ` +
+        `in_progress and done are REACHED through transitions (hive_board_bind / hive_board_start / dream completion), ` +
+        `never set directly. Creating in_progress without an owner_session would violate SCHEMA §3 invariant 1.`,
+    }
+  }
+  if (init.priority !== undefined && !VALID_PRIORITY.has(init.priority)) {
+    return {
+      ok: false as const,
+      reason: "INVALID_PRIORITY",
+      detail: `Invalid priority "${init.priority}" — use low, medium or high.`,
+    }
+  }
+  const badTags = (init.tags ?? []).filter((t) => !TAG_PATTERN.test(t))
+  if (badTags.length > 0) {
+    return {
+      ok: false as const,
+      reason: "INVALID_TAG",
+      detail: `Invalid tag(s): ${badTags.join(", ")}. Tags are bare tokens — letters, digits, dot, dash, underscore.`,
+    }
+  }
+  if ((init.subtasks ?? []).some((s) => s.content.trim() === "")) {
+    return { ok: false as const, reason: "EMPTY_SUBTASK", detail: "Subtask entries cannot be empty." }
+  }
+  return null
+}
+
+export function createIdea(directory: string, init: CreateIdeaInit): Promise<TransitionResult> {
+  const refusal = validateCreateInit(init)
+  if (refusal) return Promise.resolve(refusal)
   return withBoardLock(directory, () => {
     const status = init.status ?? "backlog"
     const birth: Transition = { at: nowIso(), from: null, to: status, by: init.by ?? "board:create" }
     const item = createItemUnlocked(directory, {
-      title: init.title,
+      title: init.title.trim(),
       status,
       owner_session: null,
       group_id: null,
@@ -89,7 +158,7 @@ export function createIdea(directory: string, init: CreateIdeaInit): Promise<Tra
       priority: init.priority ?? "medium",
       tags: init.tags ?? [],
       done_without_dream: false,
-      subtasks: [],
+      subtasks: init.subtasks ?? [],
       todo_mirror: [],
       todo_mirror_updated: null,
       transitions: [birth],
@@ -483,6 +552,184 @@ export function markItemDoneFromDream(
       ok: true as const,
       action: from === "done" ? "redefined" : "done",
       item: updated,
+    }
+  })
+}
+
+// ── Authoring edits: respec / retitle / tags (WI-064) ────────────────────────
+
+/**
+ * Ownership gate shared by the authoring edits (SCHEMA §2 field authority).
+ *
+ * Body and title are freely writable while the item is UN-OWNED, and belong to
+ * the owning session once it is owned ("B → A while owned", Q13). Only the
+ * plugin runtime can resolve a session id trustworthily (W-009), so the caller
+ * passes the identity it has proven; `null` means "no proven session", which
+ * may only edit un-owned items.
+ */
+function ownershipRefusal(item: WorkItem, callerSession: string | null, what: string): TransitionErr | null {
+  if (item.owner_session === null) return null
+  if (item.owner_session === callerSession) return null
+  return {
+    ok: false as const,
+    reason: "ITEM_OWNED",
+    detail:
+      `${item.id} is owned by session ${item.owner_session}; once owned, its ${what} belongs to that ` +
+      `session alone (SCHEMA §2 — it accumulates notes and decisions as it works). ` +
+      `Edit it from that session, or true-demote the item first to make it fluid again (§5.5).`,
+  }
+}
+
+export interface RespecOptions {
+  /** The caller's PROVEN session id, or null for an identity-free caller (the board). */
+  session?: string | null
+  /** Audit label, e.g. "hive_board_respec". */
+  by?: string
+}
+
+/**
+ * Replace an item's spec body, preserving the text it replaces (WI-064).
+ *
+ * The prior body is archived content-addressed under `board/<id>/` by the
+ * storage layer (structurally, not optionally), and a transition entry
+ * carrying `superseded: <old hash>` records THAT the spec changed, when, and
+ * by whom — a tombstone readable without opening the payload (W-103).
+ *
+ * Deliberately does NOT re-stamp `spec_hash`: `reattachInfo()` compares the
+ * stamp against the live body to decide re-attach vs fresh session, so the
+ * divergence this edit creates IS the signal (Q13).
+ */
+export function respecItem(
+  directory: string,
+  id: string,
+  body: string,
+  opts: RespecOptions = {}
+): Promise<TransitionResult> {
+  const callerSession = opts.session ?? null
+  return withBoardLock(directory, () => {
+    const item = readItem(directory, id) // re-read inside the lock
+    if (!item) {
+      return { ok: false as const, reason: "NOT_FOUND", detail: `No work item ${id} in .opencode/board/.` }
+    }
+    const refusal = ownershipRefusal(item, callerSession, "spec body")
+    if (refusal) return refusal
+
+    const next = body.replace(/^\n+/, "").replace(/\s+$/, "")
+    if (next === "") {
+      return {
+        ok: false as const,
+        reason: "EMPTY_BODY",
+        detail: `Refusing to replace ${id}'s spec with an empty body — that would discard the spec, not revise it.`,
+      }
+    }
+    const priorHash = specHash(item.body)
+    if (specHash(next) === priorHash) {
+      // Idempotent no-op (I-212): no revision, no transition, no `updated` bump.
+      return { ok: true as const, action: "respec-noop", item }
+    }
+
+    // `superseded` is a POINTER to an archived payload, so it may only be
+    // stamped when a payload actually exists. Writing the first spec onto an
+    // item created without a body supersedes nothing: the storage layer
+    // archives nothing (there is no text to preserve), so stamping the hash of
+    // the empty string would leave a dangling pointer that resolves to null —
+    // an entry claiming text was replaced when none ever existed. Found by
+    // disposing of WI-065, which had an empty body; every test until then had
+    // created items WITH bodies and never exercised this path.
+    const hadPriorBody = item.body.trim() !== ""
+
+    const updated = editItemUnlocked(directory, id, {
+      setBody: { body: next },
+      appendTransition: {
+        at: nowIso(),
+        from: item.status,
+        to: item.status, // a revision is not a column move — the status self-loop is the honest record
+        by: opts.by ?? "board:respec",
+        ...(callerSession !== null ? { session: callerSession } : {}),
+        ...(hadPriorBody ? { superseded: priorHash } : {}),
+      },
+    })
+    return { ok: true as const, action: "respecced", item: updated }
+  })
+}
+
+/** Retitle an item. Same ownership rule as the body — once owned, the title is session-mirrored (§2). */
+export function retitleItem(
+  directory: string,
+  id: string,
+  title: string,
+  opts: RespecOptions = {}
+): Promise<TransitionResult> {
+  const callerSession = opts.session ?? null
+  return withBoardLock(directory, () => {
+    const item = readItem(directory, id)
+    if (!item) {
+      return { ok: false as const, reason: "NOT_FOUND", detail: `No work item ${id} in .opencode/board/.` }
+    }
+    const refusal = ownershipRefusal(item, callerSession, "title")
+    if (refusal) return refusal
+    const next = title.trim()
+    if (next === "") {
+      return { ok: false as const, reason: "EMPTY_TITLE", detail: `Refusing to set an empty title on ${id}.` }
+    }
+    if (next === item.title) return { ok: true as const, action: "retitle-noop", item }
+    return { ok: true as const, action: "retitled", item: editItemUnlocked(directory, id, { set: { title: next } }) }
+  })
+}
+
+/**
+ * Add and/or remove tags as SET DELTAS (WI-064).
+ *
+ * No ownership gate: tags are proposal-journal metadata that any session or
+ * the board may adjust (SCHEMA §2), and the delta shape means a concurrent
+ * editor's change is merged rather than clobbered. No transition entry either
+ * — tags are mutable metadata like `priority` (which has never logged one),
+ * and nothing is destroyed, so there is no loss to audit.
+ */
+export function editItemTags(
+  directory: string,
+  id: string,
+  delta: { add?: string[]; remove?: string[] },
+  _opts: RespecOptions = {}
+): Promise<TransitionResult> {
+  return withBoardLock(directory, () => {
+    const item = readItem(directory, id)
+    if (!item) {
+      return { ok: false as const, reason: "NOT_FOUND", detail: `No work item ${id} in .opencode/board/.` }
+    }
+    const norm = (xs: string[] | undefined) =>
+      [...new Set((xs ?? []).map((t) => t.trim()).filter((t) => t !== ""))]
+    const add = norm(delta.add)
+    const remove = norm(delta.remove)
+    const bad = add.filter((t) => remove.includes(t))
+    if (bad.length > 0) {
+      return {
+        ok: false as const,
+        reason: "CONTRADICTORY_TAGS",
+        detail: `Tag(s) ${bad.join(", ")} appear in both add and remove — refusing to guess an order. Send one or the other.`,
+      }
+    }
+    const malformed = [...add, ...remove].filter((t) => !TAG_PATTERN.test(t))
+    if (malformed.length > 0) {
+      return {
+        ok: false as const,
+        reason: "INVALID_TAG",
+        detail: `Invalid tag(s): ${malformed.join(", ")}. Tags are bare tokens — letters, digits, dot, dash, underscore; no spaces, commas or brackets.`,
+      }
+    }
+    if (add.length === 0 && remove.length === 0) {
+      return { ok: false as const, reason: "EMPTY_DELTA", detail: `Nothing to do for ${id} — pass add and/or remove.` }
+    }
+    // Guard-before-mutate (I-212): skip the write entirely when the delta is a
+    // no-op, so an idempotent retry does not bump `updated`.
+    const wouldAdd = add.some((t) => !item.tags.includes(t))
+    const wouldRemove = remove.some((t) => item.tags.includes(t))
+    if (!wouldAdd && !wouldRemove) return { ok: true as const, action: "tags-noop", item }
+
+    return {
+      ok: true as const,
+      action: "tags-edited",
+      item: editItemUnlocked(directory, id, { editTags: { add, remove } }),
     }
   })
 }
