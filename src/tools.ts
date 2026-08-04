@@ -100,6 +100,46 @@ function nearDuplicateTitles(existing: { id: string; title: string }[], title: s
   return hits
 }
 
+/**
+ * ⚠️ DO NOT DELETE THIS LIST, AND DO NOT DELETE THE REFUSAL TEXT IN THE
+ * hive_board_create DESCRIPTION THAT ADVERTISES IT. Two independent readers
+ * have already tried to reason it away on the same false premise. Read this
+ * before you become the third.
+ *
+ * THE ARGUMENT FOR DELETING IT: "these fields aren't in the declared schema, so
+ * a caller could not pass them even if they wanted to — the prose forbids what
+ * the type system already forbids, at zero payoff."
+ *
+ * THAT ARGUMENT IS FALSE, AND IT IS THE EXACT PREMISE THAT CAUSED THE ORIGINAL
+ * WI-064 BUG. `tool()` is the identity function and `tool.schema` is
+ * re-exported zod that nothing ever invokes (three lines, see
+ * node_modules/@opencode-ai/plugin/dist/tool.js). The declared schema is
+ * ADVERTISING — it tells the model what to send and infers a TypeScript type.
+ * It is not a gate. Undeclared keys arrive in `args` untouched.
+ *
+ * LIVE EVIDENCE, not reasoning. A call carrying two keys absent from the
+ * declared schema:
+ *     hive_board_create(title: ..., owner_session: "ses_forged_by_caller",
+ *                                   spec_hash: "deadbeef1234")
+ * Both keys REACHED execute(). Nothing stripped them. Only the check below
+ * refused them. Delete it and a forged owner_session is silently accepted —
+ * an item claiming a session that never owned it, which no later transition
+ * would ever correct.
+ *
+ * PROVENANCE OF THE FALSE PREMISE — it is persuasive, not careless:
+ *   - 2026-08-04, me: trusted `tool.schema.enum(["backlog","todo"])` to reject
+ *     at runtime. It did not. WI-065 was written to disk as in_progress with
+ *     owner_session: null — illegal state.
+ *   - 2026-08-04, a cold agent auditing these descriptions: ranked deleting
+ *     this list as its #2 recommendation, reasoning "I could not have passed
+ *     spec_hash if I'd wanted to; there's no parameter for it."
+ * The second reader reached the same wrong conclusion from a CLEANER surface
+ * than the first. A well-documented schema reads more like an enforced
+ * contract, so improving the docs made the false model MORE persuasive.
+ *
+ * The rationale lives here, at the point of deletion, because that is the only
+ * place it can prevent one (WI-053 applied to the guard itself).
+ */
 const FORBIDDEN_CREATE_KEYS = [
   "id",
   "owner_session",
@@ -262,10 +302,18 @@ export function createHiveTools(
 
     hive_board_create: tool({
       description:
-        "File a work item on the hive-board and get back its id. " +
-        "Use this instead of writing a WI-*.md file by hand: it allocates the next id atomically under the board lock, timestamps it, and writes a valid birth transition — nothing to look up, no existing item to copy. " +
+        "File a work item on the hive-board. " +
+        "Returns a full receipt of what was stored — the new id plus title, status, priority, tags, body size, subtask count and next steps — so you never need to open the file to confirm the write. " +
+        "Use this instead of writing a WI-*.md file by hand: it allocates the next id atomically under the board lock, timestamps it, and opens the item's append-only history with an entry recording its creation — nothing to look up, no existing item to copy. " +
         "New items are UN-OWNED: captured, with no session working them yet. Ownership comes later — hive_board_bind (this session takes it) or hive_board_start (spawn a fresh session for it). " +
-        "Lifecycle fields are not the author's to set: id, ownership, spec_hash, transitions, dream/artifact links, and any status beyond backlog/todo are owned by the transition module and are refused with an explanation if passed.",
+        // ⚠️ The sentence below is LOAD-BEARING — see the comment on
+        // FORBIDDEN_CREATE_KEYS before shortening it in a way that weakens the
+        // claim. It looks redundant with the declared schema; it is not,
+        // because the schema rejects nothing at runtime. Two readers have
+        // already proposed deleting it on exactly that false premise, and a
+        // live probe showed undeclared keys reaching execute() untouched.
+        "These fields are managed for you and are refused if passed: id, ownership, spec_hash, transitions, dream/artifact links, and any status beyond backlog/todo. " +
+        "They belong to the transition module, and the refusal is by name — nothing is silently dropped.",
       args: {
         title: tool.schema.string().describe("Short imperative title, e.g. 'Add push opt-out toggle'."),
         body: tool.schema.string().optional().describe(
@@ -278,10 +326,10 @@ export function createHiveTools(
           "Really does sort: this is the PRIMARY sort key in the Backlog and Todo columns, ahead of recency, so high visibly moves the card to the top. Default medium."
         ),
         tags: tool.schema.array(tool.schema.string()).optional().describe(
-          "Free-form labels — there is no controlled vocabulary and no namespacing convention. Rendered as chips; they do not filter anything today. The common pattern is the project or component name (jellyfetch, hive-board, tooling). Bare tokens: letters, digits, dot, dash, underscore. Editable later with hive_board_tag."
+          "Optional. Free-form labels — there is no controlled vocabulary and no namespacing convention. Rendered as chips; they do not filter anything today. The common pattern is the project or component name (jellyfetch, hive-board, tooling). Bare tokens: letters, digits, dot, dash, underscore. Editable later with hive_board_tag."
         ),
         subtasks: tool.schema.array(tool.schema.string()).optional().describe(
-          "An author-written plan: the steps you would take, in order. CREATION-TIME ONLY — not because the plan is meant to be frozen as a record of original intent, but because no safe concurrent-edit primitive for it exists yet: an ordered list of rich records cannot be merged the way a set of tags can, so a whole-replace edit would silently lose a concurrent editor's change. So pass a decomposition you are settled on; to revise the plan later, put the revision in the body. Distinct from todo_mirror, which is the owning session's live TodoWrite and is machine-written."
+          "An author-written plan: the steps you would take, in order. CREATION-TIME ONLY — not because the plan is meant to be frozen as a record of original intent, but because no safe concurrent-edit primitive for it exists yet: an ordered list of rich records cannot be merged the way a set of tags can, so a whole-replace edit would silently lose a concurrent editor's change. Optional, and omitting it is the normal case — pass a decomposition only if it is already settled; to revise a plan later, put the revision in the body. Distinct from todo_mirror, which is the owning session's live TodoWrite and is machine-written."
         ),
       },
       async execute(args, context) {
@@ -330,10 +378,22 @@ export function createHiveTools(
           dupes.length > 0
             ? ` ⚠ Possible duplicate of ${dupes.join(", ")} — check before starting work; there is no delete path, so a duplicate is best resolved by respec/retitle or by closing one.`
             : ""
+        // A COMPLETE RECEIPT. This tool's whole premise is "you don't need to
+        // read the file", so the caller has no other way to confirm what was
+        // stored — every field they supplied must be echoed back, or they are
+        // left unable to verify their own write. Tags and the body were missing
+        // here, and a cold agent correctly called that a real gap.
         return (
-          `Created ${it.id} ("${it.title}") — status ${it.status}, priority ${it.priority}, un-owned. ` +
-          `Birth transition appended.${it.subtasks.length > 0 ? ` ${it.subtasks.length} subtask(s) recorded (not editable afterwards).` : ""} ` +
-          `Take ownership with hive_board_bind ${it.id} (this session) or hive_board_start ${it.id} (fresh session).${dupeNote}`
+          `Created ${it.id} — stored and verified:\n` +
+          `  title      ${it.title}\n` +
+          `  status     ${it.status} (un-owned — no session is working it yet)\n` +
+          `  priority   ${it.priority}\n` +
+          `  tags       ${it.tags.length > 0 ? it.tags.join(", ") : "(none)"}\n` +
+          `  body       ${it.body.length > 0 ? `${it.body.length} bytes stored` : "(empty — add one with hive_board_respec)"}\n` +
+          `  subtasks   ${it.subtasks.length > 0 ? `${it.subtasks.length} recorded (not editable afterwards)` : "(none)"}\n` +
+          `  history    1 entry — the item's creation, logged to its append-only history\n` +
+          `Next: hive_board_bind ${it.id} to work it in this session, or hive_board_start ${it.id} to spawn a fresh one.` +
+          dupeNote
         )
       },
     }),
@@ -426,7 +486,8 @@ export function createHiveTools(
     hive_board_start: tool({
       description:
         "Start an UN-OWNED hive-board work item (one sitting in backlog/todo, with no session on it yet) in a FRESH top-level HIVE coordinator session: creates the session, stamps it as owner, and triggers /awaken in it seeded with the item's spec. " +
-        "Use hive_board_bind instead when THIS session should own the item. Done items are reopened via re-attach, not started fresh.",
+        "Use hive_board_bind instead when THIS session should own the item. " +
+        "A Done item is not started fresh — reopening it resumes the session that already owned it, so its context survives.",
       args: {
         id: tool.schema.string().describe("Work item id, e.g. WI-007"),
       },
