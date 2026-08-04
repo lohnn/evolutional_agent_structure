@@ -27,7 +27,7 @@ import type { BoardColumns } from "../data/board"
 import type { HivemindMessage } from "../data/messages"
 import type { SessionCard, SessionMirror } from "../data/sessions"
 import type { Subtask, WorkItem } from "../data/workitems"
-import { absorbedLineage, lineageSessions } from "../data/lineage"
+import { absorbedLineage, lineageSessions, specRevisions } from "../data/lineage"
 import { displayTitle } from "../data/placeholder-title"
 import { recencyKey } from "../data/recency"
 import { summarizeTodos, type TodoSubState } from "../data/todo-types"
@@ -245,6 +245,50 @@ function todoSubStateLane(sub: TodoSubState | undefined): string {
     ${current}
     <details class="todo-list"><summary>${sub.todos.length} todo${sub.todos.length === 1 ? "" : "s"}</summary><ul>${rows}</ul></details>
   </div>`
+}
+
+/**
+ * Spec-revision tombstone (SCHEMA §4d, W-103).
+ *
+ * A revision must not be silently invisible: without this, the only trace of a
+ * replaced spec is a `transitions[]` entry nobody renders, so a reader has no
+ * way to know the text on the card superseded something. The entry already
+ * carries everything worth showing — when, by whom, and which body it replaced
+ * — so this reads the log and shows nothing else.
+ *
+ * ── Why the archived body is NOT fetchable from here (a deliberate decision) ─
+ * The payloads under `.opencode/board/<id>/<hash>.md` are plain markdown on
+ * disk, and this viewer serves an UNAUTHENTICATED HTTP surface. A route taking
+ * an item id and a hash and handing back file contents is precisely the shape
+ * that turns into a path-traversal read of the operator's `.opencode/`, and it
+ * would exist to re-serve files the reader can already open. So: no route. The
+ * hash and its on-disk path are surfaced in the tooltip instead, which makes
+ * the payload REACHABLE (by hand, or via `readRevision`) while adding no new
+ * read surface. Recorded rather than merely omitted, so the next maintainer
+ * knows this was weighed — if a real diff view is ever wanted, it needs a
+ * deliberate decision about auth, not an incremental route.
+ *
+ * Rendered OUTSIDE the `item.body` conditional on purpose: a body-less item
+ * must still show its history.
+ */
+function specRevisionHtml(item: WorkItem): string {
+  const revs = specRevisions(item)
+  if (revs.length === 0) return ""
+  const last = revs[revs.length - 1]!
+  const rows = revs
+    .map((r) => {
+      const who = r.session ? ` <span class="mono dim">${esc(shortSes(r.session))}</span>` : ""
+      // Name the payload and where it lives — reachable without a fetch route.
+      // Path is relative to the BOARD DIRECTORY (SCHEMA §1's own notation), not
+      // hardcoded to `.opencode/board/`: this renderer is browser-side and does
+      // not know the configured board dir, and in fixture mode it is not
+      // `.opencode/` at all. A relative path is true in every mode.
+      const where = `superseded body — board/${item.id}/${r.supersededHash}.md`
+      return `<li><span class="mono dim">${esc(fmtTime(r.at))}</span> ${esc(r.by)}${who} <span class="mono dim" title="${esc(where)}">${esc(r.supersededHash)}</span></li>`
+    })
+    .join("")
+  const times = revs.length === 1 ? "once" : `${revs.length}×`
+  return `<details class="revisions"><summary>spec revised ${times}<span class="dim"> · latest ${esc(fmtTime(last.at))}</span></summary><ul>${rows}</ul></details>`
 }
 
 function lineageHtml(item: WorkItem, guiBaseUrl: string, mirror: SessionMirror): string {
@@ -496,6 +540,7 @@ function itemCard(item: WorkItem, ctx: CardCtx): string {
     ${subtaskLane(item.subtasks)}
     ${todoSubStateLane(ctx.todoSubStates[item.id])}
     ${artifacts}
+    ${specRevisionHtml(item)}
     ${lineageHtml(item, guiBaseUrl, mirror)}
     ${body}
     ${writesEnabled ? actionForms(item, ctx) : ""}
@@ -752,6 +797,8 @@ tr.active-dream td { background:#1c2128; }
 .lineage a { color:#58a6ff88; }
 .spec > summary { font-size:.72rem; margin:.35rem 0 0; }
 .spec-body { font-size:.75rem; color:#8b949e; white-space:pre-wrap; margin-top:.3rem; }
+.revisions > summary { font-size:.7rem; margin:.35rem 0 0; color:#6e7681; cursor:pointer; }
+.revisions ul { margin:.25rem 0 0; padding-left:1rem; font-size:.68rem; color:#6e7681; }
 .actions { margin-top:.5rem; display:flex; flex-wrap:wrap; gap:.35rem; align-items:center; }
 .actions form { display:flex; gap:.25rem; align-items:center; margin:0; }
 .act { background:#21262d; color:#c9d1d9; border:1px solid #30363d; border-radius:6px; font-size:.7rem; padding:.15rem .5rem; cursor:pointer; }
