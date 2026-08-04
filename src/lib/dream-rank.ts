@@ -36,10 +36,12 @@
 
 import {
   scanArtifacts,
-  tokenise,
   type ArtifactType,
   type ArtifactRecord,
 } from "./dream-artifacts.js"
+// Tokenisation is subject-neutral and shared with the board read surface
+// (WI-068) — imported from its neutral home, not through dream-artifacts.
+import { tokenise } from "./text-tokens.js"
 
 // ── Contract ──────────────────────────────────────────────────────────────────
 
