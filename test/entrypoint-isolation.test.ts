@@ -189,6 +189,14 @@ describe("browser-bundle purity (I-192)", () => {
   // build, and this test catches it. Note the deliberate semantics: an import
   // that is tree-shaken out does NOT fail, because it does not ship. The guard
   // asserts what reaches the browser, not what someone typed.
+  //
+  // SCOPE NOTE (WI-068): the browser-reachable set is no longer confined to
+  // src/board-viewer/. `src/lib/board-recency.ts` is now compiled into this
+  // bundle via render.ts — the FIRST file under src/lib/ to ship to the
+  // browser, in a directory where node:/bun: surface is otherwise normal
+  // (board-store, board-reconcile-db). It carries a matching banner naming the
+  // constraint; this note is the other half, so the two ends of an invariant
+  // enforced HERE and violated THERE both point at each other.
   test("the browser bundle builds", async () => {
     const bundle = await buildClientBundle("guard-test")
     expect(bundle.error ?? null).toBeNull()

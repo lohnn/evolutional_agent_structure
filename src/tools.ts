@@ -1,5 +1,8 @@
 /**
  * HIVE custom tools: hive_signal, hive_listen, hive_awaken,
+ *                    hive_board_list, hive_board_search, hive_board_read,
+ *                    hive_board_bind, hive_board_create, hive_board_respec,
+ *                    hive_board_retitle, hive_board_tag, hive_board_start,
  *                    hive_dream_residue, hive_dream_harvest,
  *                    hive_dream_artifact_create, hive_dream_query,
  *                    hive_dream_rank,
@@ -63,43 +66,62 @@ import {
   type SdkLikeClient,
 } from "./lib/board-transitions.js"
 import { listRevisions, listItems } from "./lib/board-store.js"
+// The board READ surface. Every filter/rank/budget/refusal decision lives in
+// that module, not here, because tool code freezes at process load and the
+// restart that would make a fix live kills the session verifying it (W-127).
+// This file supplies `listItems(directory)` and returns the rendered string.
+import {
+  listBoard,
+  searchBoard,
+  readItems,
+  nearestItems,
+  formatNearest,
+  MAX_K,
+  DEFAULT_K,
+  DEFAULT_MAX_BYTES,
+  MAX_MAX_BYTES,
+} from "./lib/board-read.js"
 import path from "path"
 import fs from "fs"
 
 type Client = ReturnType<typeof createOpencodeClient>
 type LogFn = (level: "info" | "debug" | "error" | "warn", message: string, extra?: Record<string, unknown>) => void
 
+/*
+ * ── TOMBSTONE: the near-duplicate THRESHOLD check, removed in WI-068 ─────────
+ *
+ * What stood here: `nearDuplicateTitles`, a title-token Jaccard ≥ 0.5 check
+ * that appended "⚠ Possible duplicate of WI-NNN" to a create receipt. Its
+ * reasoning was sound — hive_board_create tells the caller they need not read
+ * an existing item, and that read was also, incidentally, the duplicate check,
+ * so removing the chore removed a safeguard riding along on it.
+ *
+ * It was measured on the real 69-item board and it was a PLACEBO:
+ *   - fired on 0 of 2346 pairs, ever;
+ *   - a genuine re-file of an existing item in different words scored 0.31 —
+ *     below its own cutoff, so it could not catch the case it existed for;
+ *   - below that cutoff, all 27 near-misses were false positives driven by
+ *     shared project vocabulary (hive, board, jellyfetch);
+ *   - IDF weighting was tried and did not rescue it: the discriminating tokens
+ *     were also the rare ones.
+ * A check that is silent on every real case, while its silence reads as "no
+ * duplicate found", is worse than no check — that is W-019's false-authority
+ * hazard on data that cannot support the technique.
+ *
+ * The replacement keeps the safeguard on the MECHANISM and drops the verdict:
+ * `nearestItems` (lib/board-read.ts) ALWAYS shows the three closest existing
+ * items with their scores, phrased as "nearest", never as a warning. Ranking
+ * works precisely because it never has to name a cutoff — it orders candidates
+ * and the agent judges (I-104).
+ *
+ * If you are about to re-add a threshold here: measure it on the live board
+ * first. That is what settled it last time.
+ */
+
 // Keys a caller must never supply to hive_board_create. The schema does not
 // reject undeclared keys (it rejects nothing at runtime), so "refuse, don't
 // strip" has to be an explicit membership test — silently dropping them
 // would teach the caller the wrong call shape worked.
-/**
- * Advisory near-duplicate check for newly filed items.
- *
- * hive_board_create tells the caller they need not read an existing item — and
- * that read was also, incidentally, the duplicate check. Removing a chore can
- * remove a safeguard that was riding along on it. This puts the safeguard back
- * on the MECHANISM instead of the caller: a cheap title-token overlap, surfaced
- * in the success message. Advisory only — it never blocks a create (similar
- * titles are often legitimately distinct work), and it lives in the tool layer,
- * not the module, because it is UX and not write authority.
- */
-function nearDuplicateTitles(existing: { id: string; title: string }[], title: string): string[] {
-  const words = (t: string) => new Set(t.toLowerCase().match(/[a-z0-9]+/g) ?? [])
-  const a = words(title)
-  if (a.size === 0) return []
-  const hits: string[] = []
-  for (const it of existing) {
-    const b = words(it.title)
-    if (b.size === 0) continue
-    let shared = 0
-    for (const w of a) if (b.has(w)) shared++
-    const jaccard = shared / (a.size + b.size - shared)
-    if (jaccard >= 0.5) hits.push(`${it.id} ("${it.title}")`)
-  }
-  return hits
-}
-
 /**
  * ⚠️ DO NOT DELETE THIS LIST, AND DO NOT DELETE THE REFUSAL TEXT IN THE
  * hive_board_create DESCRIPTION THAT ADVERTISES IT. Two independent readers
@@ -261,6 +283,83 @@ export function createHiveTools(
       },
     }),
 
+    // ── hive-board: READ surface (WI-068) ────────────────────────────────────
+    //
+    // Three tools, and MODE IS THE TOOL: list enumerates, search ranks, read
+    // fetches. Deliberately NOT one tool that switches between an index and
+    // full content at runtime the way hive_dream_query does — with spec bodies
+    // running 1 B to 12 KB on the measured board, a hidden mode switch is
+    // exactly where a context bomb hides. list is a promise of cheapness; read
+    // is an explicit request to spend.
+
+    hive_board_list: tool({
+      description:
+        "Enumerate the hive-board: the INDEX of work items — id, status, priority, owner, recency, spec SIZE, tags and title, one line each. " +
+        "NEVER returns spec bodies, and that is the point: the entire 69-item board indexes to roughly 2.3k tokens, so this call is always affordable and its cost is predictable before you make it. The `body` column is the spec's size, so you can see what reading one would cost before you ask for it. " +
+        "Defaults to status=\"live\" — backlog + todo + in_progress. DONE items are EXCLUDED by default (two thirds of the board is finished work); pass status=\"all\" to include them. " +
+        "This is the tool for 'what is on the board right now'. Reach for hive_board_search instead when you have WORDS rather than a filter (it also spans done items), and hive_board_read when you already know the ids and need the actual spec text. " +
+        "Reads take no lock and no snapshot: writes are atomic per file, so nothing you see is ever half-written, but a long listing may observe one item before and another after a concurrent write.",
+      args: {
+        status: tool.schema.enum(["live", "all", "backlog", "todo", "in_progress", "done"]).optional().describe(
+          "live (DEFAULT) = everything except done. all = including done. Or one exact status. `all` exists as a real value rather than 'omit the filter' so the narrow default cannot silently hide finished work from you."
+        ),
+        owner: tool.schema.enum(["any", "owned", "none"]).optional().describe(
+          "any (default). owned = a session is on it. none = un-owned, i.e. free to pick up. Note that owned ⟺ in_progress by schema, so combining owner with a queued status is refused rather than answered with a misleading empty list."
+        ),
+        priority: tool.schema.enum(["any", "low", "medium", "high"]).optional().describe("any (default), or one exact priority."),
+        limit: tool.schema.number().optional().describe(
+          "Cap the number of rows. Rarely needed — the whole index is cheap by construction. When it cuts, the count omitted is reported, never silently."
+        ),
+      },
+      async execute(args, _context) {
+        const r = listBoard(listItems(directory), args as Record<string, unknown>)
+        return r.ok ? r.text : r.error
+      },
+    }),
+
+    hive_board_search: tool({
+      description:
+        "Find work items by free text: a RANKED shortlist with scores and a matching excerpt from each spec. Spans EVERY status including done — solved work is often the most valuable thing to find, and it is invisible to hive_board_list's default. " +
+        "USE THIS BEFORE FILING ANYTHING NEW. The board has no delete path, so a duplicate item is expensive to unpick afterwards; two minutes here is the cheapest moment to discover the work already exists. " +
+        "It ranks, it does not judge: scores are lexical token overlap (query coverage plus a title boost), so a high score means 'shares vocabulary', not 'is the same work', and a low score does not prove unrelated. There is deliberately no duplicate verdict and no threshold — a cutoff was measured on this board and fired on 0 of 2346 pairs while missing genuine re-files, so the ordering is handed to you and the judgement stays yours. " +
+        "Bounded by k (default " + DEFAULT_K + ", ceiling " + MAX_K + "), excerpt only. Follow up with hive_board_read for the full spec of anything that looks close.",
+      args: {
+        query: tool.schema.string().describe(
+          "Free text describing the work you are looking for — the words you would use to explain it, not a filter expression. Tokens are lowercased, punctuation-stripped, and 1–2 character words are dropped (so db/id/ui/os do not survive; give the ranker a longer word too)."
+        ),
+        k: tool.schema.number().optional().describe(
+          "Shortlist size, default " + DEFAULT_K + ", ceiling " + MAX_K + ". Only items scoring above zero are returned, so a small k is usually enough."
+        ),
+      },
+      async execute(args, _context) {
+        const r = searchBoard(listItems(directory), args.query, { k: (args as Record<string, unknown>).k })
+        return r.ok ? r.text : r.error
+      },
+    }),
+
+    hive_board_read: tool({
+      description:
+        "Read the FULL spec of named work items: the complete body, plus tags/dates/ownership, the append-only history, and `subtasks` and `todo_mirror` shown SEPARATELY — they have the same shape but different write classes (an author-written plan whose loss is unrecoverable, versus a rebuildable mirror of the owning session's live todos). " +
+        "This is the expensive one, and explicitly so. Spec bodies on this board run from empty to 12 KB, so it takes named ids rather than a filter and is bounded by a byte budget (default " + DEFAULT_MAX_BYTES + " bytes, ceiling " + MAX_MAX_BYTES + "). Discover ids with hive_board_list or hive_board_search first. " +
+        "Nothing disappears quietly: an id with no item on the board is reported by name, and an item the budget could not fit is reported by name as deferred — never dropped. " +
+        "Use this instead of opening .opencode/board/WI-*.md by hand: this is the same parser the writers use, so what you read is what the board stores. " +
+        "One honest limitation: reading several items is NOT a cross-item snapshot. No lock is taken (a read must never be able to make a concurrent write fail), and while each file is written atomically so no single item is ever torn, a multi-item read may observe one item before and another after a concurrent write.",
+      args: {
+        ids: tool.schema.string().describe(
+          "Work item ids, comma or space separated, e.g. \"WI-012,WI-031\". Zero-padding and case are forgiven (wi-3 → WI-003); anything that is not id-shaped is refused rather than guessed at."
+        ),
+        max_bytes: tool.schema.number().optional().describe(
+          "Payload ceiling in characters (default " + DEFAULT_MAX_BYTES + ", range 500–" + MAX_MAX_BYTES + "). Items past it are named as deferred so you can fetch them in a second call."
+        ),
+      },
+      async execute(args, _context) {
+        const r = readItems(listItems(directory), args.ids, {
+          max_bytes: (args as Record<string, unknown>).max_bytes,
+        })
+        return r.ok ? r.text : r.error
+      },
+    }),
+
     // ── hive-board: bind current session to a work item ──────────────────────
 
     hive_board_bind: tool({
@@ -306,6 +405,13 @@ export function createHiveTools(
         "Returns a full receipt of what was stored — the new id plus title, status, priority, tags, body size, subtask count and next steps — so you never need to open the file to confirm the write. " +
         "Use this instead of writing a WI-*.md file by hand: it allocates the next id atomically under the board lock, timestamps it, and opens the item's append-only history with an entry recording its creation — nothing to look up, no existing item to copy. " +
         "New items are UN-OWNED: captured, with no session working them yet. Ownership comes later — hive_board_bind (this session takes it) or hive_board_start (spawn a fresh session for it). " +
+        // ⚠️ LOAD-BEARING POINTER (WI-068). This tool's premise is "you never
+        // need to open an existing item" — and opening existing items WAS the
+        // duplicate check. The mechanism-side replacement (the nearest-items
+        // advisory on the receipt below) fires only AFTER the item is on a
+        // board with no delete path. Without this sentence the caller has no
+        // reason to look before writing, and the safeguard is inert.
+        "BEFORE you file: run hive_board_search with the words you would use to describe this work. There is no delete path on this board, so an accidental duplicate is expensive to unpick, and search spans done items — which the board index hides by default. " +
         // ⚠️ The sentence below is LOAD-BEARING — see the comment on
         // FORBIDDEN_CREATE_KEYS before shortening it in a way that weakens the
         // claim. It looks redundant with the declared schema; it is not,
@@ -370,14 +476,11 @@ export function createHiveTools(
         // nothing at runtime; the module is the guard, and it can say no.
         if (!result.ok) return `Refused (${result.reason}): ${result.detail}`
         const it = result.item
-        const dupes = nearDuplicateTitles(
-          listItems(directory).filter((x) => x.id !== it.id),
-          it.title
+        // Advisory, unconditional, and NOT a verdict — see the tombstone above
+        // for why the threshold check it replaced was removed.
+        const nearNote = formatNearest(
+          nearestItems(listItems(directory).filter((x) => x.id !== it.id), it.title, 3)
         )
-        const dupeNote =
-          dupes.length > 0
-            ? ` ⚠ Possible duplicate of ${dupes.join(", ")} — check before starting work; there is no delete path, so a duplicate is best resolved by respec/retitle or by closing one.`
-            : ""
         // A COMPLETE RECEIPT. This tool's whole premise is "you don't need to
         // read the file", so the caller has no other way to confirm what was
         // stored — every field they supplied must be echoed back, or they are
@@ -393,7 +496,7 @@ export function createHiveTools(
           `  subtasks   ${it.subtasks.length > 0 ? `${it.subtasks.length} recorded (not editable afterwards)` : "(none)"}\n` +
           `  history    1 entry — the item's creation, logged to its append-only history\n` +
           `Next: hive_board_bind ${it.id} to work it in this session, or hive_board_start ${it.id} to spawn a fresh one.` +
-          dupeNote
+          nearNote
         )
       },
     }),

@@ -34,6 +34,9 @@
 
 import path from "path"
 import fs from "fs"
+// Subject-neutral text helpers (WI-068). Imported for local use AND re-exported
+// further down — `export ... from` alone does not bind them in this scope.
+import { tokenise, jaccard } from "./text-tokens.js"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -655,24 +658,23 @@ export interface DuplicateCandidate {
   dream_distance?: number
 }
 
-/** Tokenise a string into lowercase words (≥3 chars, strip punctuation). */
-export function tokenise(s: string): Set<string> {
-  return new Set(
-    s.toLowerCase()
-      .replace(/[^a-z0-9\s]/g, " ")
-      .split(/\s+/)
-      .filter((t) => t.length >= 3)
-  )
-}
-
-/** Jaccard similarity between two sets. */
-export function jaccard(a: Set<string>, b: Set<string>): number {
-  if (a.size === 0 && b.size === 0) return 0
-  let intersection = 0
-  for (const item of a) if (b.has(item)) intersection++
-  const union = a.size + b.size - intersection
-  return union === 0 ? 0 : intersection / union
-}
+/**
+ * `tokenise` / `jaccard` MOVED to lib/text-tokens.ts (WI-068) and are
+ * re-exported here unchanged.
+ *
+ * They were never about dreams — they are subject-neutral text helpers that
+ * simply happened to be born in the first subsystem that needed them. Once the
+ * board's read surface became a second consumer, leaving them here would have
+ * meant either the board importing the dream archive for eight lines of string
+ * handling, or a second copy free to drift from this one. Both are worse than
+ * a neutral home.
+ *
+ * The re-export is deliberate and load-bearing, not laziness: this module is a
+ * PUBLISHED entry point (`exports["./lib/dream-artifacts"]` in package.json),
+ * so dropping the names would be a breaking change for any consumer outside
+ * this repo. New call sites should import from lib/text-tokens.js directly.
+ */
+export { tokenise, jaccard } from "./text-tokens.js"
 
 /** Parse the ordinal out of a DRM id (e.g. "DRM-014" → 14). Returns undefined if unparseable. */
 function dreamOrdinal(sourceDream: string): number | undefined {
