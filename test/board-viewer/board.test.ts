@@ -29,8 +29,8 @@ describe("buildBoard — column mapping (SCHEMA §3)", () => {
   const board = buildBoard(items, mirror([]))
 
   test("columns", () => {
-    expect(board.backlog.map((i) => i.id)).toEqual(["WI-001"])
-    expect(board.todo.map((i) => i.id)).toEqual(["WI-002", "WI-007"]) // high before medium
+    expect(board.backlog.map((i) => i.id)).toEqual(["WI-009", "WI-001"]) // both low; WI-009 revised 2026-08-04
+    expect(board.todo.map((i) => i.id)).toEqual(["WI-002", "WI-008", "WI-007"]) // high, then medium by recency
     expect(board.inProgress.map((i) => i.id).sort()).toEqual(["WI-003", "WI-004"])
     expect(board.done.map((i) => i.id).sort()).toEqual(["WI-005", "WI-006"])
   })

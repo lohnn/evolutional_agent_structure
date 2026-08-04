@@ -19,8 +19,18 @@ no database, human-readable, git-friendly.
 .opencode/board/
 ├── WI-001.md
 ├── WI-002.md
+├── WI-002/                  # spec-revision archive (only if the spec was ever revised)
+│   └── a3f91c2e5b70.md      #   a superseded body, named by its own specHash
 └── ...
 ```
+
+**Per-item revision directories (WI-064).** When a spec body is replaced, the body it replaced is
+archived to `board/<id>/<old-spec-hash>.md` *before* the new text lands — write-once, content-
+addressed, **never pruned** (the board is gitignored; there is no VCS underneath to recover from).
+Enumeration is unaffected: `listItemsInDir` filters on `/^WI-\d+\.md$/`, which a bare directory
+name never matches, so revisions cost the board nothing to parse. Recover one with
+`readRevision(dir, id, hash)`, which re-hashes the file and returns null if it no longer matches its
+own name. Items that were never revised have no directory.
 
 **Column is NOT encoded by directory.** A single flat `board/` directory holds all items; the
 `status` field determines the column. Rationale (dream I-049 / I-105): status is derived/canonical
@@ -127,10 +137,25 @@ session's dispatch prompt.
 
 ### Field authority (from DESIGN §4 write-authority model)
 
-| Field | Class | Written by |
+> **Two different taxonomies use the letters A/B/C in this document. They are ORTHOGONAL AXES and
+> the collision is a documentation hazard, so read the axis before reading the letter.**
+>
+> - **This table = the AUTHORITY axis** (DESIGN §4): *who* may write a field and *when*.
+>   A = authority-restricted (transition module / owning session / an explicit tool);
+>   B = freely writable while the item is un-owned ("proposal journal");
+>   C = derived or stamped by a handler, never authored.
+> - **§4 / §4b = the LOSS axis** (I-105/I-266): what happens if the value is *destroyed*.
+>   Canonical = the item file is the only source of truth, loss is unrecoverable;
+>   derived-rebuildable = a cache with an external source, loss costs a refresh.
+>
+> A field can be permissive on the authority axis and canonical on the loss axis at the same time —
+> `tags` is exactly that. **Only the LOSS axis decides whether a whole-replace primitive is safe.**
+
+| Field | Authority | Written by |
 |---|---|---|
-| `tags`, `priority` | B (proposal-journal) | any session (and the board), while not owned |
-| body (spec) | B → **A while owned** (Q13) | un-owned: any session/the board; owned: **owning session only** (it accumulates notes/decisions as it works); reverts to B on true-demote |
+| `tags` | B (proposal-journal) — **but CANONICAL on the loss axis** | any session and the board, owned or not. Edited as **set deltas** (`ItemEdit.editTags` add/remove), never whole-replace — see §4e |
+| `priority` | B (proposal-journal) | any session (and the board), while not owned |
+| body (spec) | B → **A while owned** (Q13); revised only via `hive_board_respec` / `ItemEdit.setBody`, which preserves the prior text (§4d) | un-owned: any session/the board; owned: **owning session only** (it accumulates notes/decisions as it works); reverts to B on true-demote |
 | `title` | B → **cached (A)** | authored freely while not owned; once owned, **mirrored from the session** and stored on the item (portability, §1a) — never read live |
 | `status` | A/C | transition tools + derivation (never hand-edit to contradict a signal) |
 | `owner_session`, `group_id` | A | `hive_board_bind` / `hive_board_start` / auto-register hook, resolved from plugin runtime + session map (W-009). **A navigation link, not a data dependency (§1a)** |
@@ -348,6 +373,74 @@ evaluated on the item being **dissolved** (`owned`), never on the item being bou
 
 Pinned by two tests in `test/board-transitions.test.ts` ("reclassification: …") so a future edit
 cannot quietly point the check at the wrong item.
+
+---
+
+## 4d. Spec revisions — `setBody`, the revision archive, and `superseded` (WI-064)
+
+Before WI-064 there was **no locked path to change a spec body at all**: `ItemEdit` could patch
+`title` but not the body, so revising a spec meant hand text-surgery that bypassed the board lock
+and destroyed the previous text. WI-055's original spec was lost exactly that way, and the board is
+gitignored, so it was unrecoverable. This section is the closure of that gap.
+
+**Retention is structural, not a convention.** `editItemUnlocked` archives the outgoing body
+*before* the new one lands, whenever `setBody` is present. There is deliberately no flag to skip it:
+a caller cannot destroy a spec body through this module even by mistake.
+
+| Surface | Shape |
+|---|---|
+| `ItemEdit.setBody` | `{ body: string }` — replace the whole body. The ONLY primitive that writes outside the frontmatter region |
+| `Transition.superseded` | `string?` — the `spec_hash` of the body this entry replaced. **A pointer; only present when a payload exists** |
+| archive path | `board/<id>/<superseded>.md`, write-once, content-addressed, never pruned |
+| read back | `readRevision(dir, id, hash)` → the body, or `null` if the file no longer hashes to its name |
+
+**The revision entry is a tombstone (W-103).** A reader sees *that* the spec changed, when, and by
+whom, straight from `transitions[]`, without opening the payload. `from` and `to` are the item's
+status on both sides — a revision is not a column move, and the self-loop is the honest record.
+
+**`spec_hash` is deliberately NOT re-stamped by a revision.** It is provenance from bind and
+true-demote, and `reattachInfo()` compares it against the *live* body hash to decide re-attach vs
+fresh session — "the edit is the decision" (Q13). Re-stamping here would silently convert
+spec-changed into spec-unchanged and re-attach a session to a spec it never agreed to.
+
+**`superseded` is only stamped when a payload exists.** Writing the first spec onto an item created
+without a body supersedes nothing; stamping the empty-string hash would leave a pointer resolving to
+`null` — an entry claiming text was replaced when none ever existed.
+
+**Consumers must not read a revision entry as a work attempt.** Anything deriving "who worked on
+this" from a transition's `session` must skip entries carrying `superseded`, or a spec *editor* is
+mislabelled a failed prior *attempt*.
+
+**Ownership gate.** Body and title are freely writable while un-owned and belong to the owning
+session once owned (§2). Only the plugin runtime resolves a session id trustworthily (W-009), so an
+identity-free caller may revise un-owned items only.
+
+---
+
+## 4e. `tags` — canonical content edited as set deltas (WI-064)
+
+`tags` is **permissive on the authority axis** (anyone may edit, owned or not) and **canonical on
+the loss axis** (author-written, no external source, unrecoverable if destroyed). Per I-266 the loss
+axis is what governs the primitive: a whole-replace `setTags` would be a silent lost update between
+two editors — the hazard that got post-creation `subtasks` editing rejected.
+
+Tags nevertheless get a safe post-creation path where `subtasks` could not, and **the reason is the
+data's algebra, not its storage shape.** Tags are an unordered SET of opaque tokens, so add/remove
+are commutative and idempotent: two concurrent editors sending `{add:["a"]}` and `{add:["b"]}`
+converge on `{a,b}` in either order, because neither ever transmits the whole set. `subtasks` is an
+ORDERED list of rich records whose concurrent edits do not commute (reorder vs in-place content
+edit), so it still needs its own design and **remains unapproved post-creation** — creation-time
+only, via `CreateIdeaInit.subtasks`.
+
+| Surface | Shape |
+|---|---|
+| `ItemEdit.editTags` | `{ add?: string[]; remove?: string[] }` — set delta, read from the file inside the lock |
+| tag grammar | `/^[A-Za-z0-9][A-Za-z0-9._-]*$/` — bare tokens; no spaces, commas or brackets |
+
+Refusals: a tag in **both** add and remove (refused, never guessed); malformed tokens; an empty
+delta. Adding a present tag or removing an absent one is a no-op and skips the write entirely, so an
+idempotent retry does not bump `updated` (I-212). No transition is appended — tags are mutable
+metadata like `priority`, and the delta shape destroys nothing, so there is no loss to audit.
 
 ---
 

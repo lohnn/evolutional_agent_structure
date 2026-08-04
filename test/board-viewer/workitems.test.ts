@@ -15,7 +15,16 @@ describe("fixture coverage — every SCHEMA state (via owner's board-store parse
   const items = loadWorkItems(FIXTURES)
   const byId = new Map(items.map((i) => [i.id, i]))
 
-  test("all seven fixtures load", () => expect(items).toHaveLength(7))
+  // WI-008/WI-009 added with WI-064 (spec revisions). WI-008 also ships a
+  // revision-archive DIRECTORY, so this doubles as the SCHEMA §1 claim that
+  // enumeration ignores it: the /^WI-\d+\.md$/ filter never matches a bare
+  // directory name, so `board/WI-008/` must not appear as a tenth item.
+  test("all nine fixtures load, and the revision directory is not one of them", () => {
+    expect(items).toHaveLength(9)
+    expect(items.map((i) => i.id).sort()).toEqual([
+      "WI-001", "WI-002", "WI-003", "WI-004", "WI-005", "WI-006", "WI-007", "WI-008", "WI-009",
+    ])
+  })
 
   test("WI-001 backlog", () => {
     const i = byId.get("WI-001")!

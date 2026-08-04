@@ -133,6 +133,54 @@ describe("in_progress ops (seeded via hand-written scratch fixture)", () => {
   })
 })
 
+/**
+ * WI-064 made `createIdea()` return `TransitionResult` and validate imperatively
+ * INSIDE the shared module. These pin that the viewer's create form is a
+ * well-behaved caller of that surface — it must surface a refusal, never assume
+ * success.
+ *
+ * The tag case is the one that matters, and it is a genuine gap this found in
+ * MY code. The form validates `status` and `priority` imperatively because both
+ * are read as untyped strings and cast to unions — the cast made the boundary
+ * visibly untrusted. `tags` needed no cast: splitting a form field yields
+ * `string[]`, which is an HONEST type, so nothing prompted a guard. But honest
+ * about the SHAPE is not honest about the GRAMMAR — `string[]` says nothing
+ * about tokens being bare. So a tag with a space used to be written to disk
+ * unchallenged. The module now refuses it, and the form's job is to show that
+ * refusal rather than swallow it. The lens generalises past a wrong type: the
+ * guard you skip is the one where the type is TRUE but insufficient.
+ */
+describe("create form is a well-behaved caller of createIdea()'s refusals", () => {
+  test("a malformed tag is refused BY THE MODULE and the refusal reaches the user", async () => {
+    const res = await post("/transitions/create", {
+      title: "Item with a bad tag",
+      status: "backlog",
+      tags: "fine, not a bare token",
+    })
+    expect(res.status).toBe(409)
+    const html = await res.text()
+    expect(html).toContain("INVALID_TAG")
+    // ...and nothing was written: a refusal must not half-create.
+    expect(listItems(ws).some((i) => i.title === "Item with a bad tag")).toBe(false)
+  })
+
+  test("an empty title is caught by the form BEFORE the module (400, not 409)", async () => {
+    // Both layers guard this; the form's own check answers first with a 400.
+    const res = await post("/transitions/create", { title: "   ", status: "backlog" })
+    expect(res.status).toBe(400)
+  })
+
+  test("status outside backlog/todo is refused, and never reaches disk", async () => {
+    // The illegal state WI-065 was born in: in_progress with owner_session null.
+    const res = await post("/transitions/create", {
+      title: "Illegal in_progress birth",
+      status: "in_progress",
+    })
+    expect(res.status).toBe(400) // the form's VALID_CREATE_STATUS answers first
+    expect(listItems(ws).some((i) => i.status === "in_progress" && i.owner_session === null)).toBe(false)
+  })
+})
+
 describe("honest refusals (TransitionErr → 409 with code + detail)", () => {
   test("pause on a non-in_progress item → NOT_IN_PROGRESS", async () => {
     const res = await post("/transitions/pause", { id: "WI-001" })

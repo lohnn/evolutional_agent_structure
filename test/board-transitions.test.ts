@@ -37,6 +37,17 @@ function fakeSessions(overrides: Partial<BoardSessionClient> = {}) {
   return client
 }
 
+/**
+ * Fixture helper: createIdea now returns TransitionResult (it validates input
+ * at runtime — WI-065). These call sites expect success, so unwrap loudly
+ * rather than letting a silently-refused fixture make a later assertion lie.
+ */
+async function mkIdea(d: string, init: Parameters<typeof createIdea>[1]) {
+  const r = await createIdea(d, init)
+  if (!r.ok) throw new Error(`fixture createIdea refused: ${r.reason} — ${r.detail}`)
+  return r
+}
+
 let dir: string
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), "board-transitions-test-"))
@@ -47,7 +58,7 @@ afterEach(() => {
 
 describe("createIdea", () => {
   test("creates a backlog item with a birth transition (from: null)", async () => {
-    const r = await createIdea(dir, { title: "An idea", body: "## Spec\n\ndetails", tags: ["x"] })
+    const r = await mkIdea(dir, { title: "An idea", body: "## Spec\n\ndetails", tags: ["x"] })
     expect(r.ok).toBe(true)
     expect(r.item.id).toBe("WI-001")
     expect(r.item.status).toBe("backlog")
@@ -60,14 +71,14 @@ describe("createIdea", () => {
   })
 
   test("status todo supported", async () => {
-    const r = await createIdea(dir, { title: "Ready", status: "todo" })
+    const r = await mkIdea(dir, { title: "Ready", status: "todo" })
     expect(r.item.status).toBe("todo")
   })
 })
 
 describe("bindSession", () => {
   test("binds: owner+group stamped together, in_progress, spec_hash from body, transition appended", async () => {
-    const { item } = await createIdea(dir, { title: "Idea", body: "spec body", status: "todo" })
+    const { item } = await mkIdea(dir, { title: "Idea", body: "spec body", status: "todo" })
     const r = await bindSession(dir, item.id, "ses_owner", "ses_group")
     expect(r.ok).toBe(true)
     if (!r.ok) return
@@ -84,7 +95,7 @@ describe("bindSession", () => {
   })
 
   test("idempotent when already bound to the same session", async () => {
-    const { item } = await createIdea(dir, { title: "Idea" })
+    const { item } = await mkIdea(dir, { title: "Idea" })
     await bindSession(dir, item.id, "ses_owner", "ses_owner")
     const r = await bindSession(dir, item.id, "ses_owner", "ses_owner")
     expect(r.ok && r.action === "already-bound").toBe(true)
@@ -94,8 +105,8 @@ describe("bindSession", () => {
     const nf = await bindSession(dir, "WI-999", "ses_a", null)
     expect(!nf.ok && nf.reason === "NOT_FOUND").toBe(true)
 
-    const { item: a } = await createIdea(dir, { title: "A" })
-    const { item: b } = await createIdea(dir, { title: "B" })
+    const { item: a } = await mkIdea(dir, { title: "A" })
+    const { item: b } = await mkIdea(dir, { title: "B" })
     await bindSession(dir, a.id, "ses_a", "ses_a")
 
     const owned = await bindSession(dir, a.id, "ses_b", "ses_b")
@@ -127,7 +138,7 @@ describe("autoRegister (awaken create-or-bind)", () => {
   })
 
   test("no-ops when the session already owns an item (Phase 3 start idempotency)", async () => {
-    const { item } = await createIdea(dir, { title: "Idea" })
+    const { item } = await mkIdea(dir, { title: "Idea" })
     await bindSession(dir, item.id, "ses_x", "ses_x")
     const r = await autoRegister(dir, "ses_x", "ses_x", "whatever")
     expect(r.action).toBe("noop-owned")
@@ -135,7 +146,7 @@ describe("autoRegister (awaken create-or-bind)", () => {
   })
 
   test("skips tombstoned sessions entirely (§5.5)", async () => {
-    const { item } = await createIdea(dir, { title: "Idea" })
+    const { item } = await mkIdea(dir, { title: "Idea" })
     await bindSession(dir, item.id, "ses_x", "ses_x")
     await demoteItem(dir, item.id, "backlog")
     const r = await autoRegister(dir, "ses_x", "ses_x", "whatever")
@@ -146,7 +157,7 @@ describe("autoRegister (awaken create-or-bind)", () => {
 
 describe("pause / unpause", () => {
   test("pause sets the flag, appends an in_progress→in_progress transition with the owner session", async () => {
-    const { item } = await createIdea(dir, { title: "Idea" })
+    const { item } = await mkIdea(dir, { title: "Idea" })
     await bindSession(dir, item.id, "ses_x", "ses_x")
     const r = await pauseItem(dir, item.id)
     expect(r.ok && r.action === "paused").toBe(true)
@@ -167,7 +178,7 @@ describe("pause / unpause", () => {
   })
 
   test("refuses on non-in_progress items", async () => {
-    const { item } = await createIdea(dir, { title: "Idea" })
+    const { item } = await mkIdea(dir, { title: "Idea" })
     const r = await pauseItem(dir, item.id)
     expect(!r.ok && r.reason === "NOT_IN_PROGRESS").toBe(true)
   })
@@ -175,7 +186,7 @@ describe("pause / unpause", () => {
 
 describe("demoteItem (true demote)", () => {
   test("tombstones the session, clears ownership, re-stamps spec_hash, moves back", async () => {
-    const { item } = await createIdea(dir, { title: "Idea", body: "original spec" })
+    const { item } = await mkIdea(dir, { title: "Idea", body: "original spec" })
     await bindSession(dir, item.id, "ses_x", "ses_x")
     const r = await demoteItem(dir, item.id, "todo")
     expect(r.ok && r.action === "demoted").toBe(true)
@@ -191,7 +202,7 @@ describe("demoteItem (true demote)", () => {
   })
 
   test("second demote of a re-bound item appends a second tombstone", async () => {
-    const { item } = await createIdea(dir, { title: "Idea" })
+    const { item } = await mkIdea(dir, { title: "Idea" })
     await bindSession(dir, item.id, "ses_1", "ses_1")
     await demoteItem(dir, item.id)
     await bindSession(dir, item.id, "ses_2", "ses_2")
@@ -202,7 +213,7 @@ describe("demoteItem (true demote)", () => {
   })
 
   test("refuses on non-in_progress items", async () => {
-    const { item } = await createIdea(dir, { title: "Idea" })
+    const { item } = await mkIdea(dir, { title: "Idea" })
     const r = await demoteItem(dir, item.id)
     expect(!r.ok && r.reason === "NOT_IN_PROGRESS").toBe(true)
   })
@@ -210,7 +221,7 @@ describe("demoteItem (true demote)", () => {
 
 describe("markDoneWithoutDream", () => {
   test("badges and freezes", async () => {
-    const { item } = await createIdea(dir, { title: "Small chore" })
+    const { item } = await mkIdea(dir, { title: "Small chore" })
     await bindSession(dir, item.id, "ses_x", "ses_x")
     const r = await markDoneWithoutDream(dir, item.id)
     expect(r.ok && r.action === "done").toBe(true)
@@ -226,7 +237,7 @@ describe("markDoneWithoutDream", () => {
 
 describe("bind-time absorption (Q15 / SCHEMA §3 invariant 6)", () => {
   test("happy path: pristine placeholder dissolved, lineage recorded, 1:1 holds", async () => {
-    const { item: idea } = await createIdea(dir, { title: "Real idea", body: "the spec" })
+    const { item: idea } = await mkIdea(dir, { title: "Real idea", body: "the spec" })
     const auto = await autoRegister(dir, "ses_x", "ses_x", "Chat title")
     const placeholder = auto.item
 
@@ -254,7 +265,7 @@ describe("bind-time absorption (Q15 / SCHEMA §3 invariant 6)", () => {
   })
 
   test("non-pristine: body edited since creation → strict refusal", async () => {
-    const { item: idea } = await createIdea(dir, { title: "Idea" })
+    const { item: idea } = await mkIdea(dir, { title: "Idea" })
     const auto = await autoRegister(dir, "ses_x", "ses_x", "t")
     const p = itemPath(dir, auto.item.id)
     fs.writeFileSync(p, fs.readFileSync(p, "utf8") + "\naccrued session notes\n")
@@ -265,7 +276,7 @@ describe("bind-time absorption (Q15 / SCHEMA §3 invariant 6)", () => {
   })
 
   test("non-pristine: dream_id set → strict refusal", async () => {
-    const { item: idea } = await createIdea(dir, { title: "Idea" })
+    const { item: idea } = await mkIdea(dir, { title: "Idea" })
     const auto = await autoRegister(dir, "ses_x", "ses_x", "t")
     await mutateItem(dir, auto.item.id, { set: { dream_id: "DRM-009" } })
 
@@ -275,7 +286,7 @@ describe("bind-time absorption (Q15 / SCHEMA §3 invariant 6)", () => {
   })
 
   test("non-pristine: subtask mirror present → strict refusal", async () => {
-    const { item: idea } = await createIdea(dir, { title: "Idea" })
+    const { item: idea } = await mkIdea(dir, { title: "Idea" })
     const auto = await autoRegister(dir, "ses_x", "ses_x", "t")
     const p = itemPath(dir, auto.item.id)
     fs.writeFileSync(
@@ -302,7 +313,7 @@ describe("bind-time absorption (Q15 / SCHEMA §3 invariant 6)", () => {
   // else refuses so accrued content is never destroyed"). These two tests pin
   // that, so a future edit cannot quietly point the check at the wrong item.
   test("reclassification: idea-first SURVIVOR keeps author-written subtasks through absorption", async () => {
-    const { item: idea } = await createIdea(dir, { title: "Authored plan" })
+    const { item: idea } = await mkIdea(dir, { title: "Authored plan" })
     const p = itemPath(dir, idea.id)
     fs.writeFileSync(
       p,
@@ -328,7 +339,7 @@ describe("bind-time absorption (Q15 / SCHEMA §3 invariant 6)", () => {
   })
 
   test("reclassification: the gate reads the ABSORBED item's subtasks, never the survivor's", async () => {
-    const { item: idea } = await createIdea(dir, { title: "Authored plan" })
+    const { item: idea } = await mkIdea(dir, { title: "Authored plan" })
     const ip = itemPath(dir, idea.id)
     fs.writeFileSync(
       ip,
@@ -351,8 +362,8 @@ describe("bind-time absorption (Q15 / SCHEMA §3 invariant 6)", () => {
   })
 
   test("idea-first owned item is never absorbed (origin guard)", async () => {
-    const { item: a } = await createIdea(dir, { title: "A" })
-    const { item: b } = await createIdea(dir, { title: "B" })
+    const { item: a } = await mkIdea(dir, { title: "A" })
+    const { item: b } = await mkIdea(dir, { title: "B" })
     await bindSession(dir, a.id, "ses_x", "ses_x") // owns an idea-first item, pristine-looking otherwise
     const r = await bindSession(dir, b.id, "ses_x", "ses_x")
     expect(!r.ok && r.reason === "SESSION_OWNS_OTHER").toBe(true)
@@ -360,8 +371,8 @@ describe("bind-time absorption (Q15 / SCHEMA §3 invariant 6)", () => {
   })
 
   test("absorption under the lock: concurrent binds resolve to exactly one owner, one deletion", async () => {
-    const { item: i1 } = await createIdea(dir, { title: "I1" })
-    const { item: i2 } = await createIdea(dir, { title: "I2" })
+    const { item: i1 } = await mkIdea(dir, { title: "I1" })
+    const { item: i2 } = await mkIdea(dir, { title: "I2" })
     const auto = await autoRegister(dir, "ses_x", "ses_x", "t")
 
     const [r1, r2] = await Promise.all([
@@ -378,7 +389,7 @@ describe("bind-time absorption (Q15 / SCHEMA §3 invariant 6)", () => {
   })
 
   test("idempotency interplay: later awaken auto-register no-ops on the bound session", async () => {
-    const { item: idea } = await createIdea(dir, { title: "Idea" })
+    const { item: idea } = await mkIdea(dir, { title: "Idea" })
     await autoRegister(dir, "ses_x", "ses_x", "t")
     await bindSession(dir, idea.id, "ses_x", "ses_x")
 
@@ -391,7 +402,7 @@ describe("bind-time absorption (Q15 / SCHEMA §3 invariant 6)", () => {
 
 describe("startItem (Phase 3: fresh session + bind + awaken-on-create)", () => {
   test("happy path: creates, binds, THEN awakens — seeded with the spec", async () => {
-    const { item: idea } = await createIdea(dir, { title: "Build the thing", body: "## Spec\ndo it well", status: "todo" })
+    const { item: idea } = await mkIdea(dir, { title: "Build the thing", body: "## Spec\ndo it well", status: "todo" })
 
     // capture the on-disk owner at the moment the awaken command fires (ordering proof)
     let ownerWhenAwakenFired: string | null | undefined
@@ -425,7 +436,7 @@ describe("startItem (Phase 3: fresh session + bind + awaken-on-create)", () => {
   })
 
   test("composition: hive_awaken auto-register no-ops on the started session (no duplicate item)", async () => {
-    const { item: idea } = await createIdea(dir, { title: "Idea" })
+    const { item: idea } = await mkIdea(dir, { title: "Idea" })
     const sessions = fakeSessions()
     const r = await startItem(dir, idea.id, sessions, { waitForAwaken: true })
     expect(r.ok).toBe(true)
@@ -442,12 +453,12 @@ describe("startItem (Phase 3: fresh session + bind + awaken-on-create)", () => {
     const nf = await startItem(dir, "WI-999", sessions)
     expect(!nf.ok && nf.reason === "NOT_FOUND").toBe(true)
 
-    const { item: owned } = await createIdea(dir, { title: "Owned" })
+    const { item: owned } = await mkIdea(dir, { title: "Owned" })
     await bindSession(dir, owned.id, "ses_x", "ses_x")
     const ro = await startItem(dir, owned.id, sessions)
     expect(!ro.ok && ro.reason === "ITEM_OWNED").toBe(true)
 
-    const { item: doneItem } = await createIdea(dir, { title: "Done thing" })
+    const { item: doneItem } = await mkIdea(dir, { title: "Done thing" })
     await markDoneWithoutDream(dir, doneItem.id)
     const rd = await startItem(dir, doneItem.id, sessions)
     expect(!rd.ok && rd.reason === "ALREADY_DONE").toBe(true)
@@ -456,7 +467,7 @@ describe("startItem (Phase 3: fresh session + bind + awaken-on-create)", () => {
   })
 
   test("fire-and-forget default: awaken failure does not fail the start; onAwakenError fires", async () => {
-    const { item: idea } = await createIdea(dir, { title: "Idea" })
+    const { item: idea } = await mkIdea(dir, { title: "Idea" })
     const errors: unknown[] = []
     const sessions = fakeSessions({
       command: async () => {
@@ -473,7 +484,7 @@ describe("startItem (Phase 3: fresh session + bind + awaken-on-create)", () => {
 
 describe("reattachInfo + promoteItem (§5.5 spec-edit signal, invariant 4)", () => {
   test("never-owned idea → fresh", async () => {
-    const { item } = await createIdea(dir, { title: "Idea" })
+    const { item } = await mkIdea(dir, { title: "Idea" })
     const d = reattachInfo(dir, item.id)
     expect(d).toEqual({ kind: "fresh", reason: "never-owned" })
 
@@ -484,7 +495,7 @@ describe("reattachInfo + promoteItem (§5.5 spec-edit signal, invariant 4)", () 
   })
 
   test("demoted, spec UNCHANGED → re-attach the released session, NO awaken, no new session", async () => {
-    const { item } = await createIdea(dir, { title: "Idea", body: "stable spec" })
+    const { item } = await mkIdea(dir, { title: "Idea", body: "stable spec" })
     await bindSession(dir, item.id, "ses_orig", "ses_orig")
     await demoteItem(dir, item.id, "todo")
 
@@ -505,7 +516,7 @@ describe("reattachInfo + promoteItem (§5.5 spec-edit signal, invariant 4)", () 
   })
 
   test("demoted, spec CHANGED → fresh session (the edit IS the decision)", async () => {
-    const { item } = await createIdea(dir, { title: "Idea", body: "original spec" })
+    const { item } = await mkIdea(dir, { title: "Idea", body: "original spec" })
     await bindSession(dir, item.id, "ses_orig", "ses_orig")
     await demoteItem(dir, item.id, "backlog")
     const p = itemPath(dir, item.id)
@@ -525,7 +536,7 @@ describe("reattachInfo + promoteItem (§5.5 spec-edit signal, invariant 4)", () 
   })
 
   test("done item → always re-attach the frozen owner (invariant 4), badge cleared", async () => {
-    const { item } = await createIdea(dir, { title: "Idea" })
+    const { item } = await mkIdea(dir, { title: "Idea" })
     await bindSession(dir, item.id, "ses_orig", "ses_orig")
     await markDoneWithoutDream(dir, item.id)
 
@@ -544,14 +555,14 @@ describe("reattachInfo + promoteItem (§5.5 spec-edit signal, invariant 4)", () 
   })
 
   test("done item never owned → distinct done-never-owned reason (Q16)", async () => {
-    const { item } = await createIdea(dir, { title: "Idea" })
+    const { item } = await mkIdea(dir, { title: "Idea" })
     await markDoneWithoutDream(dir, item.id)
     const d = reattachInfo(dir, item.id)
     expect(d).toEqual({ kind: "fresh", reason: "done-never-owned" })
   })
 
   test("Q16 reopen-as-fresh: promote un-does the item and runs the normal start", async () => {
-    const { item } = await createIdea(dir, { title: "Obsolete-but-back", body: "the spec" })
+    const { item } = await mkIdea(dir, { title: "Obsolete-but-back", body: "the spec" })
     await markDoneWithoutDream(dir, item.id)
     expect(readItem(dir, item.id)!.done_without_dream).toBe(true)
 
@@ -577,7 +588,7 @@ describe("reattachInfo + promoteItem (§5.5 spec-edit signal, invariant 4)", () 
   })
 
   test("Q16 shortcut lives in promote ONLY: direct startItem still refuses done items", async () => {
-    const { item } = await createIdea(dir, { title: "Idea" })
+    const { item } = await mkIdea(dir, { title: "Idea" })
     await markDoneWithoutDream(dir, item.id)
     const sessions = fakeSessions()
     const r = await startItem(dir, item.id, sessions)
@@ -587,7 +598,7 @@ describe("reattachInfo + promoteItem (§5.5 spec-edit signal, invariant 4)", () 
   })
 
   test("Q16 does not disturb done+OWNED: still the reattach path, badge cleared, no client calls", async () => {
-    const { item } = await createIdea(dir, { title: "Idea" })
+    const { item } = await mkIdea(dir, { title: "Idea" })
     await bindSession(dir, item.id, "ses_orig", "ses_orig")
     await markDoneWithoutDream(dir, item.id)
 
@@ -599,7 +610,7 @@ describe("reattachInfo + promoteItem (§5.5 spec-edit signal, invariant 4)", () 
   })
 
   test("refuses in_progress items", async () => {
-    const { item } = await createIdea(dir, { title: "Idea" })
+    const { item } = await mkIdea(dir, { title: "Idea" })
     await bindSession(dir, item.id, "ses_x", "ses_x")
     const d = reattachInfo(dir, item.id)
     expect(d.kind).toBe("refuse")
@@ -608,7 +619,7 @@ describe("reattachInfo + promoteItem (§5.5 spec-edit signal, invariant 4)", () 
   })
 
   test("re-attached session composes with autoRegister (noop-owned despite tombstone)", async () => {
-    const { item } = await createIdea(dir, { title: "Idea", body: "spec" })
+    const { item } = await mkIdea(dir, { title: "Idea", body: "spec" })
     await bindSession(dir, item.id, "ses_orig", "ses_orig")
     await demoteItem(dir, item.id)
     await promoteItem(dir, item.id, fakeSessions()) // re-attach (unchanged spec)
@@ -621,8 +632,8 @@ describe("reattachInfo + promoteItem (§5.5 spec-edit signal, invariant 4)", () 
 
 describe("composition: the demote→rebind lifecycle", () => {
   test("a released session can bind a DIFFERENT item; awaken keeps skipping it", async () => {
-    const { item: a } = await createIdea(dir, { title: "A" })
-    const { item: b } = await createIdea(dir, { title: "B" })
+    const { item: a } = await mkIdea(dir, { title: "A" })
+    const { item: b } = await mkIdea(dir, { title: "B" })
     await bindSession(dir, a.id, "ses_x", "ses_x")
     await demoteItem(dir, a.id)
 
@@ -654,7 +665,7 @@ describe("markItemDoneFromDream (event-driven Done on dream complete)", () => {
   })
 
   test("happy path: in_progress owned → done, dream_id + artifacts stamped, audited transition", async () => {
-    const { item } = await createIdea(dir, { title: "Coordinator work", body: "spec" })
+    const { item } = await mkIdea(dir, { title: "Coordinator work", body: "spec" })
     await bindSession(dir, item.id, "ses_c", "ses_c")
 
     const r = await markItemDoneFromDream(dir, "ses_c", "DRM-046", withArts("DRM-046", ["I-179", "W-064", "SHADOW-004"]))
@@ -677,7 +688,7 @@ describe("markItemDoneFromDream (event-driven Done on dream complete)", () => {
   })
 
   test("clears a paused sub-state on the way to done", async () => {
-    const { item } = await createIdea(dir, { title: "Parked", body: "spec" })
+    const { item } = await mkIdea(dir, { title: "Parked", body: "spec" })
     await bindSession(dir, item.id, "ses_p", "ses_p")
     await pauseItem(dir, item.id)
     expect(readItem(dir, item.id)!.paused).toBe(true)
@@ -690,7 +701,7 @@ describe("markItemDoneFromDream (event-driven Done on dream complete)", () => {
 
   test("no owning item → clean no-op (the common case: session owns nothing)", async () => {
     // A board exists but this session owns nothing.
-    await createIdea(dir, { title: "Unrelated" })
+    await mkIdea(dir, { title: "Unrelated" })
     const r = await markItemDoneFromDream(dir, "ses_nobody", "DRM-001", complete("DRM-001"))
     expect(r.ok && r.action === "noop-no-owner").toBe(true)
   })
@@ -701,7 +712,7 @@ describe("markItemDoneFromDream (event-driven Done on dream complete)", () => {
   })
 
   test("idempotent: re-firing the SAME DRM no-ops (no double transition)", async () => {
-    const { item } = await createIdea(dir, { title: "Once", body: "spec" })
+    const { item } = await mkIdea(dir, { title: "Once", body: "spec" })
     await bindSession(dir, item.id, "ses_1", "ses_1")
 
     const first = await markItemDoneFromDream(dir, "ses_1", "DRM-060", complete("DRM-060"))
@@ -716,7 +727,7 @@ describe("markItemDoneFromDream (event-driven Done on dream complete)", () => {
   })
 
   test("multi-dream session: a LATER completed dream re-stamps the definer, preserves lineage", async () => {
-    const { item } = await createIdea(dir, { title: "Two dreams", body: "spec" })
+    const { item } = await mkIdea(dir, { title: "Two dreams", body: "spec" })
     await bindSession(dir, item.id, "ses_m", "ses_m")
 
     await markItemDoneFromDream(dir, "ses_m", "DRM-070", withArts("DRM-070", ["I-100"]))
@@ -742,7 +753,7 @@ describe("markItemDoneFromDream (event-driven Done on dream complete)", () => {
   })
 
   test("un-owned item (idea, no owner) is untouched — only the OWNING session's item moves", async () => {
-    const { item } = await createIdea(dir, { title: "Idea only", status: "todo" })
+    const { item } = await mkIdea(dir, { title: "Idea only", status: "todo" })
     const r = await markItemDoneFromDream(dir, "ses_none", "DRM-080", complete("DRM-080"))
     expect(r.ok && r.action === "noop-no-owner").toBe(true)
     // the idea is still todo, un-owned
@@ -752,7 +763,7 @@ describe("markItemDoneFromDream (event-driven Done on dream complete)", () => {
   test("owned but not in_progress (parked back to todo) → refuses NOT_IN_PROGRESS", async () => {
     // Force a pathological state: owner set but status todo (never happens via
     // normal transitions, but the helper must refuse rather than clobber).
-    const { item } = await createIdea(dir, { title: "Weird", body: "spec" })
+    const { item } = await mkIdea(dir, { title: "Weird", body: "spec" })
     await bindSession(dir, item.id, "ses_w", "ses_w")
     await mutateItem(dir, item.id, { set: { status: "todo" } })
 
@@ -762,7 +773,7 @@ describe("markItemDoneFromDream (event-driven Done on dream complete)", () => {
   })
 
   test("refuses when the DRM is NOT COMPLETE (belt-and-braces), item untouched", async () => {
-    const { item } = await createIdea(dir, { title: "Incomplete dream", body: "spec" })
+    const { item } = await mkIdea(dir, { title: "Incomplete dream", body: "spec" })
     await bindSession(dir, item.id, "ses_i", "ses_i")
 
     const r = await markItemDoneFromDream(dir, "ses_i", "DRM-999", { drmIsComplete: () => false })
@@ -774,7 +785,7 @@ describe("markItemDoneFromDream (event-driven Done on dream complete)", () => {
   })
 
   test("done_without_dream escape-hatch item: a later real dream UPGRADES it (badge cleared, audited)", async () => {
-    const { item } = await createIdea(dir, { title: "Manual then dreamt", body: "spec" })
+    const { item } = await mkIdea(dir, { title: "Manual then dreamt", body: "spec" })
     await bindSession(dir, item.id, "ses_d", "ses_d")
     await markDoneWithoutDream(dir, item.id)
     const badged = readItem(dir, item.id)!
@@ -800,7 +811,7 @@ describe("markItemDoneFromDream (event-driven Done on dream complete)", () => {
   })
 
   test("default cross-check reads real DRM history files (integration, no injected fakes)", async () => {
-    const { item } = await createIdea(dir, { title: "Real DRM", body: "spec" })
+    const { item } = await mkIdea(dir, { title: "Real DRM", body: "spec" })
     await bindSession(dir, item.id, "ses_real", "ses_real")
 
     // Write a genuine COMPLETE DRM history file the default helpers will read.
@@ -842,7 +853,7 @@ describe("markItemDoneFromDream (event-driven Done on dream complete)", () => {
   })
 
   test("default cross-check refuses when the DRM history file is absent", async () => {
-    const { item } = await createIdea(dir, { title: "Missing DRM", body: "spec" })
+    const { item } = await mkIdea(dir, { title: "Missing DRM", body: "spec" })
     await bindSession(dir, item.id, "ses_miss", "ses_miss")
 
     const r = await markItemDoneFromDream(dir, "ses_miss", "DRM-404")

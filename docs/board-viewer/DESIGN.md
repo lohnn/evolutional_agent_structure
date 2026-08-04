@@ -190,8 +190,14 @@ opencode state, never one that **depends on** it.
 
 ### 5.1 Backlog
 Loosely-specified future work. An item here has a title and a growing body of notes/spec that you
-add to over time. No owner, no dream. Freely editable from any session (Class B). This is where an
-idea matures until it's worth starting.
+add to over time. No owner, no dream. Freely editable from any session (Class B on the **authority**
+axis — SCHEMA §2). This is where an idea matures until it's worth starting.
+
+> **Read the axis before the letter.** SCHEMA §2's A/B/C (authority: *who may write*) and §4/§4b's
+> A/B (loss: *what happens if destroyed*) are orthogonal taxonomies that happen to share letters.
+> A backlog body is authority-B (anyone may edit) **and** loss-canonical (nothing else holds that
+> text — destroying it is unrecoverable, which is exactly why WI-064 archives every superseded body,
+> SCHEMA §4d). Only the LOSS axis decides whether a whole-replace primitive is safe.
 
 ### 5.2 Todo / New
 A Backlog item deemed ready. Same storage, `status: todo`. Still no owner. The distinction from
@@ -254,7 +260,8 @@ An item is In Progress **iff** a HIVE coordinator session owns it. There are **t
   persists in `awakeSessions` across restarts. Re-attach is a deep link only. Re-running awaken
   would burn a model turn and re-inject awakening context into a session that already has it.
 
-Once owned, that coordinator session is the item's single canonical writer (Class A).
+Once owned, that coordinator session is the item's single canonical writer (Class A on the
+**authority** axis — see §5.1 on why the axis label matters).
 
 **Alive subtasks:** while In Progress, the card shows a subtask lane. The *upstream* source is the
 **owning session's own TodoWrite list** (via `session.todo({ path:{ id } })` + the `todo.updated`

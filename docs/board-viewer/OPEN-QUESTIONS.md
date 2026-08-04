@@ -276,10 +276,14 @@ would later make the hash differ even if nobody touched the spec after demote, f
 fresh session.
 
 **Resolved (user, 2026-07-08): both parts as proposed.**
-1. **Body while owned = Class A.** Once `owner_session` is set, the spec body is editable only
-   by/through the owning session (same rule as `title`). The coordinator is *expected* to accumulate
-   notes into it as work proceeds. Other sessions may not edit an owned item's body (single-writer).
-   On true-demote the body reverts to Class B (any session may reshape the idea).
+1. **Body while owned = Class A on the AUTHORITY axis.** Once `owner_session` is set, the spec body
+   is editable only by/through the owning session (same rule as `title`). The coordinator is
+   *expected* to accumulate notes into it as work proceeds. Other sessions may not edit an owned
+   item's body (single-writer). On true-demote the body reverts to authority-Class B (any session
+   may reshape the idea).
+   > These letters are the AUTHORITY axis (who may write), not the LOSS axis (what happens if
+   > destroyed) — SCHEMA §2 labels both. On the loss axis the body is canonical in EVERY column,
+   > owned or not, which is why WI-064 archives each superseded body unconditionally (§4d).
 2. **`spec_hash` is (re)stamped at true-demote, and compared against that.** The question the hash
    answers is "did the spec change *while the item sat un-owned* in Todo/Backlog?" — so the baseline
    must be taken at the moment ownership was released, not at bind. Keep the bind-time stamp too if
