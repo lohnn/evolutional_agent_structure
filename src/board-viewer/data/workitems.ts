@@ -6,8 +6,12 @@
  * (`parseWorkItem` — the same code path the locked storage module writes
  * with; announced 2026-07-10). The former `wi-fields.ts` stopgap is deleted
  * (I-046/I-148: one owner, one code path). We re-export the owner's types;
- * the only view-side addition is `problems[]` — SCHEMA §3 invariant
- * violations surfaced visibly (W-030), a rendering concern, not a parsing one.
+ * the only addition is the `problems[]` OVERLAY — SCHEMA §3 invariant
+ * violations surfaced visibly (W-030). The overlay is view-side; the RULES are
+ * not — since WI-071 they too are the owner's, in `lib/board-invariants`, so
+ * the card chip and the plugin's board read tools cannot disagree about
+ * legality. This module only decides that the viewer carries the answer on
+ * every item.
  *
  * `loadWorkItems(boardDir)` delegates to the owner's `listItemsInDir()`
  * (Q15 delta) — the `/^WI-\d+\.md$/` filename filter has ONE owner again.
@@ -29,6 +33,20 @@ import {
   type WorkItemPriority,
   type WorkItemStatus,
 } from "../../lib/board-store"
+// SCHEMA §3 invariant checking is defined once, in hive-infra's shared leaf
+// module, so the viewer's `⚠ invariant` chip and the plugin's board read tools
+// can never disagree about whether an item is in a legal state (WI-071). A
+// violation is a FACT about an item, not a policy of a surface — two answers
+// would mean one is simply wrong. Contrast `sortForColumn` below, which is
+// deliberately NOT shared: column ordering is a policy, and two surfaces
+// ordering differently is a legitimate choice.
+//
+// Computed SERVER-SIDE only: render.ts imports this module in type position
+// and reads the `problems` FIELD off an already-normalized item, never the
+// function, so nothing of this crosses to the browser but the result. The
+// module is written pure, but note it is NOT covered by the bundle-purity
+// guard (that guard asserts against the emitted bundle, and this never ships).
+import { computeProblems } from "../../lib/board-invariants"
 // Recency ordering is defined once, in the browser-safe leaf module recency.ts,
 // so every column and the render layer sort by exactly the same rule.
 import { recencyKey } from "./recency"
@@ -41,8 +59,17 @@ export type { Subtask, TodoMirrorEntry, Transition, WorkItemStatus, WorkItemPrio
 export { absorbedLineage, lineageSessions } from "./lineage"
 
 /**
- * The owner's WorkItem plus the view-computed `problems[]` overlay (SCHEMA §3
- * invariant violations surfaced visibly — W-030).
+ * The owner's WorkItem plus the `problems[]` overlay (SCHEMA §3 invariant
+ * violations surfaced visibly — W-030), computed by the owner's shared
+ * `lib/board-invariants#computeProblems`.
+ *
+ * READ IT AS A FLOOR, NOT A VERDICT: an empty `problems[]` means "violates
+ * none of the three cheap, purely-local rules that module checks", NOT "this
+ * item is schema-clean". SCHEMA §3 declares six invariants; three are
+ * unchecked (they need the session map, a second file read, or the whole
+ * board) and two of the three checked are weakened forms. No viewer copy may
+ * imply otherwise — which is why the absence of the `⚠ invariant` chip is
+ * silent rather than an "ok" badge. See the module header for the full gap.
  *
  * `todo_mirror` / `todo_mirror_updated` are the owner's OWN fields again
  * (WI-038 contract restored on board-store, v0.4.38): `todo_mirror:
@@ -55,21 +82,6 @@ export { absorbedLineage, lineageSessions } from "./lineage"
  * an absent field) is thus defended in depth — owner parser AND view boundary.
  */
 export type WorkItem = StoreWorkItem & { problems: string[] }
-
-/** SCHEMA §3 invariants — surfaced visibly, never silently normalized. */
-function computeProblems(item: StoreWorkItem): string[] {
-  const problems: string[] = []
-  if (item.status === "in_progress" && !item.owner_session) {
-    problems.push("in_progress without owner_session (invariant 1)")
-  }
-  if (item.status === "done" && !item.dream_id && !item.done_without_dream) {
-    problems.push("done without dream_id or done_without_dream (invariant 2)")
-  }
-  if (item.owner_session && !item.group_id) {
-    problems.push("owner_session without group_id (invariant 3)")
-  }
-  return problems
-}
 
 /**
  * Belt-and-suspenders default for the owner's `todo_mirror` field (I-191).

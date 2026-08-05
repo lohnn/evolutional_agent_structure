@@ -281,10 +281,25 @@ describe("list — impossible combinations hard-error (I-050)", () => {
   })
 
   test("…and it still tells a violation-hunter how to hunt (illegal states DO reach disk)", () => {
+    // The refusal must never read as "no such state exists". WI-071 changed
+    // WHERE it sends them — from a manual workaround (read the owner column)
+    // to the real surface (the ⚠ marker) — but not THAT it must send them
+    // somewhere. Both halves are asserted: the admission and the route.
     const r = listBoard(board(), { status: "in_progress", owner: "none" })
     if (r.ok) throw new Error("expected refusal")
     expect(r.error).toContain("WI-065")
-    expect(r.error).toContain("owner column")
+    expect(r.error).toContain("LEGAL, never what is STORED")
+    expect(r.error).toContain("⚠")
+    expect(r.error).toContain("hive_board_list")
+  })
+
+  test("the refusal no longer routes anyone at the pre-WI-071 manual workaround", () => {
+    // Guards the actual regression risk: someone restoring the old wording
+    // (or the old wording surviving a merge) would re-create a paragraph that
+    // is now strictly worse than the surface it was standing in for.
+    const r = listBoard(board(), { status: "in_progress", owner: "none" })
+    if (r.ok) throw new Error("expected refusal")
+    expect(r.error).not.toContain("owner column")
   })
 
   test("backlog/todo + owner=owned refuses in the other direction", () => {
@@ -304,6 +319,107 @@ describe("list — impossible combinations hard-error (I-050)", () => {
     ]) {
       expect(listBoard(board(), opts).ok).toBe(true)
     }
+  })
+})
+
+// ── invariant violations (WI-071) ────────────────────────────────────────────
+
+describe("invariant violations are surfaced board-wide (WI-071)", () => {
+  /**
+   * The base `board()` fixture is deliberately all-legal, so every other test
+   * in this file sees no ⚠ at all. Violations are opted into HERE, one item
+   * per checked invariant — the same three cases the viewer's
+   * test/board-viewer/workitems.test.ts asserts, mirrored on this surface.
+   *
+   * These records are exactly what the schema forbids and what WI-065 proved
+   * reaches disk anyway: the point of the surface is that a real board can
+   * contain them, so the fixture must be able to as well.
+   */
+  function illegalBoard(): WorkItem[] {
+    return [
+      ...board(),
+      item("WI-101", { status: "in_progress", owner_session: null }), // invariant 1
+      item("WI-102", { status: "done", dream_id: null, done_without_dream: false }), // invariant 2
+      item("WI-103", {
+        status: "in_progress",
+        owner_session: "ses_orphan0001",
+        group_id: null, // invariant 3 (and 1 is satisfied: owner is set)
+      }),
+    ]
+  }
+
+  test("a clean board shows no marker and no count at all", () => {
+    const r = listBoard(board(), { status: "all" })
+    if (!r.ok) throw new Error(r.error)
+    expect(r.text).not.toContain("⚠")
+    expect(r.text).not.toContain("ILLEGAL")
+  })
+
+  test("each of the three checked invariants is detected and named", () => {
+    const r = listBoard(illegalBoard(), { status: "all" })
+    if (!r.ok) throw new Error(r.error)
+    expect(r.text).toContain("invariant 1")
+    expect(r.text).toContain("invariant 2")
+    expect(r.text).toContain("invariant 3")
+  })
+
+  test("the header counts violations and names the offending ids", () => {
+    const r = listBoard(illegalBoard(), { status: "all" })
+    if (!r.ok) throw new Error(r.error)
+    const header = r.text.split("\n").find((l) => l.includes("ILLEGAL state"))
+    expect(header).toBeDefined()
+    expect(header).toContain("3 of 8")
+    for (const id of ["WI-101", "WI-102", "WI-103"]) expect(header).toContain(id)
+  })
+
+  test("the count spans everything MATCHED, not just what limit rendered", () => {
+    // The whole reason this moved out of the viewer is that a per-card check
+    // cannot answer a board-wide question. A count that quietly followed the
+    // rendered page would re-create exactly that failure under a new name.
+    const r = listBoard(illegalBoard(), { status: "all", limit: 1 })
+    if (!r.ok) throw new Error(r.error)
+    expect(r.shown).toBe(1)
+    const header = r.text.split("\n").find((l) => l.includes("ILLEGAL state"))
+    expect(header).toContain("3 of 8")
+    expect(header).toContain("WI-101")
+  })
+
+  test("only the violating rows are marked", () => {
+    const r = listBoard(illegalBoard(), { status: "all" })
+    if (!r.ok) throw new Error(r.error)
+    const rows = r.text.split("\n").filter((l) => /^\s{2}WI-\d{3}\s/.test(l))
+    const marked = rows.filter((l) => l.includes("⚠ ILLEGAL:")).map((l) => l.trim().slice(0, 6))
+    expect(marked.sort()).toEqual(["WI-101", "WI-102", "WI-103"])
+  })
+
+  test("the marker states WHICH invariant broke, not just that one did", () => {
+    const r = listBoard(illegalBoard(), { status: "all" })
+    if (!r.ok) throw new Error(r.error)
+    const row = r.text.split("\n").find((l) => l.trim().startsWith("WI-101"))
+    expect(row).toContain("in_progress without owner_session (invariant 1)")
+  })
+
+  test("read surfaces the violation on a named item, under its status line", () => {
+    const r = readItems(illegalBoard(), "WI-103")
+    if (!r.ok) throw new Error(r.error)
+    expect(r.text).toContain("⚠ ILLEGAL  owner_session without group_id (invariant 3)")
+    const lines = r.text.split("\n")
+    const statusAt = lines.findIndex((l) => l.startsWith("  status "))
+    const illegalAt = lines.findIndex((l) => l.startsWith("  ⚠ ILLEGAL"))
+    expect(illegalAt).toBe(statusAt + 1)
+  })
+
+  test("read says the record is real, not a parse error, and must not be repaired", () => {
+    const r = readItems(illegalBoard(), "WI-101")
+    if (!r.ok) throw new Error(r.error)
+    expect(r.text).toContain("LEGAL, never what is")
+    expect(r.text).toContain("not a parse error")
+  })
+
+  test("read of a legal item says nothing about invariants", () => {
+    const r = readItems(illegalBoard(), "WI-003")
+    if (!r.ok) throw new Error(r.error)
+    expect(r.text).not.toContain("ILLEGAL")
   })
 })
 

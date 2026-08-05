@@ -298,6 +298,7 @@ export function createHiveTools(
         "NEVER returns spec bodies, and that is the point: the entire 69-item board indexes to roughly 2.3k tokens, so this call is always affordable and its cost is predictable before you make it. The `body` column is the spec's size, so you can see what reading one would cost before you ask for it. " +
         "Defaults to status=\"live\" — backlog + todo + in_progress. DONE items are EXCLUDED by default (two thirds of the board is finished work); pass status=\"all\" to include them. " +
         "This is the tool for 'what is on the board right now'. Reach for hive_board_search instead when you have WORDS rather than a filter (it also spans done items), and hive_board_read when you already know the ids and need the actual spec text. " +
+        "It is ALSO how you find corruption. Every call checks the SCHEMA §3 invariants on every matched item, counts violations in the header and marks each violating row \"⚠\" with the invariant it breaks — no filter or flag needed, and the count spans everything matched, not just the rows `limit` rendered. Illegal states genuinely reach disk (WI-065 did), so this answers 'which items are in an illegal state' board-wide. Detection only: nothing is repaired, and a clean board shows no marker at all. Note the check is a floor, not an audit — three of the schema's six invariants, two of them in weakened form (see the gap note in lib/board-invariants.ts), so no ⚠ means 'breaks none of the three cheap per-item rules', not 'schema-clean'. " +
         "Reads take no lock and no snapshot: writes are atomic per file, so nothing you see is ever half-written, but a long listing may observe one item before and another after a concurrent write.",
       args: {
         status: tool.schema.enum(["live", "all", "backlog", "todo", "in_progress", "done"]).optional().describe(
@@ -343,6 +344,7 @@ export function createHiveTools(
         "This is the expensive one, and explicitly so. Spec bodies on this board run from empty to 12 KB, so it takes named ids rather than a filter and is bounded by a byte budget (default " + DEFAULT_MAX_BYTES + " bytes, ceiling " + MAX_MAX_BYTES + "). Discover ids with hive_board_list or hive_board_search first. " +
         "Nothing disappears quietly: an id with no item on the board is reported by name, and an item the budget could not fit is reported by name as deferred — never dropped. " +
         "Use this instead of opening .opencode/board/WI-*.md by hand: this is the same parser the writers use, so what you read is what the board stores. " +
+        "If the item violates a SCHEMA §3 invariant, that is stated as a \"⚠ ILLEGAL\" line directly under its status — the record is real and in a forbidden state, not a parse error. Reported, never repaired. " +
         "One honest limitation: reading several items is NOT a cross-item snapshot. No lock is taken (a read must never be able to make a concurrent write fail), and while each file is written atomically so no single item is ever torn, a multi-item read may observe one item before and another after a concurrent write.",
       args: {
         ids: tool.schema.string().describe(
