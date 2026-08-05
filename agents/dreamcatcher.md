@@ -1,7 +1,7 @@
 ---
 description: dreamcatcher — semantic dream archive agent. Two modes: Recall (surface relevant artifacts before delegation) and Audit (detect duplicates, contradictions, and staleness for /evolve). Read-only access to the dream archive.
 mode: subagent
-model: anthropic/claude-sonnet-5
+model: claude-sonnet-5
 permission:
   read: allow
   glob: allow
