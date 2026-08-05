@@ -43,6 +43,18 @@ function tools(directory: string) {
   )
 }
 
+/**
+ * `hive_board_create` resolves the calling agent for its `by:` stamp, so unlike
+ * the read tools it genuinely needs a nervous system. Anything that reaches
+ * createIdea — including a refusal RAISED BY THE MODULE — evaluates that
+ * expression on the way, so the bare `tools()` stub above is not enough.
+ */
+function createTools(directory: string) {
+  return createHiveTools({ resolveAgent: () => "test" } as never, {} as never, () => {}, directory)
+}
+
+const createCtx = { sessionID: "ses_test", agent: "test" } as never
+
 const ctx = {} as never
 
 let dir: string
@@ -161,6 +173,41 @@ describe("hive_board_create — the advisory and the pointer", () => {
     const d = tools(dir).hive_board_create.description
     expect(d).toContain("hive_board_search")
     expect(d).toMatch(/BEFORE you file/)
+  })
+
+  test("subtasks as a bare string is refused AT THE TOOL, which is where it threw", async () => {
+    // The tool converts string[] into records with a `.map` that runs BEFORE
+    // createIdea, so this arg cannot be covered by the module guard alone —
+    // it threw at src/tools.ts, not in board-transitions.ts. A module-only
+    // fix leaves exactly this call still crashing.
+    const out = await createTools(dir).hive_board_create.execute(
+      { title: "x", subtasks: "step one" } as never,
+      createCtx
+    )
+    expect(out).toContain("Refused (NOT_AN_ARRAY)")
+    expect(out).toContain("subtasks must be an ARRAY")
+    expect(out).not.toContain("is not a function")
+  })
+
+  test("tags as a bare string is refused THROUGH the module, in the tool's own refusal format", async () => {
+    // Not duplicated at the tool layer on purpose: tags is passed through
+    // untouched, so the module refuses it and the tool formats that refusal
+    // exactly like its own. Asserted so the pass-through cannot rot silently.
+    const out = await createTools(dir).hive_board_create.execute(
+      { title: "x", tags: "hive-board" } as never,
+      createCtx
+    )
+    expect(out).toContain("Refused (NOT_AN_ARRAY)")
+    expect(out).toContain('tags: ["one", "two"]')
+  })
+
+  test("a malformed array arg writes NOTHING — the refusal precedes the write", async () => {
+    const before = (await import("../src/lib/board-store.ts")).listItems(dir).length
+    await createTools(dir).hive_board_create.execute(
+      { title: "x", subtasks: "step one" } as never,
+      createCtx
+    )
+    expect((await import("../src/lib/board-store.ts")).listItems(dir)).toHaveLength(before)
   })
 
   test("the three read tools describe their own bound, so cost is predictable before calling", () => {

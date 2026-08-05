@@ -152,6 +152,136 @@ describe("REFUSALS proven by live calls with the forbidden value", () => {
   })
 })
 
+describe("ARRAY ARGS: malformed containers REFUSE, they do not throw", () => {
+  /**
+   * Reported from a live machine 2026-08-05 and reproduced here before the fix:
+   * every array-taking argument threw a raw TypeError naming an internal
+   * expression (`(init.tags ?? []).filter is not a function`) when the value
+   * arrived as a string. The caller saw an "internal error" with no reason code
+   * and no guidance — indistinguishable from a plugin bug.
+   *
+   * Same defect class as WI-065, one layer in: `tool.schema.array(...)`
+   * describes the arg to the model and rejects NOTHING at runtime, and the
+   * WI-064 hardening validated tag CONTENTS but never the CONTAINER.
+   *
+   * Every test below passes the malformed value as a REAL CALL. `expect(...)
+   * .resolves` is not enough on its own — a throw and a refusal are both
+   * "not the happy path", so each asserts the specific reason code AND that
+   * nothing reached disk.
+   */
+  const MALFORMED: Array<[string, unknown]> = [
+    ["bare string", "hive-board"],
+    ["JSON-encoded string", '["a","b"]'],
+    ["number", 42],
+    ["object", { 0: "a" }],
+  ]
+
+  describe("create — tags", () => {
+    for (const [label, value] of MALFORMED) {
+      test(`${label} is refused NOT_AN_ARRAY and writes nothing`, async () => {
+        const r = await createIdea(dir, { title: "x", tags: value as unknown as string[] })
+        expect(!r.ok && r.reason).toBe("NOT_AN_ARRAY")
+        expect(!r.ok && r.detail).toContain("tags must be an ARRAY")
+        expect(listItems(dir)).toHaveLength(0)
+      })
+    }
+
+    test("the refusal names the arg and the required shape, not an internal expression", async () => {
+      const r = await createIdea(dir, { title: "x", tags: "hive-board" as unknown as string[] })
+      if (r.ok) throw new Error("expected refusal")
+      expect(r.detail).toContain('["hive-board"]') // the exact correction to make
+      expect(r.detail).toContain('tags: ["one", "two"]')
+      // The old failure mode leaked module internals to a tool caller.
+      expect(r.detail).not.toContain("is not a function")
+      expect(r.detail).not.toContain("init.tags")
+    })
+
+    test("a JSON-encoded array is refused rather than parsed — and says so", async () => {
+      const r = await createIdea(dir, { title: "x", tags: '["a","b"]' as unknown as string[] })
+      if (r.ok) throw new Error("expected refusal")
+      expect(r.detail).toContain("JSON-ENCODED")
+      // It must NOT offer the wrap-it correction here: wrapping would produce
+      // one absurd tag whose text is the JSON source.
+      expect(r.detail).not.toContain('If you meant a single entry')
+    })
+
+    test("a non-string ELEMENT is refused too, and is located by index", async () => {
+      const r = await createIdea(dir, { title: "x", tags: ["ok", 7] as unknown as string[] })
+      expect(!r.ok && r.reason).toBe("BAD_ARRAY_ELEMENT")
+      expect(!r.ok && r.detail).toContain("tags[1]")
+      expect(listItems(dir)).toHaveLength(0)
+    })
+
+    test("well-formed tags still pass — the guard rejects, it does not block everything", async () => {
+      const r = await mkIdea(dir, { title: "x", tags: ["hive-board", "tooling"] })
+      expect(r.item.tags).toEqual(["hive-board", "tooling"])
+    })
+  })
+
+  describe("create — subtasks (broken at BOTH layers, so guarded at both)", () => {
+    test("a string container is refused at the module", async () => {
+      const r = await createIdea(dir, {
+        title: "x",
+        subtasks: "step one" as unknown as { content: string; status: "pending" }[],
+      })
+      expect(!r.ok && r.reason).toBe("NOT_AN_ARRAY")
+      expect(listItems(dir)).toHaveLength(0)
+    })
+
+    test("an array of BARE STRINGS is refused — a container check alone would have let this through", async () => {
+      // This is the case that proves Array.isArray is not a sufficient fix:
+      // the container is a perfectly good array and the old code still threw
+      // (`s.content.trim` of undefined) because entries must be records.
+      const r = await createIdea(dir, {
+        title: "x",
+        subtasks: ["step one"] as unknown as { content: string; status: "pending" }[],
+      })
+      expect(!r.ok && r.reason).toBe("BAD_ARRAY_ELEMENT")
+      expect(!r.ok && r.detail).toContain("subtasks[0]")
+      // and it tells a module caller the converted shape to send
+      expect(!r.ok && r.detail).toContain('content: "step one"')
+      expect(listItems(dir)).toHaveLength(0)
+    })
+
+    test("well-formed subtask records still pass", async () => {
+      const r = await mkIdea(dir, {
+        title: "x",
+        subtasks: [{ content: "step one", status: "pending" }],
+      })
+      expect(r.item.subtasks).toHaveLength(1)
+    })
+  })
+
+  describe("tag — add / remove", () => {
+    for (const field of ["add", "remove"] as const) {
+      test(`${field} as a bare string is refused NOT_AN_ARRAY`, async () => {
+        const { item } = await mkIdea(dir, { title: "target", tags: ["keep"] })
+        const r = await editItemTags(dir, item.id, {
+          [field]: "hive-board",
+        } as unknown as { add?: string[] })
+        expect(!r.ok && r.reason).toBe("NOT_AN_ARRAY")
+        expect(!r.ok && r.detail).toContain(`${field} must be an ARRAY`)
+        // the item is untouched
+        expect(readItem(dir, item.id)!.tags).toEqual(["keep"])
+      })
+    }
+
+    test("a malformed arg outranks a MISSING item — the caller learns both problems in one call", async () => {
+      // Before the fix this returned NOT_FOUND (readItem short-circuited
+      // inside the lock, before the throw site), so a caller fixed the id and
+      // only THEN met the TypeError. The shape check now runs before the lock.
+      const r = await editItemTags(dir, "WI-999", { add: "x" } as unknown as { add?: string[] })
+      expect(!r.ok && r.reason).toBe("NOT_AN_ARRAY")
+    })
+
+    test("well-formed deltas still pass", async () => {
+      const { item } = await mkIdea(dir, { title: "target", tags: ["keep"] })
+      const r = await editItemTags(dir, item.id, { add: ["added"], remove: ["keep"] })
+      expect(r.ok && r.item.tags).toEqual(["added"])
+    })
+  })
+})
+
 describe("respec — retention is structural", () => {
   test("prior body is archived content-addressed and is byte-recoverable", async () => {
     const { item } = await mkIdea(dir, { title: "T", body: "ORIGINAL SPEC" })

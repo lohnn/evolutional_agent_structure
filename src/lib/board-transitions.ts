@@ -103,6 +103,137 @@ export const TAG_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
  * owner (WI-065, 2026-08-04). TypeScript had narrowed the value to the enum
  * and thereby argued that this check was redundant. It was not.
  */
+/** What actually arrived, for a refusal message. `null` and arrays are not "object". */
+function argType(v: unknown): string {
+  if (v === null) return "null"
+  if (Array.isArray(v)) return "array"
+  return typeof v
+}
+
+/** ≤60 chars of the offending value so the caller recognises it — never a dump. */
+function argPreview(v: unknown): string {
+  let s: string
+  try {
+    s = typeof v === "string" ? v : (JSON.stringify(v) ?? String(v))
+  } catch {
+    s = String(v)
+  }
+  return s.length > 60 ? `${s.slice(0, 60)}…` : s
+}
+
+/**
+ * Refuse an argument that is not an array of strings — CONTAINER FIRST, then
+ * elements. Exported because both the plugin tool layer and this module need
+ * it: `hive_board_create`'s `subtasks` is consumed in `src/tools.ts` (a `.map`
+ * that converts `string[]` into records) BEFORE `createIdea` is ever called, so
+ * a module-only guard leaves that one arg still throwing.
+ *
+ * ── Why this exists at all: the declared schema is advertising ──────────────
+ * `tool.schema.array(tool.schema.string())` describes the argument to the model
+ * and infers a TypeScript type. It rejects NOTHING at runtime — `tool()` is the
+ * identity function and `tool.schema` is re-exported zod that nothing invokes.
+ * Whatever the model emits arrives as-is. This is the same defect class that
+ * put WI-065 on disk (a declared status enum that did not gate), one layer in:
+ * the WI-064/065 hardening validated tag CONTENTS (`TAG_PATTERN` per element)
+ * but never that the container was an array. `(xs ?? [])` defends against
+ * null/undefined and READS like a type guard, which is likely why the gap
+ * survived review — it is the shape of a check without being one.
+ *
+ * Reported from a live machine 2026-08-05 and reproduced here: `tags` as a bare
+ * string and as a JSON-encoded string both threw a raw TypeError naming an
+ * internal expression (`(init.tags ?? []).filter is not a function`), which
+ * surfaces to the caller as an "internal error" with no reason code and no
+ * guidance, and reads like a plugin bug rather than a malformed call.
+ *
+ * ── Why it REFUSES rather than coercing a string to a one-element array ─────
+ * Coercion is tempting for the bare case (`tags: "hive-board"` obviously means
+ * one tag) but there is no safe general rule, and the two observed inputs need
+ * OPPOSITE handling: `'["a","b"]'` coerced naively becomes a single absurd tag
+ * whose text is `["a","b"]`. That one happens to trip TAG_PATTERN afterwards —
+ * so it would be refused, but for the wrong reason, with a message pointing at
+ * tag syntax instead of at the real mistake. Guessing differently for two
+ * spellings of one error teaches an inconsistent contract, and for `subtasks`
+ * (records, not strings) there is no defensible coercion at all. A refusal that
+ * states the required shape is information; a coercion is a guess that writes
+ * to disk. Nothing here is unrecoverable for the caller — they retry with an
+ * array — so the conservative side is cheap.
+ *
+ * Returns `null` when the value is absent: every one of these args is optional.
+ */
+export function expectStringArray(field: string, value: unknown): TransitionErr | null {
+  if (value === undefined || value === null) return null
+  if (!Array.isArray(value)) {
+    const looksJson = typeof value === "string" && /^\s*\[/.test(value)
+    return {
+      ok: false as const,
+      reason: "NOT_AN_ARRAY",
+      detail:
+        `${field} must be an ARRAY of strings, but arrived as ${argType(value)}: ${argPreview(value)}. ` +
+        (looksJson
+          ? `That looks like a JSON-ENCODED array, and it is deliberately not parsed: unwrapping a string ` +
+            `because it resembles JSON would make this boundary guess at a transport problem, and a wrong ` +
+            `guess writes a corrupt value no later check can tell from an intended one. `
+          : `If you meant a single entry, wrap it in an array: ["${argPreview(value)}"]. `) +
+        `Correct shape: ${field}: ["one", "two"].`,
+    }
+  }
+  const at = value.findIndex((x) => typeof x !== "string")
+  if (at !== -1) {
+    return {
+      ok: false as const,
+      reason: "BAD_ARRAY_ELEMENT",
+      detail:
+        `${field}[${at}] must be a string, but is ${argType(value[at])}: ${argPreview(value[at])}. ` +
+        `Every entry in ${field} is a plain string; nested arrays and objects are not flattened or unwrapped.`,
+    }
+  }
+  return null
+}
+
+/**
+ * Refuse a `subtasks` value that is not an array of `{ content, status }`
+ * records. Separate from `expectStringArray` because the two layers genuinely
+ * differ in shape: the plugin tool accepts `string[]` from the model and maps
+ * it into records, so THIS module — the layer board-viewer and any direct
+ * caller reach — must validate the RECORD form.
+ *
+ * The likeliest mistake is therefore an array of bare strings, which is
+ * well-formed as an array and still threw (`s.content.trim` of undefined)
+ * before this existed. That case is called out by name: a container check
+ * alone would have passed it straight through to the same crash, which is why
+ * "is it an array" was never a sufficient fix.
+ */
+export function expectSubtaskArray(field: string, value: unknown): TransitionErr | null {
+  if (value === undefined || value === null) return null
+  if (!Array.isArray(value)) {
+    return {
+      ok: false as const,
+      reason: "NOT_AN_ARRAY",
+      detail:
+        `${field} must be an ARRAY, but arrived as ${argType(value)}: ${argPreview(value)}. ` +
+        `Correct shape: ${field}: [{ content: "step one", status: "pending" }].`,
+    }
+  }
+  const at = value.findIndex(
+    (s) => typeof s !== "object" || s === null || typeof (s as { content?: unknown }).content !== "string"
+  )
+  if (at !== -1) {
+    const el = value[at]
+    return {
+      ok: false as const,
+      reason: "BAD_ARRAY_ELEMENT",
+      detail:
+        `${field}[${at}] must be a record with a string \`content\`, but is ${argType(el)}: ${argPreview(el)}. ` +
+        (typeof el === "string"
+          ? `A bare string is the common mistake here: the hive_board_create TOOL accepts subtasks as plain ` +
+            `strings and converts them for you, but this module is the shared write path and takes the ` +
+            `converted form. Send [{ content: ${JSON.stringify(el)}, status: "pending" }].`
+          : `Correct shape: ${field}: [{ content: "step one", status: "pending" }].`),
+    }
+  }
+  return null
+}
+
 function validateCreateInit(init: CreateIdeaInit): TransitionErr | null {
   if (init.title.trim() === "") {
     return { ok: false as const, reason: "EMPTY_TITLE", detail: "A work item needs a title." }
@@ -124,6 +255,16 @@ function validateCreateInit(init: CreateIdeaInit): TransitionErr | null {
       detail: `Invalid priority "${init.priority}" — use low, medium or high.`,
     }
   }
+  // CONTAINER BEFORE CONTENTS. The two checks below inspect elements, and
+  // every one of them is a method call that throws on a non-array. That
+  // ordering is the entire bug this pair of guards fixes: the content checks
+  // existed and looked thorough, but they were reached with an unvalidated
+  // container, so a malformed arg crashed instead of being refused.
+  const badTagsShape = expectStringArray("tags", init.tags)
+  if (badTagsShape) return badTagsShape
+  const badSubtasksShape = expectSubtaskArray("subtasks", init.subtasks)
+  if (badSubtasksShape) return badSubtasksShape
+
   const badTags = (init.tags ?? []).filter((t) => !TAG_PATTERN.test(t))
   if (badTags.length > 0) {
     return {
@@ -692,6 +833,19 @@ export function editItemTags(
   delta: { add?: string[]; remove?: string[] },
   _opts: RespecOptions = {}
 ): Promise<TransitionResult> {
+  // Shape is checked BEFORE the lock and before readItem, deliberately, for two
+  // reasons. It is a pure argument check that needs no board state, so taking a
+  // 5 s-timeout lock to perform it can make a concurrent WRITE fail for a call
+  // that was never going to write. And it fixes the order in which a caller
+  // learns things: previously a malformed `add` on an id that does not exist
+  // reported NOT_FOUND, so the caller fixed the id and only then met the
+  // TypeError — two round trips for one malformed call. A malformed argument
+  // now outranks a missing target.
+  const badAdd = expectStringArray("add", delta.add)
+  if (badAdd) return Promise.resolve(badAdd)
+  const badRemove = expectStringArray("remove", delta.remove)
+  if (badRemove) return Promise.resolve(badRemove)
+
   return withBoardLock(directory, () => {
     const item = readItem(directory, id)
     if (!item) {
