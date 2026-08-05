@@ -62,6 +62,7 @@ import {
   respecItem,
   retitleItem,
   editItemTags,
+  expectStringArray,
   sdkSessionClient,
   type SdkLikeClient,
 } from "./lib/board-transitions.js"
@@ -460,6 +461,14 @@ export function createHiveTools(
         }
         const title = args.title.trim()
         if (title === "") return "Refused (EMPTY_TITLE): title is required and cannot be empty."
+        // `subtasks` MUST be shape-checked here, not only in the module: the
+        // `.map` below converts string[] into records and runs BEFORE
+        // createIdea, so a module-only guard leaves this arg still throwing a
+        // raw TypeError. `tags` is deliberately NOT duplicated here — it is
+        // passed through untouched and the module refuses it with the same
+        // message, and a second copy of a guard is a second thing to drift.
+        const badSubtasks = expectStringArray("subtasks", (args as Record<string, unknown>).subtasks)
+        if (badSubtasks) return `Refused (${badSubtasks.reason}): ${badSubtasks.detail}`
         const result = await createIdea(directory, {
           title,
           ...(args.body !== undefined ? { body: args.body } : {}),
