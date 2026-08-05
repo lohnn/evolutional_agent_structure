@@ -23,6 +23,7 @@ import { tickEnergy } from "./lib/energy.js"
 import { executeReconcile, formatReconcileReport } from "./lib/board-reconcile.js"
 import { buildLivePlan, defaultDbPath, backfillTitlesFromDb } from "./lib/board-reconcile-db.js"
 import { NervousSystem } from "./lib/nervous-system.js"
+import { loadModelCatalog, resolveAgentModel } from "./lib/model-resolve.js"
 import { createHiveTools } from "./tools.js"
 import {
   createEventHook,
@@ -168,15 +169,47 @@ export const HivePlugin: Plugin = async function (ctx: PluginInput) {
         config.agent = config.agent || {}
         config.command = config.command || {}
 
+        // Model resolution (see lib/model-resolve.ts). Agent frontmatter names
+        // the MODEL; the provider prefix comes from this machine's own default
+        // model, because which provider a user has auth for is a property of
+        // their machine, not of the agent. Catalog loaded ONCE, outside the
+        // loop — it is memoized, but the intent should be visible here too.
+        const catalog = loadModelCatalog()
+        const modelDecisions: Record<string, string> = {}
+
         const agents = readMdDir(AGENTS_DIR)
         for (const agent of agents) {
           const fm = agent.frontmatter
+          const spec = typeof fm.model === "string" ? fm.model : undefined
+          const resolved = resolveAgentModel({
+            agentName: agent.name,
+            spec,
+            defaultModel: typeof config.model === "string" ? config.model : undefined,
+            catalog,
+          })
           config.agent[agent.name] = {
             description: (fm.description as string) || "",
             prompt: agent.body.trim(),
             mode: ((fm.mode as string) || "subagent") as "subagent" | "primary" | "all",
-            ...((fm.model as string) && { model: fm.model as string }),
+            ...(resolved.model && { model: resolved.model }),
             ...((fm.permission as Record<string, string>) && { permission: fm.permission as Record<string, string> }),
+          }
+          modelDecisions[agent.name] = resolved.model ?? "(inherited)"
+          // Log ONLY where a decision was actually made. An agent with no
+          // model: inherits by design and says nothing; the agents that asked
+          // for something are the ones whose outcome is worth reading — this
+          // line is the diagnostic a user reads when an agent misbehaves on a
+          // machine with different providers, so it carries the spec, the
+          // outcome and the reason together.
+          if (spec !== undefined || resolved.model !== undefined) {
+            log("info", `[model] ${agent.name}: ${resolved.model ?? "inherited (no model registered)"}`, {
+              agent: agent.name,
+              frontmatter: spec ?? "(none)",
+              resolved: resolved.model ?? "(inherited)",
+              defaultModel: config.model ?? "(unset)",
+              catalog: catalog ? "loaded" : "unavailable",
+              reason: resolved.reason,
+            })
           }
         }
 
@@ -197,6 +230,7 @@ export const HivePlugin: Plugin = async function (ctx: PluginInput) {
 
         log("info", `HIVE config registered`, {
           agents: agents.map((a) => a.name),
+          models: modelDecisions,
           commands: commands.map((c) => c.name),
           rules: ["delegation.md (via system.transform)", "hivemind-capabilities.md (via system.transform)"],
         })

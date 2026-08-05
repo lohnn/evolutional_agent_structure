@@ -32,6 +32,48 @@ bun run board      # start the viewer locally (binds 127.0.0.1)
 Under node/tsx the tests fail with a misleading `ERR_UNSUPPORTED_ESM_URL_SCHEME` that looks like a
 regression but is not.
 
+## Agent frontmatter names the MODEL, not the provider
+
+**Write `model: claude-sonnet-5`, never `model: anthropic/claude-sonnet-5`.**
+
+This package is distributed. Which provider a user has auth for is a property of *their machine*,
+not of the agent — a hardcoded `anthropic/` prefix simply breaks the agent on a machine with only
+GitHub Copilot. It is a prefix problem and not a model-mapping one: in the models.dev catalog the
+model *name* is identical across providers (`anthropic` and `github-copilot` both expose a model
+literally called `claude-sonnet-5`), so the name travels and only the prefix has to be supplied
+locally. `src/lib/model-resolve.ts` supplies it at config time.
+
+| Frontmatter | Resolves to |
+|---|---|
+| *(no `model:`)* | nothing registered — the agent **inherits the session's model** |
+| `claude-sonnet-5` | `<provider of the machine's default model>/claude-sonnet-5` |
+| `anthropic/claude-sonnet-5` | **exactly that** — a `/` means "pin this, I mean it", passed through untouched |
+
+Two rules the resolver never breaks:
+
+- **`HIVE_MODEL_<AGENT>` overrides everything**, verbatim and unvalidated — e.g.
+  `HIVE_MODEL_DREAMCATCHER=github-copilot/gpt-5.1`. Non-alphanumerics in the agent name become
+  underscores (`board-viewer` → `HIVE_MODEL_BOARD_VIEWER`). It is an escape hatch; it does not
+  second-guess you.
+- **Every failure degrades to inherit, never to a guessed provider.** No default model, a default
+  with no `provider/` prefix, or a catalog that positively says the provider lacks that model — all
+  register no model, so the agent runs on the session's model, which is by definition a working one.
+
+The models.dev catalog (`~/.cache/opencode/models.json`, XDG and macOS paths also checked) is used
+**best-effort only**: absent, unreadable or missing that provider all resolve *optimistically* to
+the composed id and let opencode be the judge. Only a positive "provider is present AND lacks this
+model" drops to inherit. A stale cache must never silently unpin every agent.
+
+**The provider comes from `config.model`, which is only populated by a config FILE** — verified
+empirically: a `-m/--model` CLI flag does *not* feed it, and there is no global "last selected
+model" state a plugin can see. So a machine that picks its model interactively rather than in
+`opencode.json` will see every bare-name agent inherit. That is safe, not broken — but if you want
+the pin honoured there, put `"model": "<provider>/<model>"` in `opencode.json`.
+
+Every decision is logged at info as `[model] <agent>: <outcome>` with the frontmatter spec, the
+machine's default, whether the catalog loaded, and the reason. That line is the diagnostic to read
+first when an agent misbehaves on a new machine.
+
 ## Guards that are load-bearing
 
 `test/entrypoint-isolation.test.ts` enforces three invariants that are otherwise invisible until
