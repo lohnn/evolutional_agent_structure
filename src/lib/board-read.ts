@@ -56,10 +56,18 @@
  * kanban column's. board-viewer's `sortForColumn` stays where it is; a shared
  * module that one caller ignores is worse than no shared module, because it
  * advertises a contract that is not real.
+ *
+ * `computeProblems` (lib/board-invariants.ts) is shared for the same reason
+ * `recencyKey` is: an invariant violation is a FACT. It arrived here in WI-071
+ * for a reason worth stating — it was computed per CARD in the viewer, so
+ * "which items are in an illegal state" was a board-wide question no surface
+ * could answer. That is what the ⚠ marker and header count below exist to fix,
+ * and why `checkImpossible` no longer has to hand out a manual workaround.
  */
 
 import type { WorkItem, WorkItemPriority, WorkItemStatus } from "./board-store.js"
 import { recencyKey } from "./board-recency.js"
+import { computeProblems } from "./board-invariants.js"
 import { tokenise } from "./text-tokens.js"
 
 // ── Result contract ───────────────────────────────────────────────────────────
@@ -216,9 +224,15 @@ function isRefusal(v: unknown): v is Refusal {
  *
  * Note what the refusal text has to admit: the invariant constrains what is
  * LEGAL, not what is on disk — WI-065 really was written as in_progress with a
- * null owner. So the message points at the way to hunt exactly that (list the
- * status and read the owner column, which marks un-owned items) rather than
- * leaving a violation-hunter with nowhere to go.
+ * null owner. A caller filtering this way may therefore be legitimately HUNTING
+ * corruption, and a refusal that only says "impossible" blinds exactly them.
+ *
+ * WI-071 changed what this refusal can offer. It used to route such a caller at
+ * a MANUAL WORKAROUND — "read the owner column, un-owned rows are marked —" —
+ * which was honest but was, in its author's own words, a workaround for the
+ * absence of `problems[]` on this surface. That absence is now closed: the
+ * violation marker and header count are a real answer, so the refusal points at
+ * them instead. It still must never read as "no such state exists".
  */
 function checkImpossible(status: StatusFilter, owner: OwnerFilter): Refusal | null {
   if (status === "in_progress" && owner === "none") {
@@ -228,8 +242,12 @@ function checkImpossible(status: StatusFilter, owner: OwnerFilter): Refusal | nu
         `an empty list here would read as "nothing in progress", which is a different and false claim.\n` +
         `  • To see work in flight:      status="in_progress" (owner filter omitted)\n` +
         `  • To see un-owned work:       owner="none" (status "live" covers backlog + todo)\n` +
-        `  • To HUNT invariant violations (illegal states do reach disk — WI-065 did): ` +
-        `status="in_progress" with no owner filter, then read the owner column — un-owned rows are marked "—".`
+        `  • To HUNT invariant violations: a schema invariant constrains what is LEGAL, never what is STORED. ` +
+        `Illegal states DO reach disk — WI-065 was written in precisely this state — so this filter is refused ` +
+        `for asking an unanswerable question, NOT because the state cannot exist. You do not need a filter to ` +
+        `find them: EVERY hive_board_list call already checks, counts violations in its header line, and marks ` +
+        `each violating row "⚠" with the invariant it breaks. Run status="all" (widest net, done items included) ` +
+        `and read the header. hive_board_read shows the same per named item.`
     )
   }
   if ((status === "backlog" || status === "todo") && owner === "owned") {
@@ -331,6 +349,12 @@ export function listBoard(items: WorkItem[], opts: ListOptions = {}): ListResult
     .sort(byReadOrder)
 
   const shown = matched.slice(0, limit)
+  // Invariant violations are counted over EVERYTHING MATCHED, not just the
+  // rendered page: "how many items are in an illegal state" is the board-wide
+  // question this surface exists to answer, and a count that silently excluded
+  // what `limit` cut would answer a narrower question under the same name.
+  const problemsOf = new Map(matched.map((it) => [it.id, computeProblems(it)]))
+  const violating = matched.filter((it) => problemsOf.get(it.id)!.length > 0)
   const counts: Record<string, number> = {}
   for (const it of matched) counts[it.status] = (counts[it.status] ?? 0) + 1
   const breakdown =
@@ -345,6 +369,13 @@ export function listBoard(items: WorkItem[], opts: ListOptions = {}): ListResult
       `(status=${status}, owner=${owner}, priority=${priority}).`
   )
   lines.push(`  ${breakdown}`)
+  if (violating.length > 0) {
+    lines.push(
+      `  ⚠ ${violating.length} of ${matched.length} matched item${violating.length === 1 ? " is" : "s are"} ` +
+        `in an ILLEGAL state (SCHEMA §3): ${violating.map((it) => it.id).join(", ")} — marked ⚠ below. ` +
+        `Detection only; the state is on disk and repairing it is a separate decision.`
+    )
+  }
   if (status === "live") {
     lines.push(`  Done items are EXCLUDED by default — pass status="all" to include them.`)
   }
@@ -358,10 +389,15 @@ export function listBoard(items: WorkItem[], opts: ListOptions = {}): ListResult
     )
     for (const it of shown) {
       const tags = it.tags.length > 0 ? `  [${it.tags.join(", ")}]` : ""
+      const problems = problemsOf.get(it.id)!
+      // The violation text rides on the row rather than being a bare glyph:
+      // violating rows are rare by construction, and "⚠" alone would send the
+      // reader to hive_board_read just to learn WHICH invariant broke.
+      const mark = problems.length > 0 ? `  ⚠ ILLEGAL: ${problems.join("; ")}` : ""
       lines.push(
         `  ${pad(it.id, 7)}${pad(it.status, 13)}${pad(PRIORITY_SHORT[it.priority], 6)}` +
           `${pad(shortSession(it.owner_session), 12)}${pad(recencyKey(it).slice(0, 10), 12)}` +
-          `${pad(formatBytes(it.body.length), 6)}${it.title}${tags}`
+          `${pad(formatBytes(it.body.length), 6)}${it.title}${tags}${mark}`
       )
     }
   }
@@ -574,6 +610,18 @@ function renderItem(it: WorkItem): string {
     `  status     ${it.status}${it.paused ? " (PAUSED)" : ""} · owner ${it.owner_session ?? "none"}` +
       (it.group_id ? ` · group ${it.group_id}` : "")
   )
+  // Directly under `status`, because every checked invariant is a claim about
+  // the status/owner/dream fields on the line above — the violation is only
+  // legible next to the state that violates it.
+  const problems = computeProblems(it)
+  if (problems.length > 0) {
+    for (const p of problems) lines.push(`  ⚠ ILLEGAL  ${p}`)
+    lines.push(
+      `             This item VIOLATES SCHEMA §3. The schema constrains what is LEGAL, never what is ` +
+        `STORED, so this is a real record in a forbidden state — not a parse error. Reported, never ` +
+        `repaired: do not "fix" it as a side effect of having read it.`
+    )
+  }
   lines.push(
     `  priority   ${it.priority} · origin ${it.origin} · tags ${it.tags.length > 0 ? it.tags.join(", ") : "(none)"}`
   )
