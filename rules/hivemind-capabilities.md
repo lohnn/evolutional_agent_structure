@@ -74,3 +74,7 @@ Honor that priming:
 Even if your dispatch prompt doesn't explicitly name a peer, if you discover a dependency on another stack's contract, signal across it rather than inventing one.
 
 **Delivery is eventually consistent**: if your peer was dispatched at the same time as you, their session may not be registered when your first signal fires. The message queues and delivers on their next tool turn. Don't stall — signal early, keep working, and integrate when the answer arrives.
+
+## Sender-side view
+
+`hive_sent` shows every message YOU sent that was never read — with per-message staleness (live vs sediment) and, for broadcasts, how many sessions received it live. Use it to check whether a question you sent is still unanswered before re-sending or escalating. `hive_retire` (dry-run by default) lists and retires stale sediment — dissolved senders, ancient pending — into an audited `retired/` archive; it never deletes and never bulk-marks-read.

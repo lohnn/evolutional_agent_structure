@@ -1,5 +1,6 @@
 /**
  * HIVE custom tools: hive_signal, hive_listen, hive_awaken,
+ *                    hive_sent, hive_retire,
  *                    hive_board_list, hive_board_search, hive_board_read,
  *                    hive_board_bind, hive_board_create, hive_board_respec,
  *                    hive_board_retitle, hive_board_tag, hive_board_start,
@@ -15,7 +16,13 @@
 
 import { tool } from "@opencode-ai/plugin"
 import type { createOpencodeClient } from "@opencode-ai/sdk"
-import { formatInboxForPrompt } from "./lib/hivemind.js"
+import {
+  formatInboxForPrompt,
+  sweepInboxes,
+  retireMessage,
+  readRetirementLog,
+  staleSignals,
+} from "./lib/hivemind.js"
 import type { NervousSystem } from "./lib/nervous-system.js"
 import { appendResidue, harvestJournals, formatHarvestForDreamer, type ResidueKind } from "./lib/dream-journal.js"
 import { appendPainpoint, listPainpoints, formatPainpointsForReview, harvestPainpoints, formatPainpointsForHarvest } from "./lib/painpoint-journal.js"
@@ -224,8 +231,12 @@ export function createHiveTools(
 
         const formatted = formatInboxForPrompt(pending)
         if (args.mark_read) {
-          ns.acknowledgeMessages(agent)
-          if (isCoordinator) ns.acknowledgeMessages("_coordinator")
+          // SWEEP-ONLY-SHOWN (WI-051): mark read ONLY the messages this
+          // group-filtered read would have shown. Other session groups'
+          // messages stay pending for their own lineage — a capability in
+          // group B must never retire group A's work it was never shown.
+          ns.acknowledgeMessages(agent, groupID)
+          if (isCoordinator) ns.acknowledgeMessages("_coordinator", groupID)
         }
 
         return formatted || "No pending messages."
@@ -281,6 +292,138 @@ export function createHiveTools(
         }
 
         return "HIVE awakened for this session. Capability dispatch and HIVEmind messaging are now active." + boardNote
+      },
+    }),
+
+    // ── Sender-side unread dashboard (WI-051 C) ──────────────────────────────
+
+    hive_sent: tool({
+      description:
+        "Sender-side queue dashboard (per I-028: a dashboard, not a raw dump): every message YOU sent that was never read, with per-message staleness so live is told from sediment. " +
+        "Handles the coordinator's TWO inboxes transparently — a coordinator reads inbox/<name>/ AND inbox/_coordinator/, so this view scans all recipient buckets and never splits the truth across them. " +
+        "Broadcasts report their aggregate receipt (delivered to N sessions live). " +
+        "Status is read from the message FILE on disk: 'delivered, unread' means injected live but never acknowledged (W-119); 'pending' means never reached. " +
+        "Stale (sediment) messages are excluded from delivery but NOT deleted — retire them explicitly with hive_retire.",
+      args: {},
+      async execute(_args, context) {
+        const sender = ns.resolveAgent(context.sessionID, context.agent)
+        if (!sender) {
+          return "Warning: could not resolve your agent identity from this session — cannot build a sender-side view."
+        }
+        return ns.buildSentView(sender)
+      },
+    }),
+
+    // ── Retirement tool (WI-051 B) ───────────────────────────────────────────
+    //
+    // Retire = MOVE out of the active inbox into retired/, with an individual
+    // justification and an append-only audit trail. NOT bulk-mark-read, NOT
+    // delete. Every retired message names the staleness signal(s) that fired —
+    // or, for an explicit force-retire, shows signals:[] in the audit entry so
+    // the anomaly is greppable rather than silent.
+    //
+    // The audit trail lives at .opencode/hivemind/retirement-log.jsonl — the
+    // hivemind ROOT, not inside inbox/ or retired/ (W-124: a record placed at
+    // the location being retired is not durable). The entry shape is frozen
+    // (W-126): one shape, v:1, no versioning escape hatch.
+
+    hive_retire: tool({
+      description:
+        "Retire stale HIVEmind messages: MOVE them out of the active inbox into retired/<recipient>/, with an INDIVIDUAL justification per message and an append-only audit trail at .opencode/hivemind/retirement-log.jsonl. " +
+        "This is NOT deletion and NOT bulk-mark-read — a retired message is preserved, inspectable, and the audit entry records WHY (which staleness signal fired, who retired it, when). " +
+        "Call with NO message argument to DRY-RUN: lists every stale message the sweep finds with its signal(s), changing nothing. Then retire a named subset by passing their filenames. " +
+        "A reason is REQUIRED to retire — the audit trail must justify each retirement individually (the spec's non-negotiable). " +
+        "Staleness signals: dissolved-sender (sender capability no longer on disk — STRONG), age (pending > 30 days — WEAK, surfaced but never sufficient alone for auto-exclusion).",
+      args: {
+        messages: tool.schema.array(tool.schema.string()).optional().describe(
+          "Filenames to retire, e.g. [\"hive-infra/msg_20260710_abc.json\"] (recipient/file). Omit to dry-run: list all stale candidates without touching anything."
+        ),
+        reason: tool.schema.string().optional().describe(
+          "REQUIRED when retiring. The justification recorded in the audit trail for every message in this batch, e.g. 'sender dissolved, question moot'. Retiring without a reason is refused."
+        ),
+        include_age_only: tool.schema.boolean().optional().describe(
+          "Include messages whose ONLY signal is age (weak). Default false: the dry-run and retirement act only on STRONG-signal (dissolved-sender) messages unless you opt in. Age alone is sediment, not proof of mootness."
+        ),
+      },
+      async execute(args, context) {
+        // ── IMPERATIVE validation (SHADOW-026/W-133) ──────────────────────
+        // tool.schema validates NOTHING at runtime; everything the model
+        // emits arrives here. Validate by hand, before any disk write.
+        const caller = ns.resolveAgent(context.sessionID, context.agent) ?? "unknown"
+        const raw = args as Record<string, unknown>
+
+        if (raw.messages !== undefined) {
+          if (!Array.isArray(raw.messages) || raw.messages.some((m) => typeof m !== "string")) {
+            return "Refused (BAD_MESSAGES): messages must be an array of strings, each \"<recipient>/<filename>\"."
+          }
+        }
+        if (raw.reason !== undefined && typeof raw.reason !== "string") {
+          return "Refused (BAD_REASON): reason must be a string."
+        }
+        if (raw.include_age_only !== undefined && typeof raw.include_age_only !== "boolean") {
+          return "Refused (BAD_FLAG): include_age_only must be a boolean."
+        }
+
+        const messages = (raw.messages as string[] | undefined) ?? []
+        const reason = (raw.reason as string | undefined)?.trim() ?? ""
+        const includeAgeOnly = raw.include_age_only === true
+
+        // Evaluate the sweep once, lazily (W-064), scoped to this session's
+        // group so a capability only ever retires its own lineage's sediment.
+        const groupID = ns.getGroupID(context.sessionID)
+        const sweep = sweepInboxes(directory, groupID)
+        const candidates = sweep.filter((e) => {
+          if (e.staleness.stale) return true // strong signal(s) present
+          if (includeAgeOnly && e.staleness.weak.includes("age")) return true
+          return false
+        })
+
+        // DRY-RUN: no messages named → show what WOULD be retired.
+        if (messages.length === 0) {
+          if (candidates.length === 0) {
+            return `No stale messages found${groupID ? ` in this session group` : ""}${includeAgeOnly ? "" : " (age-only messages hidden — pass include_age_only:true to see them)"}.`
+          }
+          const lines = [`Stale-message sweep (DRY RUN — nothing moved)${groupID ? ` — group ${groupID}` : ""}:\n`]
+          for (const c of candidates) {
+            const sigs = staleSignals(c.staleness).join(", ")
+            lines.push(`- ${c.recipient}/${c.file}  [${sigs}]`)
+            lines.push(`  from \`${c.msg.sender}\` (${c.msg.type}, ${c.msg.timestamp.slice(0, 10)}): ${c.msg.content.replace(/\s+/g, " ").slice(0, 70)}…`)
+          }
+          lines.push(``)
+          lines.push(`To retire, call hive_retire with messages:["<recipient>/<file>", ...] and a reason.`)
+          return lines.join("\n")
+        }
+
+        // RETIRE: reason is mandatory.
+        if (reason === "") {
+          return "Refused (REASON_REQUIRED): retiring messages requires a reason — the audit trail justifies each retirement individually."
+        }
+
+        const byKey = new Map(candidates.map((c) => [`${c.recipient}/${c.file}`, c]))
+        const results: string[] = []
+        let retired = 0
+        for (const key of messages) {
+          const entry = byKey.get(key)
+          if (!entry) {
+            results.push(`✗ ${key} — not a current stale candidate (wrong name, already retired, or not stale${includeAgeOnly ? "" : " under the strong-signal filter"})`)
+            continue
+          }
+          const sigs = staleSignals(entry.staleness)
+          const rec = retireMessage(directory, entry.recipient, entry.file, {
+            signals: sigs,
+            retiredBy: caller,
+            reason,
+          })
+          if (rec.ok) {
+            retired++
+            results.push(`✓ ${key} — retired (${sigs.join(", ") || "forced"})`)
+          } else {
+            results.push(`✗ ${key} — ${rec.detail}`)
+          }
+        }
+        results.push(``)
+        results.push(`${retired}/${messages.length} retired. Audit trail: .opencode/hivemind/retirement-log.jsonl (${readRetirementLog(directory).length} entries).`)
+        return results.join("\n")
       },
     }),
 

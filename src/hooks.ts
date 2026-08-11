@@ -10,7 +10,6 @@ import fs from "fs"
 import type { createOpencodeClient } from "@opencode-ai/sdk"
 import { snapshotAgentsMtime, snapshotChanged } from "./lib/reload.js"
 import { tickEnergy, getCapabilitiesSummary } from "./lib/energy.js"
-import { listPendingInboxes } from "./lib/hivemind.js"
 import { refreshOwnerTitle } from "./lib/board-store.js"
 import { recentPreCompactionDreams, type PreCompactionDream } from "./lib/dream-state.js"
 import type { NervousSystem } from "./lib/nervous-system.js"
@@ -79,31 +78,15 @@ export function createEventHook(ctx: HooksContext) {
       ns.markIdle(props.sessionID)
 
       // If this was a capability session, check for pending unrouted messages
-      // and wake the coordinator so it can route them
+      // and wake the coordinator so it can route them. The block shape (and
+      // its live-vs-stale bucketing, WI-051 D) is rendered ONCE in
+      // ns.formatRoutingNeeded — the two routing sites had already drifted.
       if (ns.isCapabilitySession(props.sessionID)) {
         const capName = ns.resolveAgent(props.sessionID)
         const capGroupID = ns.getGroupID(props.sessionID)
-        const pendingInboxes = listPendingInboxes(directory, capGroupID)
-        // Find messages that need coordinator attention: _coordinator inbox or
-        // capabilities that are not currently active
-        const needsRouting = pendingInboxes.filter(({ recipient }) => {
-          if (recipient === "_coordinator") return true
-          if (recipient === "_broadcast") return false
-          // Check if that capability has an active session in this group
-          return true
-        })
-
-        if (needsRouting.length > 0) {
-          const lines = needsRouting.map(({ recipient, count }) => {
-            if (recipient === "_coordinator") {
-              return `- _coordinator: ${count} message(s) [FOR YOU]`
-            }
-            const capPath = path.join(directory, ".opencode/agents/capabilities", `${recipient}.md`)
-            const exists = fs.existsSync(capPath)
-            const status = exists ? "CAPABILITY EXISTS, INACTIVE" : "CAPABILITY DOES NOT EXIST (spawn signal)"
-            return `- ${recipient}: ${count} message(s) [${status}]`
-          })
-          const reason = `Capability ${capName} completed. Pending routing needed:\n${lines.join("\n")}`
+        const block = ns.formatRoutingNeeded(capGroupID)
+        if (block) {
+          const reason = `Capability ${capName} completed. Pending routing needed:\n${block}`
           ns.wakeCoordinator(reason, props.sessionID).catch((err) => {
             log("error", `[HIVE] wakeCoordinator failed: ${String(err)}`)
           })
@@ -348,26 +331,12 @@ export function createToolExecuteAfterHook(ctx: HooksContext) {
     markCapabilityUsed(directory, capName, getActiveSessionId())
     debugLog(`[HIVE] Capability task completed: ${capName}`)
 
-    // Check for pending messages that need routing (scoped to caller's group)
+    // Check for pending messages that need routing (scoped to caller's group).
+    // Same shared renderer as the session.idle site — one shape, no drift.
     const callerGroupID = ns.getGroupID(input.sessionID)
-    const pendingInboxes = listPendingInboxes(directory, callerGroupID)
-    const needsRouting = pendingInboxes.filter(({ recipient }) => {
-      if (recipient === "_coordinator") return true
-      if (recipient === "_broadcast") return false
-      return true
-    })
-
-    if (needsRouting.length > 0) {
-      const lines = needsRouting.map(({ recipient, count }) => {
-        if (recipient === "_coordinator") return `- _coordinator: ${count} message(s) [FOR YOU]`
-        const capPath = path.join(directory, ".opencode/agents/capabilities", `${recipient}.md`)
-        const exists = fs.existsSync(capPath)
-        const status = exists ? "CAPABILITY EXISTS, INACTIVE" : "CAPABILITY DOES NOT EXIST (spawn signal)"
-        return `- ${recipient}: ${count} message(s) [${status}]`
-      })
-
-      // Append routing info to the task output so the coordinator sees it
-      output.output += `\n\n## HIVEmind — Routing Needed\n\n${lines.join("\n")}`
+    const block = ns.formatRoutingNeeded(callerGroupID)
+    if (block) {
+      output.output += `\n\n## HIVEmind — Routing Needed\n\n${block}`
     }
   }
 }
