@@ -338,6 +338,16 @@ export class NervousSystem {
     })
   }
 
+  /**
+   * Public seam over injectIntoSession for plugin-internal notices that are
+   * NOT HIVEmind messages (WI-081: the post-compaction dream-pointer digest).
+   * Same noReply prompt path; callers handle their own guard logic and
+   * error policy.
+   */
+  async injectNotice(sessionID: string, text: string): Promise<void> {
+    return this.injectIntoSession(sessionID, text)
+  }
+
   // ── Reading messages ──────────────────────────────────────────────────────
 
   readMessages(capabilityName: string, groupID?: string): ReturnType<typeof getInbox> {

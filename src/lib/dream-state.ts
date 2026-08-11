@@ -157,6 +157,60 @@ export function listActiveDreams(directory: string): string[] {
   }
 }
 
+// ── Pre-compaction dream discovery (WI-081) ──────────────────────────────────
+
+/** A completed pre-compaction dream, summarised for pointer digests. */
+export interface PreCompactionDream {
+  dreamId: string
+  intention: string
+  artifacts: string[]
+}
+
+/**
+ * Scan dreams/history/ for COMPLETE DRMs carrying `pre_compaction: true`,
+ * most recent first (by DRM number — ids are sequential, so numeric order IS
+ * chronological order), capped at `limit` (default 5).
+ *
+ * Attribution heuristic (I-182): DRM files carry no owning-session field, so
+ * this returns the workspace's most recent pre-compaction dreams rather than
+ * "this session's". That is deliberate: the digest is a POINTER (ids + how to
+ * re-query), not a mutation — showing one extra dream from a sibling session
+ * is harmless, and exact attribution would require mining the opencode
+ * transcript DB, which is over-engineering for a reminder. Never throws: an
+ * unreadable/missing history dir or an unparseable file is skipped.
+ */
+export function recentPreCompactionDreams(directory: string, limit = 5): PreCompactionDream[] {
+  const histDir = path.join(dreamsBase(directory), "history")
+  let files: string[]
+  try {
+    files = fs.readdirSync(histDir).filter((f) => /^DRM-\d+\.yaml$/.test(f))
+  } catch {
+    return []
+  }
+  // Numeric descending (newest dream first)
+  files.sort((a, b) => {
+    const na = parseInt(a.match(/^DRM-(\d+)/)![1]!, 10)
+    const nb = parseInt(b.match(/^DRM-(\d+)/)![1]!, 10)
+    return nb - na
+  })
+  const out: PreCompactionDream[] = []
+  for (const f of files) {
+    if (out.length >= limit) break
+    try {
+      const d = readDreamState(path.join(histDir, f))
+      if (d.pre_compaction !== true) continue
+      out.push({
+        dreamId: d.dream_id,
+        intention: typeof d.intention === "string" ? d.intention : "",
+        artifacts: [...(d.insights ?? []), ...(d.warnings ?? []), ...(d.songlines ?? []), ...(d.shadows ?? [])],
+      })
+    } catch {
+      continue // unparseable file — skip, never break the scan
+    }
+  }
+  return out
+}
+
 // ── Parser ────────────────────────────────────────────────────────────────────
 
 /**
