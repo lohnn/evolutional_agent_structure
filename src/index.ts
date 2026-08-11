@@ -224,15 +224,20 @@ export const HivePlugin: Plugin = async function (ctx: PluginInput) {
         }
 
         config.instructions = config.instructions || []
-        // Note: delegation.md and hivemind-capabilities.md are injected conditionally
-        // via system.transform (coordinator-only / capability-only, gated by /awaken).
-        // They are NOT added to config.instructions (which is static and global).
+        // Note: delegation.md, coordinator-dreams.md and hivemind-capabilities.md
+        // are injected conditionally via system.transform (coordinator-only /
+        // capability-only, gated by /awaken). They are NOT added to
+        // config.instructions (which is static and global — W-008).
 
         log("info", `HIVE config registered`, {
           agents: agents.map((a) => a.name),
           models: modelDecisions,
           commands: commands.map((c) => c.name),
-          rules: ["delegation.md (via system.transform)", "hivemind-capabilities.md (via system.transform)"],
+          rules: [
+            "delegation.md (via system.transform)",
+            "coordinator-dreams.md (via system.transform)",
+            "hivemind-capabilities.md (via system.transform)",
+          ],
         })
       } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.stack || err.message : String(err)

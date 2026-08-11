@@ -167,7 +167,7 @@ session's dispatch prompt.
 | `subtasks` | **A (canonical, authored)** | **author-written plan / decomposition stored on the item** (§4). The item file is its only source of truth — losing it is unrecoverable. Written at creation (`createItemUnlocked`) or hand-authored; **no `ItemEdit` primitive exists** (see §4b before adding one). Hand-authoring is *intended*, unlike every other field in this table |
 | `todo_mirror`, `todo_mirror_updated` | A (cached/mirrored, derived-rebuildable) | whole-replaced from the owning session's live TodoWrite by the board via the shared locked-storage edit (`ItemEdit.setTodoMirror`, identity-free — I-179); `todo_mirror_updated` is a **full-precision ISO-8601** stamp (I-191/W-081). Derived-rebuildable throwaway cache (I-105/I-113). **Never hand-edited** (§4b) |
 | `dream_id` | C (derived) | stamped by the **`hive_dream_begin` handler** — it resolves the calling session (`context.sessionID`), finds the item with matching `owner_session`, writes the new DRM id (DESIGN §5.4). File-scan detection is backfill/integrity fallback only |
-| `artifacts[]` | C (cached) | copied onto the item by the **`hive_dream_complete` handler** (same session→item lookup), so "what it produced" survives migration (§1a) |
+| `artifacts[]` | C (cached) | copied onto the item by the **`hive_dream_complete` handler** (same session→item lookup), so "what it produced" survives migration (§1a). Skipped for DRMs carrying `pre_compaction: true` (WI-080) — a mid-session consolidation dream completes and archives but never touches the item |
 | `done_without_dream` | A | explicit escape-hatch tool call only |
 | `transitions[]` | A (append-only) | every transition appends one entry; prior entries immutable (I-049) |
 
@@ -200,7 +200,9 @@ names may differ from status values, but this table binds them.
    top-level coordinator session (`parentID` absent). The board must never show In Progress without a
    resolvable owner in the session map, and never shows non-HIVE sessions at all.
 2. `status: done` requires either a `COMPLETE` DRM at `dream_id`, or `done_without_dream: true`
-   (which forces the `no-dream` badge).
+   (which forces the `no-dream` badge). Note the converse is NOT an invariant: a COMPLETE DRM
+   marked `pre_compaction: true` (WI-080) does not move its owning item — dream completion implies
+   done only for unflagged (end-of-work) dreams.
 3. `owner_session` and `group_id` are set **together, at bind/registration** (dream I-043).
 4. A backward move Done → In Progress **must** re-attach to the existing `owner_session` (same id,
    unarchiving if needed), not allocate a new session (dream I-042: true resumption by id).

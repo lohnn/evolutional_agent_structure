@@ -132,6 +132,7 @@ export function createSystemTransformHook(ctx: HooksContext) {
   // Cache rule file contents (they don't change during a session)
   let delegationContent: string | null = null
   let hivemindCapContent: string | null = null
+  let coordinatorDreamsContent: string | null = null
 
   return async (input: { sessionID?: string; model?: unknown }, output: { system: string[] }) => {
     const { ns, log, debugLog, rulesDir } = ctx
@@ -174,7 +175,8 @@ export function createSystemTransformHook(ctx: HooksContext) {
         debugLog(`[HIVE] system.transform injected messages for ${capName}`)
       }
     } else if (isCoordinator) {
-      // Coordinator: inject delegation rules + _coordinator messages + queue status
+      // Coordinator: inject delegation rules + dream hygiene guidance +
+      // _coordinator messages + queue status
       if (delegationContent === null) {
         try {
           delegationContent = fs.readFileSync(path.join(rulesDir, "delegation.md"), "utf8")
@@ -183,6 +185,23 @@ export function createSystemTransformHook(ctx: HooksContext) {
         }
       }
       if (delegationContent) output.system.push(delegationContent)
+
+      // Dream hygiene (WI-080): residue rhythm, dream-before-compaction, and
+      // the pre_compaction lifecycle flag. Ships WITH the plugin as a rules/
+      // asset (PACKAGE_ROOT via the same rulesDir mechanism as delegation.md)
+      // instead of workspace-local `config.instructions` files, which every
+      // workspace had to author by hand and which drifted (W-008). Injected
+      // here — the coordinator-only branch of system.transform (I-023/I-036) —
+      // so it can never leak into capability or generic subagent prompts
+      // (three-category injection rule, I-041).
+      if (coordinatorDreamsContent === null) {
+        try {
+          coordinatorDreamsContent = fs.readFileSync(path.join(rulesDir, "coordinator-dreams.md"), "utf8")
+        } catch {
+          coordinatorDreamsContent = ""
+        }
+      }
+      if (coordinatorDreamsContent) output.system.push(coordinatorDreamsContent)
 
       const coordGroupID = ns.getGroupID(input.sessionID)
       const coordMessages = ns.formatMessages("_coordinator", coordGroupID)
