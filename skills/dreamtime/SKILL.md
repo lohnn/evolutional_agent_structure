@@ -19,7 +19,7 @@ Use this skill when:
 - You notice yourself re-deriving conclusions reached earlier
 - Coherence is decaying across topics (too many threads, not enough synthesis)
 - Exploration is saturated (broad coverage achieved, depth needed)
-- Context utilization is above 70%
+- Context utilization is approaching ~70% — dream BEFORE auto-compaction rewrites early history into a lossy summary (see "Mid-session (pre-compaction) dreams" below)
 - The user says "dream", "consolidate", or "wrap up knowledge"
 
 ## Workflow
@@ -78,11 +78,20 @@ hive_dream_begin(
   coherence: HIGH | MEDIUM | LOW,
   threads_active: N,
   retain_high: "thing to keep\nanother thing to keep",   // newline-separated
-  retain_low: "thing to release\nanother thing"
+  retain_low: "thing to release\nanother thing",
+  pre_compaction: true | false                            // default false — see below
 )
 ```
 
 The tool returns the assigned DRM id (e.g. `DRM-015`). Use this id as `source_dream` for every artifact you create in the next step.
+
+#### Mid-session (pre-compaction) dreams
+
+Pass `pre_compaction: true` when the dream is a **mid-session consolidation** — typically triggered at ~70% context, BEFORE auto-compaction rewrites early history into a lossy summary. Dreaming first means compression runs on firsthand experience, not on the summary.
+
+A pre-compaction dream completes and archives **normally** (artifacts linked, moved to `dreams/history/`), with ONE difference: its completion does **not** close the board work item the session owns — the item stays `in_progress` and work continues afterwards. An unflagged (end-of-work) dream keeps the historical behavior: completing it promotes the owned item to done. Two dreams against one work item are expected — pre-compaction dream(s) mid-work, one final unflagged dream to close.
+
+The marker is recorded in the dream file as `pre_compaction: true|false` (a begin-time scalar, never mutated after), so readers of `dreams/history/*.yaml` can always tell a mid-session consolidation from a final dream.
 
 For reference, the tool writes a file of this shape to `dreams/active/DRM-NNN.yaml`:
 
@@ -106,6 +115,8 @@ retain_high:
   - "..."
 retain_low:
   - "..."
+# Lifecycle
+pre_compaction: false
 # Artifacts (populated during dream)
 insights: []
 warnings: []
@@ -202,7 +213,7 @@ hive_dream_complete(
 )
 ```
 
-The tool stamps `exit_time` and `status: COMPLETE`, links the artifact ids into the DRM arrays (bucketing by id prefix automatically), validates each artifact file exists, and atomically moves `dreams/active/DRM-NNN.yaml` to `dreams/history/DRM-NNN.yaml`. If any id is not found on disk it is warned but does not block completion.
+The tool stamps `exit_time` and `status: COMPLETE`, links the artifact ids into the DRM arrays (bucketing by id prefix automatically), validates each artifact file exists, and atomically moves `dreams/active/DRM-NNN.yaml` to `dreams/history/DRM-NNN.yaml`. If any id is not found on disk it is warned but does not block completion. If the dream was begun with `pre_compaction: true`, completion leaves the session's board item untouched (still `in_progress` — work continues); otherwise completion promotes the owned item to done as usual.
 
 Harvested journals are already archived under `dreams/raw/.harvested/` by `hive_dream_harvest` — no manual cleanup needed. If a capability is re-awoken after the dream, it appends fresh deltas to a clean journal, which the next dream harvests.
 

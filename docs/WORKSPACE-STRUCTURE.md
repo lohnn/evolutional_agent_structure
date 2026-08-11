@@ -395,7 +395,7 @@ workspace-relative in a way that assumes the vendored layout.
 | `agents/*.md` (`AGENTS_DIR`) → `config.agent` | `PACKAGE_ROOT/agents` | ✅ portable |
 | `commands/*.md` (`COMMANDS_DIR`) → `config.command` | `PACKAGE_ROOT/commands` | ✅ portable |
 | `templates/_template.md` (`TEMPLATES_DIR`) copy | `PACKAGE_ROOT/templates` | ✅ portable |
-| `rules/delegation.md`, `rules/hivemind-capabilities.md` (`RULES_DIR`, injected via `ctx.rulesDir` in `system.transform`) | `PACKAGE_ROOT/rules` | ✅ portable |
+| `rules/delegation.md`, `rules/coordinator-dreams.md`, `rules/hivemind-capabilities.md` (`RULES_DIR`, injected via `ctx.rulesDir` in `system.transform` — the first two coordinator-only, the last capability-only) | `PACKAGE_ROOT/rules` | ✅ portable |
 | `skills/*` symlink source | `PACKAGE_ROOT/skills` | ✅ portable |
 | `package.json` (version read) | `PACKAGE_ROOT/package.json` | ✅ portable |
 | all `.opencode/…` runtime (dreams, hivemind, painpoints, board, capabilities, skills **dest**) | `directory` (workspace) | ✅ correct — always the workspace |

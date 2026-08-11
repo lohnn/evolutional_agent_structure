@@ -1094,6 +1094,12 @@ export function createHiveTools(
         threads_active: tool.schema.number().optional().describe("Number of active threads in pre-dream context (default 1)"),
         retain_high: tool.schema.string().optional().describe("Newline-separated list of things to retain at high fidelity during compression"),
         retain_low: tool.schema.string().optional().describe("Newline-separated list of things that can be released during compression"),
+        pre_compaction: tool.schema.boolean().optional().describe(
+          "Mark this as a mid-session, pre-compaction consolidation (default false). " +
+          "Set true when dreaming BEFORE auto-compaction (~70% context) so compression runs on firsthand experience, not a lossy summary. " +
+          "A pre-compaction dream completes and archives normally, but its completion does NOT close the work item this session owns — work continues afterwards. " +
+          "Omit/false for an end-of-work dream, which closes the owned item on completion as usual."
+        ),
       },
       async execute(args, context) {
         const caller = ns.resolveAgent(context.sessionID, context.agent)
@@ -1126,10 +1132,14 @@ export function createHiveTools(
           },
           retain_high: splitLines(args.retain_high),
           retain_low: splitLines(args.retain_low),
+          pre_compaction: args.pre_compaction ?? false,
         })
 
-        log("info", `[dream_begin] opened ${dreamId}`, { filePath, caller })
-        return `Dream ${dreamId} opened (status: DREAMING). File: ${filePath}\nProceed with compression and call hive_dream_artifact_create for each artifact, then hive_dream_complete when done.`
+        log("info", `[dream_begin] opened ${dreamId}`, { filePath, caller, preCompaction: args.pre_compaction ?? false })
+        const lifecycleNote = args.pre_compaction === true
+          ? "\nMarked pre_compaction: completing this dream will NOT close any board work item — work continues afterwards."
+          : ""
+        return `Dream ${dreamId} opened (status: DREAMING). File: ${filePath}${lifecycleNote}\nProceed with compression and call hive_dream_artifact_create for each artifact, then hive_dream_complete when done.`
       },
     }),
 
@@ -1198,11 +1208,15 @@ export function createHiveTools(
 
         // Board: if THIS session owns an in-progress work item, promote it to
         // Done now that its dream is COMPLETE (event-driven — there is no timer
-        // tick, W-064; the completing process must apply the transition). Only
-        // context.sessionID is trustworthy identity (I-179, never agent
-        // self-report). The write is the shared, locked markItemDoneFromDream —
-        // this handler only DETECTS + resolves identity. Best-effort: a board
-        // failure must never fail the dream completion (mirrors the title hook).
+        // tick, W-064; the completing process must apply the transition) —
+        // UNLESS the dream was begun with pre_compaction: a mid-session
+        // consolidation dream leaves the owned item in_progress and work
+        // continues (WI-080; the gate lives inside markItemDoneFromDream, not
+        // here). Only context.sessionID is trustworthy identity (I-179, never
+        // agent self-report). The write is the shared, locked
+        // markItemDoneFromDream — this handler only DETECTS + resolves
+        // identity. Best-effort: a board failure must never fail the dream
+        // completion (mirrors the title hook).
         try {
           const promo = await markItemDoneFromDream(directory, context.sessionID, dreamId)
           if (promo.ok && (promo.action === "done" || promo.action === "redefined") && promo.item) {
@@ -1210,6 +1224,11 @@ export function createHiveTools(
               `  Board: ${promo.item.id} → done (${promo.action === "redefined" ? "re-stamped from " : ""}${dreamId}, ${promo.item.artifacts.length} artifact(s) mirrored).`
             )
             log("info", `[dream_complete] board ${promo.action}`, { itemID: promo.item.id, dreamId, caller })
+          } else if (promo.ok && promo.action === "skipped-pre-compaction") {
+            lines.push(
+              `  Board: ${promo.item.id} stays in_progress (pre-compaction dream ${dreamId} — work continues; a final unflagged dream closes it).`
+            )
+            log("info", "[dream_complete] board close skipped (pre-compaction dream)", { itemID: promo.item.id, dreamId, caller })
           } else if (!promo.ok) {
             log("warn", "[dream_complete] board promote refused", { reason: promo.reason, detail: promo.detail, dreamId, caller })
           }

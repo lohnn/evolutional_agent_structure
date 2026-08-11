@@ -30,6 +30,9 @@
  *   retain_low:
  *     - "..."
  *
+ *   # Lifecycle
+ *   pre_compaction: false
+ *
  *   # Artifacts (populated during dream)
  *   insights: [I-044, I-045]
  *   warnings: [W-018]
@@ -82,6 +85,16 @@ export interface DreamState {
   context_signals: ContextSignals
   retain_high: string[]
   retain_low: string[]
+  /**
+   * Lifecycle marker, set ONCE at hive_dream_begin and never mutated after
+   * (scalar-set-at-begin semantics, I-190). `true` marks a mid-session,
+   * pre-compaction consolidation: the dream completes and archives normally,
+   * but its completion must NOT promote the owning session's board item to
+   * done — work continues afterwards. Absent from older files; parse-side the
+   * raw-record read yields undefined, which every consumer must treat as
+   * false (an unflagged end-of-work dream keeps the historical close behavior).
+   */
+  pre_compaction: boolean
   insights: string[]
   warnings: string[]
   songlines: string[]
@@ -330,6 +343,12 @@ export function serializeDreamState(d: DreamState): string {
     blockSeq("retain_low", d.retain_low),
   ].join("\n"))
 
+  // Lifecycle marker (set at begin, never mutated after)
+  sections.push([
+    `# Lifecycle`,
+    `pre_compaction: ${d.pre_compaction === true}`,
+  ].join("\n"))
+
   // artifact arrays
   sections.push([
     `# Artifacts (populated during dream)`,
@@ -349,13 +368,14 @@ export interface BeginResult {
   filePath: string
 }
 
-export function beginDream(directory: string, state: Omit<DreamState, "dream_id" | "exit_time" | "status" | "insights" | "warnings" | "songlines" | "shadows">): BeginResult {
+export function beginDream(directory: string, state: Omit<DreamState, "dream_id" | "exit_time" | "status" | "insights" | "warnings" | "songlines" | "shadows" | "pre_compaction"> & { pre_compaction?: boolean }): BeginResult {
   const id = nextDreamId(directory)
   const dream: DreamState = {
     ...state,
     dream_id: id,
     exit_time: null,
     status: "DREAMING",
+    pre_compaction: state.pre_compaction ?? false,
     insights: [],
     warnings: [],
     songlines: [],
@@ -381,8 +401,35 @@ export interface CompleteResult {
 }
 
 /**
+ * Rewrite the two top-level scalar lines completion mutates (`exit_time`,
+ * `status`) IN PLACE within the file's raw text. Both are written by
+ * beginDream as single unindented `key: value` lines, so a line-anchored
+ * rewrite is exact — and everything else in the file (comments, sections,
+ * any field a later writer added that this serializer does not know) is
+ * preserved byte-for-byte (I-049: never round-trip parse→mutate→serialize a
+ * file whose schema can grow underneath you).
+ */
+function rewriteCompletionScalars(content: string, exitTime: string): string {
+  const lines = content.split("\n")
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!
+    if (line.startsWith("exit_time: ")) lines[i] = `exit_time: ${exitTime}`
+    else if (line.startsWith("status: ")) lines[i] = `status: COMPLETE`
+  }
+  return lines.join("\n")
+}
+
+/**
  * Stamp the active dream COMPLETE, link artifact IDs, and atomically move it
  * to history/. Uses the same renameSync + copy+unlink fallback as dream-journal.ts.
+ *
+ * I-049 append-preserve: completion never reserializes the DRM file. The
+ * scalar rewrite above mutates exit_time/status in place; the artifact ID
+ * arrays are appended as flow-array lines to the END of the file (valid YAML
+ * — the parser takes the last occurrence of a repeated key, and the empty
+ * arrays begin wrote are earlier lines). A pre_compaction marker, a comment,
+ * or any future field written at begin therefore survives completion
+ * untouched.
  */
 export function completeDream(
   directory: string,
@@ -433,20 +480,24 @@ export function completeDream(
   if (!activeFile) throw new Error("NO_ACTIVE_DREAM")
 
   const activeFull = path.join(activeDir, activeFile)
-  const state = readDreamState(activeFull)
+  const dreamId = activeFile.replace(/\.yaml$/, "")
 
-  // Update
-  state.exit_time = exitTime
-  state.status = "COMPLETE"
-  state.insights = insights
-  state.warnings = warnings
-  state.songlines = songlines
-  state.shadows = shadows
+  // Update the file content WITHOUT reserializing (see function doc).
+  const original = fs.readFileSync(activeFull, "utf8")
+  let content = rewriteCompletionScalars(original, exitTime)
+  content = content.replace(/\s*$/, "\n")
+  content += [
+    flowArray("insights", insights),
+    flowArray("warnings", warnings),
+    flowArray("songlines", songlines),
+    flowArray("shadows", shadows),
+    "",
+  ].join("\n")
 
-  const histPath = historyDreamPath(directory, state.dream_id)
+  const histPath = historyDreamPath(directory, dreamId)
 
   // Write updated content to active path first, then move
-  fs.writeFileSync(activeFull, serializeDreamState(state), "utf8")
+  fs.writeFileSync(activeFull, content, "utf8")
 
   // Atomic rename-to-history (same pattern as dream-journal.ts:99-104)
   try {
@@ -457,7 +508,7 @@ export function completeDream(
   }
 
   return {
-    dreamId: state.dream_id,
+    dreamId,
     historyPath: histPath,
     linkedArtifacts: { insights, warnings, songlines, shadows },
     missingArtifacts,

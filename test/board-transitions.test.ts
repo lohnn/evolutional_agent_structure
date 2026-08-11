@@ -860,4 +860,141 @@ describe("markItemDoneFromDream (event-driven Done on dream complete)", () => {
     expect(!r.ok && r.reason === "DRM_NOT_COMPLETE").toBe(true)
     expect(readItem(dir, item.id)!.status).toBe("in_progress")
   })
+
+  // ── WI-080: pre-compaction dreams do not close work ──────────────────────
+
+  const preCompaction = (drm: string) => ({
+    drmIsComplete: (d: string) => d === drm,
+    drmIsPreCompaction: (d: string) => d === drm,
+  })
+
+  test("pre-compaction dream: owned item stays in_progress, no transition, no stamps", async () => {
+    const { item } = await mkIdea(dir, { title: "Mid-session dream", body: "spec" })
+    await bindSession(dir, item.id, "ses_pc", "ses_pc")
+    const countBefore = readItem(dir, item.id)!.transitions.length
+
+    const r = await markItemDoneFromDream(dir, "ses_pc", "DRM-300", preCompaction("DRM-300"))
+    expect(r.ok && r.action === "skipped-pre-compaction").toBe(true)
+
+    const after = readItem(dir, item.id)!
+    expect(after.status).toBe("in_progress")
+    expect(after.dream_id).toBeNull()
+    expect(after.artifacts).toEqual([])
+    expect(after.transitions.length).toBe(countBefore) // NO transition entry appended (W-126)
+  })
+
+  test("a LATER unflagged dream still closes the item (two dreams, one item)", async () => {
+    const { item } = await mkIdea(dir, { title: "Dream twice", body: "spec" })
+    await bindSession(dir, item.id, "ses_2d", "ses_2d")
+
+    // First: pre-compaction dream mid-work — no close.
+    const mid = await markItemDoneFromDream(dir, "ses_2d", "DRM-310", preCompaction("DRM-310"))
+    expect(mid.ok && mid.action === "skipped-pre-compaction").toBe(true)
+
+    // Then: the end-of-work dream closes normally.
+    const fin = await markItemDoneFromDream(dir, "ses_2d", "DRM-311", withArts("DRM-311", ["I-900"]))
+    expect(fin.ok && fin.action === "done").toBe(true)
+    const after = readItem(dir, item.id)!
+    expect(after.status).toBe("done")
+    expect(after.dream_id).toBe("DRM-311")
+    expect(after.artifacts).toEqual(["I-900"])
+    // exactly one done transition, from the unflagged dream only
+    const doneTs = after.transitions.filter((t) => t.to === "done")
+    expect(doneTs.length).toBe(1)
+    expect(doneTs[0]!.by).toBe(dreamCompleteBy("DRM-311"))
+  })
+
+  test("pre-compaction no-op precedes the done-redefinition path (an already-done item is untouched)", async () => {
+    const { item } = await mkIdea(dir, { title: "Done then mid-dream", body: "spec" })
+    await bindSession(dir, item.id, "ses_rd", "ses_rd")
+    await markItemDoneFromDream(dir, "ses_rd", "DRM-320", complete("DRM-320"))
+    const countBefore = readItem(dir, item.id)!.transitions.length
+
+    // A pre-compaction dream completing later must NOT re-stamp the definer.
+    const r = await markItemDoneFromDream(dir, "ses_rd", "DRM-321", preCompaction("DRM-321"))
+    expect(r.ok && r.action === "skipped-pre-compaction").toBe(true)
+    const after = readItem(dir, item.id)!
+    expect(after.dream_id).toBe("DRM-320")
+    expect(after.transitions.length).toBe(countBefore)
+  })
+
+  test("default pre-compaction check reads the REAL DRM history file (integration)", async () => {
+    const { item } = await mkIdea(dir, { title: "Real flagged DRM", body: "spec" })
+    await bindSession(dir, item.id, "ses_real_pc", "ses_real_pc")
+
+    const histDir = path.join(dir, ".opencode/dreams/history")
+    fs.mkdirSync(histDir, { recursive: true })
+    fs.writeFileSync(
+      path.join(histDir, "DRM-330.yaml"),
+      [
+        "dream_id: DRM-330",
+        "depth: 1",
+        'intention: "mid-session"',
+        "intention_type: CONSOLIDATION",
+        "entry_time: 2026-08-11T00:00:00Z",
+        "exit_time: 2026-08-11T00:10:00Z",
+        "status: COMPLETE",
+        'project_context: "test"',
+        "",
+        "context_signals:",
+        "  contradictions: 0",
+        "  repetitions_detected: false",
+        "  coherence: HIGH",
+        "  threads_active: 1",
+        "",
+        "pre_compaction: true",
+        "",
+        "insights: []",
+        "warnings: []",
+        "songlines: []",
+        "shadows: []",
+        "",
+      ].join("\n"),
+      "utf8"
+    )
+
+    // No injected fakes — the real readers must find the marker.
+    const r = await markItemDoneFromDream(dir, "ses_real_pc", "DRM-330")
+    expect(r.ok && r.action === "skipped-pre-compaction").toBe(true)
+    expect(readItem(dir, item.id)!.status).toBe("in_progress")
+  })
+
+  test("default pre-compaction check treats a missing marker as end-of-work (legacy DRM closes)", async () => {
+    const { item } = await mkIdea(dir, { title: "Legacy unflagged DRM", body: "spec" })
+    await bindSession(dir, item.id, "ses_legacy", "ses_legacy")
+
+    const histDir = path.join(dir, ".opencode/dreams/history")
+    fs.mkdirSync(histDir, { recursive: true })
+    // Legacy shape: no pre_compaction line at all.
+    fs.writeFileSync(
+      path.join(histDir, "DRM-340.yaml"),
+      [
+        "dream_id: DRM-340",
+        "depth: 2",
+        'intention: "final"',
+        "intention_type: CONSOLIDATION",
+        "entry_time: 2026-08-11T00:00:00Z",
+        "exit_time: 2026-08-11T00:10:00Z",
+        "status: COMPLETE",
+        'project_context: "test"',
+        "",
+        "context_signals:",
+        "  contradictions: 0",
+        "  repetitions_detected: false",
+        "  coherence: HIGH",
+        "  threads_active: 1",
+        "",
+        "insights: []",
+        "warnings: []",
+        "songlines: []",
+        "shadows: []",
+        "",
+      ].join("\n"),
+      "utf8"
+    )
+
+    const r = await markItemDoneFromDream(dir, "ses_legacy", "DRM-340")
+    expect(r.ok && r.action === "done").toBe(true)
+    expect(readItem(dir, item.id)!.dream_id).toBe("DRM-340")
+  })
 })

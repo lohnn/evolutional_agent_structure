@@ -293,6 +293,12 @@ made **inside the plugin's own dream tool handlers**, which know the calling ses
   found, stamp `dream_id: DRM-NNN` onto the item. From this moment the item and the dream are joined.
 - **`hive_dream_complete`**: same lookup; copy the DRM's `artifacts[]` onto the item (portability,
   §4.a) and transition `status → done` (appending to `transitions[]`).
+  **Pre-compaction exception (WI-080):** if the completing DRM carries
+  `pre_compaction: true` (a mid-session consolidation dream, begun at ~70% context so compression
+  precedes auto-compaction), `hive_dream_complete` archives the dream normally but the
+  item-touching step is skipped entirely — no `done`, no `dream_id` re-stamp, no artifacts mirror,
+  no transition entry. Work continues; a later unflagged dream closes the item through the normal
+  path. Two dreams against one item are expected and supported.
 
 This makes Done **event-driven like everything else** (§6.a) — no file-watching required in the
 common path. A scan of `dreams/history/DRM-*.yaml` for `COMPLETE` remains available as a

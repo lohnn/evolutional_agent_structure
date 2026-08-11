@@ -32,6 +32,7 @@ import {
   nowIso,
 } from "./board-store.js"
 import { makeDrmCompleteCheck, makeDrmArtifacts } from "./board-reconcile.js"
+import { readDreamState, historyDreamPath } from "./dream-state.js"
 
 // ── Result shape ──────────────────────────────────────────────────────────────
 
@@ -40,7 +41,7 @@ export type TransitionOk = {
   /** what happened: created | bound | bound-absorbed | already-bound |
    *  registered | noop-owned | skipped-released | paused | already-paused |
    *  unpaused | not-paused | demoted | done | started | reattached |
-   *  noop-no-owner | already-done | redefined */
+   *  noop-no-owner | already-done | redefined | skipped-pre-compaction */
   action: string
   item: WorkItem
   /** on "bound-absorbed": the pristine placeholder WI id that was dissolved (Q15) */
@@ -593,6 +594,31 @@ export interface MarkDoneFromDreamOptions {
    * default so the mirror can never diverge from the archive.
    */
   drmArtifacts?: (drm: string) => string[]
+  /**
+   * Pre-compaction lifecycle check (WI-080). Defaults to reading
+   * `pre_compaction` from the DRM history file. A pre-compaction dream is a
+   * MID-SESSION consolidation: it completes and archives normally, but its
+   * completion must not close the owning session's work — the item stays
+   * in_progress. Tests inject a fake alongside drmIsComplete.
+   */
+  drmIsPreCompaction?: (drm: string) => boolean
+}
+
+/**
+ * True iff the DRM history file carries `pre_compaction: true`. Fail-CLOSED
+ * to false: an unreadable DRM or an older file without the field is treated
+ * as a normal end-of-work dream (historical close behavior preserved — the
+ * safer direction, since the COMPLETE check above has already gated on the
+ * file being genuinely present and COMPLETE).
+ */
+export function makeDrmPreCompactionCheck(directory: string): (drm: string) => boolean {
+  return (drm: string): boolean => {
+    try {
+      return readDreamState(historyDreamPath(directory, drm)).pre_compaction === true
+    } catch {
+      return false
+    }
+  }
 }
 
 /**
@@ -611,6 +637,12 @@ export interface MarkDoneFromDreamOptions {
  *
  *   - no item owned by this session  → clean no-op (action "noop-no-owner").
  *     The common case: most dreaming sessions don't own a board item.
+ *   - DRM carries pre_compaction: true → clean no-op (action
+ *     "skipped-pre-compaction", WI-080): a mid-session consolidation dream
+ *     completes and archives normally, but work CONTINUES on the owned item —
+ *     no Done, no dream_id re-stamp, no artifacts mirror, no transition entry.
+ *     A later unflagged (end-of-work) dream still closes the item through the
+ *     normal path below; two dreams against one item are expected and fine.
  *   - DRM not COMPLETE on disk       → refuse DRM_NOT_COMPLETE (belt & braces).
  *   - item in_progress               → stamp dream_id + artifacts, clear paused,
  *     append in_progress→done (action "done").
@@ -634,6 +666,7 @@ export function markItemDoneFromDream(
 ): Promise<TransitionResult> {
   const isComplete = opts.drmIsComplete ?? makeDrmCompleteCheck(directory)
   const artifactsOf = opts.drmArtifacts ?? makeDrmArtifacts(directory)
+  const isPreCompaction = opts.drmIsPreCompaction ?? makeDrmPreCompactionCheck(directory)
   return withBoardLock(directory, () => {
     // Re-read inside the lock — no stale in-memory copy (SCHEMA §4a.3).
     const item = listItems(directory).find((i) => i.owner_session === sessionID)
@@ -649,6 +682,17 @@ export function markItemDoneFromDream(
     // Already done and already defined by THIS dream → exact re-fire, no-op.
     if (item.status === "done" && item.dream_id === drm) {
       return { ok: true as const, action: "already-done", item }
+    }
+
+    // Pre-compaction gate (WI-080): a mid-session consolidation dream does not
+    // close work. Guard on the EXISTING path — no new transition entry type
+    // (W-126): readers of the `transitions` log and the `by:board:dream-complete:*`
+    // label family see no entries at all from pre-compaction completions, which
+    // is exactly the assumption they already make. Read the flag from the DRM
+    // history file — at this point the completing process has already archived
+    // it (hive_dream_complete completes the dream BEFORE this call).
+    if (isPreCompaction(drm)) {
+      return { ok: true as const, action: "skipped-pre-compaction", item }
     }
 
     // Belt-and-braces: only mark Done from a DRM the archive confirms COMPLETE.
