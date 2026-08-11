@@ -93,6 +93,8 @@ A pre-compaction dream completes and archives **normally** (artifacts linked, mo
 
 The marker is recorded in the dream file as `pre_compaction: true|false` (a begin-time scalar, never mutated after), so readers of `dreams/history/*.yaml` can always tell a mid-session consolidation from a final dream.
 
+**Resuming after compaction:** when compaction later fires, the plugin re-injects the pointers automatically — the summarizer is told to preserve a dream-pointer block, and a `[HIVE]` digest message lands in the session afterwards naming each pre-compaction DRM and its artifact ids. You do not need to remember or re-derive anything: pull consolidated content back with `hive_dream_query(ids:"<artifact ids>")` or `hive_dream_rank` when you need it, and keep working. The final unflagged dream at end-of-work still closes the board item.
+
 For reference, the tool writes a file of this shape to `dreams/active/DRM-NNN.yaml`:
 
 ```yaml

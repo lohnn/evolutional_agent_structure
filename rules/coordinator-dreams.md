@@ -6,3 +6,4 @@
 - End-of-work dream: begin it unflagged. `hive_dream_complete` then closes your owned board item (in_progress → done) as usual.
 - Two dreams against one work item are expected and supported: pre-compaction dream(s) mid-work, one final unflagged dream to close.
 - The dream file records the marker (`pre_compaction: true|false` in `dreams/history/DRM-NNN.yaml`), so readers can always tell a mid-session consolidation from a final dream.
+- After compaction fires, your pre-compaction dream pointers are re-injected automatically (a `[HIVE]` digest naming each DRM and its artifact ids) — re-query content with `hive_dream_query(ids:...)` or `hive_dream_rank` as needed.

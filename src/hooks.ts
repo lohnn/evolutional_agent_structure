@@ -12,6 +12,7 @@ import { snapshotAgentsMtime, snapshotChanged } from "./lib/reload.js"
 import { tickEnergy, getCapabilitiesSummary } from "./lib/energy.js"
 import { listPendingInboxes } from "./lib/hivemind.js"
 import { refreshOwnerTitle } from "./lib/board-store.js"
+import { recentPreCompactionDreams, type PreCompactionDream } from "./lib/dream-state.js"
 import type { NervousSystem } from "./lib/nervous-system.js"
 
 type Client = ReturnType<typeof createOpencodeClient>
@@ -33,9 +34,25 @@ export interface HooksContext {
   setActiveSessionId: (id: string) => void
 }
 
+/** Truncate an intention string for one-line digest display (~80 chars). */
+function intentionExcerpt(intention: string): string {
+  const flat = intention.replace(/\s+/g, " ").trim()
+  return flat.length > 80 ? `${flat.slice(0, 80)}…` : flat
+}
+
+/**
+ * Format the post-compaction dream-pointer digest (WI-081). Shared shape for
+ * the two layers: the compacting-hook context block and the session.compacted
+ * noReply injection both render the same per-dream pointer line.
+ */
+function dreamPointerLine(d: PreCompactionDream): string {
+  const arts = d.artifacts.length > 0 ? d.artifacts.join(", ") : "none"
+  return `${d.dreamId} (pre-compaction, artifacts: ${arts}) — ${intentionExcerpt(d.intention)}`
+}
+
 export function createEventHook(ctx: HooksContext) {
   return async ({ event }: { event: { type: string; properties?: unknown } }) => {
-    const { ns, directory, projectAgentsPath, log, debugLog, getLastSnapshot, setLastSnapshot, setActiveSessionId } = ctx
+    const { ns, client, directory, projectAgentsPath, log, debugLog, getLastSnapshot, setLastSnapshot, setActiveSessionId } = ctx
 
     if (event.type === "session.created") {
       const { results, skipped } = tickEnergy(directory)
@@ -123,6 +140,49 @@ export function createEventHook(ctx: HooksContext) {
         } catch (err) {
           log("warn", "[board] title refresh failed", { sessionID: info.id, error: String(err) })
         }
+      }
+    }
+
+    // Post-compaction dream-pointer digest (WI-081, layer B): compaction has
+    // just rewritten early history into a summary — remind the agent that its
+    // mid-session dreams survived on disk and how to pull them back.
+    if (event.type === "session.compacted") {
+      try {
+        const props = event.properties as { sessionID?: string }
+        const sessionID = props?.sessionID
+        if (!sessionID) return
+        // Guards mirror system.transform (I-041): only awakened coordinator
+        // sessions own board dreams — capability/generic sessions get nothing.
+        if (!ns.hasCapabilities() || !ns.isSessionAwake(sessionID)) return
+        if (ns.isCapabilitySession(sessionID)) return
+        // isCoordinatorSession depends on the chat.message hook having
+        // registered the session's agent — but sessions created via `opencode
+        // run`/attach may compact BEFORE any chat.message fires in THIS
+        // process, leaving them unregistered (isCoordinatorSession → false).
+        // An awakened session is coordinator by construction (hive_awaken only
+        // auto-registers board items for top-level sessions), so fall back to
+        // a parentID lookup only when registration is absent.
+        if (!ns.isCoordinatorSession(sessionID)) {
+          const res = await client.session.get({ path: { id: sessionID } }).catch(() => undefined)
+          const sess = res?.data as { parentID?: string } | undefined
+          if (sess?.parentID) return // a child session — not a coordinator
+          // top-level (or lookup failed-open) + awake → coordinator
+        }
+
+        const dreams = recentPreCompactionDreams(directory, 5)
+        if (dreams.length === 0) return
+
+        const lines = [
+          `[HIVE] Compaction just rewrote early history. Your mid-session dream(s) survived on disk:`,
+          ...dreams.map((d) => `- ${dreamPointerLine(d)}`),
+          `Pull content with hive_dream_query(ids:"DRM-NNN-linked artifact ids") or hive_dream_rank as needed.`,
+          `A final unflagged dream still closes your board item.`,
+        ]
+        await ns.injectNotice(sessionID, lines.join("\n"))
+        debugLog("[dreams] injected post-compaction pointer digest", { sessionID, dreams: dreams.map((d) => d.dreamId) })
+      } catch (err) {
+        // Best-effort: a failed injection must never break the event hook.
+        log("warn", "[dreams] post-compaction digest injection failed", { error: String(err) })
       }
     }
   }
@@ -224,7 +284,7 @@ export function createChatMessageHook(ctx: HooksContext) {
 }
 
 export function createCompactionHook(ctx: HooksContext) {
-  return async (_input: unknown, output: { context: string[] }) => {
+  return async (input: { sessionID?: string }, output: { context: string[] }) => {
     const { directory, capabilitiesPath, debugLog } = ctx
 
     const { results, skipped } = tickEnergy(directory)
@@ -237,6 +297,26 @@ export function createCompactionHook(ctx: HooksContext) {
       output.context.push(
         `## HIVE State (preserved across compaction)\n\n${summary}\n\nUse /status to see full details. Capabilities with low energy may need attention.`
       )
+    }
+
+    // Dream pointers (WI-081, layer A): the summarizer must not drop the ids of
+    // this session's mid-session (pre-compaction) dreams — after compaction
+    // they are the only way back to the consolidated artifacts.
+    try {
+      const dreams = recentPreCompactionDreams(directory, 5)
+      if (dreams.length > 0) {
+        const lines = [
+          `## HIVE dream pointers (preserve in summary)`,
+          ``,
+          ...dreams.map((d) => `- ${dreamPointerLine(d)}`),
+          ``,
+          `Re-query content with hive_dream_query(ids:"<artifact ids>") or hive_dream_rank after compaction.`,
+        ]
+        output.context.push(lines.join("\n"))
+        debugLog("[dreams] added pointer block to compaction context", { sessionID: input.sessionID, dreams: dreams.map((d) => d.dreamId) })
+      }
+    } catch {
+      // Best-effort: a scan failure must never block compaction.
     }
   }
 }
