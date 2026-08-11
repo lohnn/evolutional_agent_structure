@@ -1,7 +1,21 @@
 import path from "path"
 import fs from "fs"
 import type { createOpencodeClient } from "@opencode-ai/sdk"
-import { getInbox, sendMessage, markAllRead, listPendingInboxes, formatInboxForPrompt } from "./hivemind.js"
+import {
+  getInbox,
+  sendMessage,
+  markAllRead,
+  listPendingInboxes,
+  formatInboxForPrompt,
+  markDelivered,
+  recordBroadcastDelivery,
+  sweepInboxes,
+  sentBy,
+  evaluateStaleness,
+  staleSignals,
+  type SweepEntry,
+  type SentEntry,
+} from "./hivemind.js"
 import { readMdFile } from "./frontmatter.js"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -272,7 +286,13 @@ export class NervousSystem {
         if (info.active && shortName(info.agent) !== sender) {
           // Only broadcast within the same group if sender has a group
           if (senderGroupID && info.groupID && info.groupID !== senderGroupID) continue
-          this.injectIntoSession(sessionID, `[HIVEmind broadcast from ${sender}] (${type}): ${content}`).catch(() => {})
+          this.injectIntoSession(sessionID, `[HIVEmind broadcast from ${sender}] (${type}): ${content}`)
+            .then(() => {
+              // Aggregate receipt (WI-051 decision 3): one append per session
+              // reached. No per-recipient structures — a count/list is enough.
+              recordBroadcastDelivery(this.directory, filename, sessionID)
+            })
+            .catch(() => {})
         }
       }
       delivered = true
@@ -283,6 +303,8 @@ export class NervousSystem {
         try {
           await this.injectIntoSession(coordSessionID, `[HIVEmind] Message from ${sender} (${type}): ${content}`)
           delivered = true
+          // W-119: the file must show it was delivered, not sit pending forever.
+          markDelivered(this.directory, recipient, filename)
         } catch {
           // queued fallback
         }
@@ -290,7 +312,12 @@ export class NervousSystem {
     } else {
       // Named capability: try real-time delivery within the same group; if not active, wake coordinator
       delivered = await this.deliverToRecipient(recipient, sender, type, content, senderGroupID)
-      if (!delivered) {
+      if (delivered) {
+        // W-119: flip the FILE's status pending → delivered after the attempt
+        // returned success. This changes only the status field — never which
+        // session the message targeted (that is WI-070's surface).
+        markDelivered(this.directory, recipient, filename)
+      } else {
         this.wakeCoordinator(`Capability ${recipient} received a queued message from ${sender} (${type}) but has no active session. Routing needed.`, senderSessionID).catch(() => {})
       }
     }
@@ -354,8 +381,8 @@ export class NervousSystem {
     return getInbox(this.directory, capabilityName, groupID)
   }
 
-  acknowledgeMessages(capabilityName: string): void {
-    markAllRead(this.directory, capabilityName)
+  acknowledgeMessages(capabilityName: string, groupID?: string): number {
+    return markAllRead(this.directory, capabilityName, groupID)
   }
 
   formatMessages(capabilityName: string, groupID?: string): string | null {
@@ -366,18 +393,63 @@ export class NervousSystem {
   // ── Coordinator awareness ─────────────────────────────────────────────────
 
   /**
-   * Build a status summary of all pending messages for the coordinator's system prompt.
-   * Shows which capabilities are waiting, active, or nonexistent.
+   * Build a status summary of all pending messages for the coordinator's system
+   * prompt. Shows which capabilities are waiting, active, or nonexistent — and
+   * splits each count LIVE vs STALE (WI-051 D): a bare "N message(s)" becomes
+   * "N live, M stale" so the coordinator can tell routable work from sediment
+   * (dissolved senders, ancient pending) at a glance. Stale messages are
+   * excluded from delivery but NOT deleted (SNG-020).
+   *
+   * The per-recipient line shape is shared with the two routing-needed blocks
+   * in hooks.ts via formatRoutingNeeded() — those blocks had already drifted
+   * slightly, so the shape now lives in ONE place (formatRecipientLines).
    *
    * @param groupID - When provided, only counts messages from this session group.
    *   The coordinator should pass its own groupID so it only sees routing work it owns.
    */
   buildQueueStatus(groupID?: string): string | null {
-    const pendingInboxes = listPendingInboxes(this.directory, groupID)
-    if (pendingInboxes.length === 0) return null
+    const sweep = sweepInboxes(this.directory, groupID)
+    if (sweep.length === 0) return null
+
+    const lines = this.formatRecipientLines(sweep, { coordinatorView: true })
+    if (lines.length === 0) return null
+    return (
+      `## HIVEmind — Message Queue Status\n\n${lines.join("\n")}\n\n` +
+      `Capabilities marked ⏳ have unread messages that will be delivered when you next delegate to them. ` +
+      `Capabilities marked ⚠ need to be spawned. ` +
+      `Stale (sediment) messages are excluded from delivery but never auto-deleted — retire them explicitly with hive_retire.`
+    )
+  }
+
+  /**
+   * The shared per-recipient line renderer behind buildQueueStatus and the two
+   * routing-needed hooks. Buckets each recipient's sweep entries into live vs
+   * stale and renders one line per recipient. `coordinatorView` selects the
+   * dashboard phrasing; the routing-needed hook lines carry their own
+   * bracketed status instead.
+   */
+  private formatRecipientLines(
+    sweep: SweepEntry[],
+    opts: { coordinatorView: boolean }
+  ): string[] {
+    // Bucket by recipient, preserving first-seen order.
+    const byRecipient = new Map<string, { live: number; stale: number }>()
+    for (const entry of sweep) {
+      const bucket = byRecipient.get(entry.recipient) ?? { live: 0, stale: 0 }
+      if (entry.staleness.stale) bucket.stale++
+      else bucket.live++
+      byRecipient.set(entry.recipient, bucket)
+    }
 
     const lines: string[] = []
-    for (const { recipient, count } of pendingInboxes) {
+    for (const [recipient, { live, stale }] of byRecipient) {
+      const countStr = stale > 0 ? `${live} live, ${stale} stale` : `${live} message(s)`
+
+      if (recipient === "_coordinator") {
+        lines.push(`- **_coordinator** — ${countStr} — [FOR YOU]`)
+        continue
+      }
+
       const capFile = path.join(this.capabilitiesPath, `${recipient}.md`)
       const exists = fs.existsSync(capFile)
 
@@ -389,17 +461,86 @@ export class NervousSystem {
         }
       }
 
-      if (!exists) {
-        lines.push(`- **${recipient}** — ${count} message(s) — \u26A0 CAPABILITY DOES NOT EXIST (spawn signal)`)
-      } else if (active) {
-        lines.push(`- **${recipient}** — ${count} message(s) — session active (will receive automatically)`)
+      if (opts.coordinatorView) {
+        if (!exists) {
+          lines.push(`- **${recipient}** — ${countStr} — ⚠ CAPABILITY DOES NOT EXIST (spawn signal)`)
+        } else if (active) {
+          lines.push(`- **${recipient}** — ${countStr} — session active (will receive automatically)`)
+        } else {
+          lines.push(`- **${recipient}** — ${countStr} — ⏳ waiting (needs delegation to receive)`)
+        }
       } else {
-        lines.push(`- **${recipient}** — ${count} message(s) — \u23F3 waiting (needs delegation to receive)`)
+        const status = exists ? "CAPABILITY EXISTS, INACTIVE" : "CAPABILITY DOES NOT EXIST (spawn signal)"
+        lines.push(`- ${recipient}: ${countStr} [${status}]`)
       }
     }
+    return lines
+  }
 
-    if (lines.length === 0) return null
-    return `## HIVEmind — Message Queue Status\n\n${lines.join("\n")}\n\nCapabilities marked \u23F3 have unread messages that will be delivered when you next delegate to them. Capabilities marked \u26A0 need to be spawned.`
+  /**
+   * The routing-needed block rendered by the two hooks.ts sites (session.idle
+   * and tool.execute.after). ONE renderer so the two sites cannot drift again
+   * (they had: the idle site wrapped lines in a "Capability X completed."
+   * preamble while the task-output site appended a bare block). Returns null
+   * when there is nothing to route.
+   */
+  formatRoutingNeeded(groupID?: string): string | null {
+    const sweep = sweepInboxes(this.directory, groupID)
+    const needsRouting = sweep.filter((e) => e.recipient !== "_broadcast")
+    if (needsRouting.length === 0) return null
+    const lines = this.formatRecipientLines(needsRouting, { coordinatorView: false })
+    return lines.join("\n")
+  }
+
+  /**
+   * Sender-side unread dashboard (WI-051 C): messages `sender` has sent that
+   * were never read, collapsed across BOTH coordinator inboxes (a coordinator
+   * reading via hive_listen reads inbox/<name>/ AND inbox/_coordinator/, so a
+   * view that scanned only one bucket would split the truth). Per-message
+   * staleness attached; broadcasts carry their deliveredTo aggregate
+   * ("delivered to N sessions live").
+   */
+  buildSentView(sender: string): string {
+    const entries = sentBy(this.directory, sender, { unreadOnly: true })
+    if (entries.length === 0) {
+      return `No unread messages sent by ${sender}.`
+    }
+
+    const live = entries.filter((e) => !e.staleness.stale)
+    const stale = entries.filter((e) => e.staleness.stale)
+
+    const render = (e: SentEntry): string => {
+      const m = e.msg
+      const sigs = staleSignals(e.staleness)
+      const sigStr = sigs.length > 0 ? ` [stale: ${sigs.join(", ")}]` : ""
+      const ageDays = Math.floor((Date.now() - new Date(m.timestamp).getTime()) / (1000 * 60 * 60 * 24))
+      const broadcastNote =
+        m.recipient === "_broadcast"
+          ? ` — delivered to ${(m.deliveredTo ?? []).length} session(s) live`
+          : ""
+      const statusNote = m.status === "delivered" ? "delivered, unread" : "pending"
+      return (
+        `- → \`${m.recipient}\` (${m.type}, ${m.timestamp.slice(0, 10)}, ${ageDays}d ago): ` +
+        `${statusNote}${broadcastNote}${sigStr}\n  ${excerpt(m.content)}`
+      )
+    }
+
+    const lines = [
+      `## HIVEmind — Unread messages sent by ${sender}`,
+      ``,
+      `${live.length} live, ${stale.length} stale (sediment). Status read from disk; "delivered, unread" = injected live but never acknowledged.`,
+      ``,
+    ]
+    if (live.length > 0) {
+      lines.push(`### Live`, ...live.map(render), ``)
+    }
+    if (stale.length > 0) {
+      lines.push(
+        `### Stale (excluded from delivery, NOT deleted — retire with hive_retire)`,
+        ...stale.map(render)
+      )
+    }
+    return lines.join("\n")
   }
 
   // ── New capability detection ──────────────────────────────────────────────
@@ -485,4 +626,10 @@ export class NervousSystem {
 /** Strip "capabilities/" prefix */
 export function shortName(agent: string): string {
   return agent.replace(/^capabilities\//, "")
+}
+
+/** One-line content excerpt for dashboard rendering (~90 chars). */
+function excerpt(content: string): string {
+  const flat = content.replace(/\s+/g, " ").trim()
+  return flat.length > 90 ? `${flat.slice(0, 90)}…` : flat
 }
