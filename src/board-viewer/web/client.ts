@@ -20,6 +20,7 @@
 import { renderBoardBody } from "./render"
 import { morph } from "./morph"
 import { boardTitle, deriveIconState, faviconHref } from "./icon"
+import { refreshBoardControls, setupBoardControls } from "./filter"
 import type { BoardState } from "../data/state"
 
 const POLL_MS = 15_000
@@ -137,6 +138,11 @@ function paint(state: BoardState): void {
   // the header full mark needs neither: it rides inside #board-root and the
   // shared renderer redraws it as part of the morph.
   stampIdentity(state)
+  // The filter/collapse controls live in the shell OUTSIDE #board-root, but
+  // their verdicts annotate the (just-rebuilt) board inside it. Re-derive from
+  // the fresh corpus island + fresh cards so filter and board can never drift
+  // across a poll (WI-084).
+  refreshBoardControls()
 }
 
 let lastGood: BoardState | null = readIsland()
@@ -211,6 +217,13 @@ function refreshIfVisible(): void {
 document.addEventListener("visibilitychange", refreshIfVisible)
 window.addEventListener("pageshow", refreshIfVisible)
 window.addEventListener("focus", refreshIfVisible)
+
+// Board controls (WI-084): the search/filter bar + column-collapse strip live
+// in the page shell OUTSIDE #board-root, so the poll morph can't touch them.
+// Bind ONCE via document-level delegation (freshly-morphed column toggles need
+// no re-binding); refreshBoardControls() in paint() re-derives verdicts per
+// poll from the fresh corpus island.
+setupBoardControls()
 
 // ── Confirmation modal (I-206) ──────────────────────────────────────────────
 //
