@@ -158,7 +158,7 @@ export function evaluateStaleness(directory: string, msg: HiveMessage, now: Date
  *   Pass undefined to read all messages regardless of group (e.g. for markAllRead).
  */
 export function getInbox(directory: string, capabilityName: string, groupId?: string): InboxEntry[] {
-  const subdirs = [capabilityName, "_broadcast"]
+  const subdirs = readerBuckets(capabilityName)
   const messages: InboxEntry[] = []
 
   for (const subdir of subdirs) {
@@ -191,12 +191,54 @@ export function getInbox(directory: string, capabilityName: string, groupId?: st
   )
 }
 
+// ── Special addresses (I-033) ─────────────────────────────────────────────────
+//
+// Recipients prefixed with `_` are SPECIAL ADDRESSES, not capability names:
+//   _coordinator — mail FOR the coordinator session itself;
+//   _broadcast   — fire-and-forget to all sessions in the sender's group.
+// They must NEVER be checked against the capability-name filesystem
+// (agents/capabilities/<name>.md) — they have no file and never will, so such
+// a check either rejects them or, worse, lets a stray `_foo` address mint a
+// new on-disk bucket by accident. Only these two are legal; any other `_`
+// recipient is refused at the write path so a typo becomes an error instead
+// of a silently orphaned inbox directory.
+
+export const SPECIAL_RECIPIENTS = new Set(["_coordinator", "_broadcast"])
+
+export function isSpecialRecipient(recipient: string): boolean {
+  return SPECIAL_RECIPIENTS.has(recipient)
+}
+
+/**
+ * The inbox subdirs a READER of `name` should see (WI-083).
+ *
+ * A name that IS a special address reads only its own bucket — the `_`
+ * addresses are roles, not capabilities, and there is no such thing as
+ * "_coordinator's broadcast" distinct from the general one. Any other name
+ * reads its own bucket plus the shared broadcast channel.
+ *
+ * One definition, consumed by BOTH the read (getInbox) and the acknowledge
+ * (markAllRead) paths: W-141 demands the mutating path act on exactly the set
+ * the read path showed, so the set must come from one place.
+ */
+export function readerBuckets(name: string): string[] {
+  return isSpecialRecipient(name) ? [name] : [name, "_broadcast"]
+}
+
 /**
  * Write a message to a recipient's inbox. Returns the filename.
  * groupId should be the sender's groupID (coordinator sessionID) so the message
  * can be group-filtered by the recipient at read time.
+ *
+ * Throws on an unknown `_`-prefixed recipient (I-033): the two special
+ * addresses above bypass the capability-name check by being EXPLICIT, not by
+ * being names that happen not to collide with a file.
  */
 export function sendMessage(directory: string, msg: Pick<HiveMessage, "sender" | "recipient" | "type" | "content"> & { groupId?: string }): string {
+  if (msg.recipient.startsWith("_") && !isSpecialRecipient(msg.recipient)) {
+    throw new Error(`Refused: unknown special recipient "${msg.recipient}". Only _coordinator and _broadcast are legal special addresses (I-033).`)
+  }
+
   const dir = inboxPath(directory, msg.recipient)
   fs.mkdirSync(dir, { recursive: true })
 
@@ -270,7 +312,7 @@ export function recordBroadcastDelivery(directory: string, file: string, session
  * Returns the number of messages flipped, so callers can report honestly.
  */
 export function markAllRead(directory: string, capabilityName: string, groupId?: string): number {
-  const subdirs = [capabilityName, "_broadcast"]
+  const subdirs = readerBuckets(capabilityName)
   let marked = 0
   for (const subdir of subdirs) {
     const dir = inboxPath(directory, subdir)

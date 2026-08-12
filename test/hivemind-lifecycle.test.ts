@@ -14,6 +14,7 @@ import {
   sentBy,
   retireMessage,
   readRetirementLog,
+  isSpecialRecipient,
   STALE_AGE_DAYS,
   type HiveMessage,
 } from "../src/lib/hivemind.ts"
@@ -55,6 +56,29 @@ function plant(recipient: string, sender: string, over: Partial<HiveMessage> = {
   fs.writeFileSync(path.join(inboxDir, file), JSON.stringify(msg, null, 2))
   return file
 }
+
+// ── I-033: special addresses bypass the capability-name check, explicitly ────
+
+describe("special recipients (I-033)", () => {
+  test("_coordinator and _broadcast are the only legal special addresses", () => {
+    expect(isSpecialRecipient("_coordinator")).toBe(true)
+    expect(isSpecialRecipient("_broadcast")).toBe(true)
+    expect(isSpecialRecipient("hive-infra")).toBe(false)
+    expect(isSpecialRecipient("_foo")).toBe(false)
+  })
+
+  test("both specials write WITHOUT any capability file existing (the bypass)", () => {
+    // No writeCap() here — the whole point is these recipients have no file.
+    expect(() => sendMessage(dir, { sender: "s", recipient: "_coordinator", type: "request", content: "x", groupId: "g1" })).not.toThrow()
+    expect(() => sendMessage(dir, { sender: "s", recipient: "_broadcast", type: "info", content: "x", groupId: "g1" })).not.toThrow()
+  })
+
+  test("an unknown _-prefixed recipient is REFUSED rather than minting an orphaned bucket", () => {
+    expect(() => sendMessage(dir, { sender: "s", recipient: "_coordiantor", type: "info", content: "typo", groupId: "g1" })).toThrow(/unknown special recipient/)
+    // And it minted nothing on disk.
+    expect(fs.existsSync(path.join(dir, ".opencode/hivemind/inbox/_coordiantor"))).toBe(false)
+  })
+})
 
 // ── W-119: delivered status flip ─────────────────────────────────────────────
 

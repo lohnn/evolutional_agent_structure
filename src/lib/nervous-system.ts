@@ -13,6 +13,7 @@ import {
   sentBy,
   evaluateStaleness,
   staleSignals,
+  isSpecialRecipient,
   type SweepEntry,
   type SentEntry,
 } from "./hivemind.js"
@@ -505,6 +506,35 @@ export class NervousSystem {
   }
 
   /**
+   * The inbox buckets a session is allowed to read, derived from its WI-070
+   * role (WI-083).
+   *
+   * Durable identity, not agent name: `role` was resolved from the server's
+   * parent chain at registration, so a coordinator whose agent name happens to
+   * collide with a capability name does NOT inherit that capability's mailbox.
+   *   - capability → [its own short name]
+   *   - everything else → ["_coordinator"]
+   *     Coordinator mail lives there (W-012). Subagent/unknown roles have no
+   *     named mailbox of their own; reading one derived from a name string is
+   *     exactly the W-012 defect, so they get the system bucket — normally
+   *     empty for them — rather than a name-collision gamble.
+   *
+   * "_broadcast" is NOT listed: `getInbox` unions it into every read already,
+   * and `markAllRead` does the same on the acknowledge side.
+   *
+   * A session with no registry record (pre-registration first turn) cannot
+   * have its role resolved yet, so it REFUSES with [] rather than guessing
+   * from the agent-name hint (I-227: suppress, don't substitute — the hint is
+   * the mutable name this function exists to stop trusting). Callers that
+   * need identity first `await ensureIdentity`, which registers the record.
+   */
+  mailboxBuckets(sessionID: string): string[] {
+    const rec = this.sessionMap.get(sessionID)
+    if (!rec) return []
+    return rec.role === "capability" ? [shortName(rec.agent)] : ["_coordinator"]
+  }
+
+  /**
    * True if this session is a coordinator: a TOP-LEVEL session (no parent).
    *
    * The discriminator is parentID presence, verified against the server
@@ -519,6 +549,13 @@ export class NervousSystem {
   // ── Message sending + delivery ────────────────────────────────────────────
 
   async send(sender: string, recipient: string, type: "question" | "info" | "result" | "request", content: string, senderSessionID?: string): Promise<{ filename: string; delivered: boolean }> {
+    // I-033: `_`-prefixed recipients are special addresses, not capability
+    // names — they bypass the capability-file existence semantics entirely.
+    // Only the two known specials are legal; any other `_foo` is refused by
+    // sendMessage itself rather than minting a silently-orphaned bucket.
+    if (recipient.startsWith("_") && !isSpecialRecipient(recipient)) {
+      throw new Error(`Refused: unknown special recipient "${recipient}". Only _coordinator and _broadcast are legal special addresses (I-033).`)
+    }
     // Resolve the sender's own identity first. Everything below is scoped by
     // the sender's group, so an unresolved sender means a message that can
     // only be delivered by suppressing and queueing — better to spend one
