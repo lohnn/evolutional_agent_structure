@@ -218,9 +218,17 @@ export function createHiveTools(
         mark_read: tool.schema.boolean().optional().describe("If true, mark all messages as read after retrieving them"),
       },
       async execute(args, context) {
+        await ns.ensureIdentity(context.sessionID, context.agent)
         const agent = ns.resolveAgent(context.sessionID, context.agent)
         const isCoordinator = !ns.isCapabilitySession(context.sessionID)
         const groupID = ns.getGroupID(context.sessionID)
+        if (!groupID) {
+          // I-227: an unresolved group cannot be read around. Reading
+          // unscoped would show (and, with mark_read, silently retire) other
+          // coordinators' mail — W-012's name-keyed identity defect, one layer
+          // down.
+          return "Cannot read messages: this session's dispatch group is unresolved, so a group-scoped inbox read is not possible. Messages remain queued on disk."
+        }
 
         let pending = ns.readMessages(agent, groupID)
         if (isCoordinator) {
@@ -247,7 +255,10 @@ export function createHiveTools(
       description: "Activate HIVE for the current session. Call this when processing /awaken to enable capability dispatch, roster injection, and HIVEmind messaging for this session. Without this, HIVE context is not injected.",
       args: {},
       async execute(_args, context) {
-        ns.awakenSession(context.sessionID)
+        // Pass the agent hint: awaken can be a session's FIRST plugin
+        // interaction (I-308), so there may be no registry record yet.
+        ns.awakenSession(context.sessionID, context.agent)
+        await ns.ensureIdentity(context.sessionID, context.agent)
 
         // Board auto-register (hive-board DESIGN §5.3b): every awakened TOP-LEVEL
         // coordinator session gets a work item, create-or-bind semantics. Board
@@ -310,7 +321,8 @@ export function createHiveTools(
         if (!sender) {
           return "Warning: could not resolve your agent identity from this session — cannot build a sender-side view."
         }
-        return ns.buildSentView(sender)
+        await ns.ensureIdentity(context.sessionID)
+        return ns.buildSentView(sender, ns.getGroupID(context.sessionID))
       },
     }),
 
@@ -370,7 +382,11 @@ export function createHiveTools(
 
         // Evaluate the sweep once, lazily (W-064), scoped to this session's
         // group so a capability only ever retires its own lineage's sediment.
+        await ns.ensureIdentity(context.sessionID, context.agent)
         const groupID = ns.getGroupID(context.sessionID)
+        if (!groupID) {
+          return "Refused (NO_GROUP): this session's dispatch group is unresolved. An unscoped sweep would offer other coordinators' messages for retirement — the exact sweep-only-shown inversion W-141 describes."
+        }
         const sweep = sweepInboxes(directory, groupID)
         const candidates = sweep.filter((e) => {
           if (e.staleness.stale) return true // strong signal(s) present
