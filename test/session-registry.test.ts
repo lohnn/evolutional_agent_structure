@@ -406,3 +406,55 @@ describe("delivery, wake and broadcast through the class", () => {
     expect(ns.buildRoster(undefined)).not.toContain("resumable")
   })
 })
+
+// ── WI-083: role-derived mailboxes (durable identity, not agent name) ─────────
+
+describe("mailboxBuckets (WI-083)", () => {
+  const COORD_A = "ses_coordA000000000000000000"
+  const CAP_A = "ses_capA00000000000000000000"
+
+  test("a coordinator reads _coordinator ONLY — never a name-derived bucket", async () => {
+    // Even when the coordinator's agent name ("build") has a same-named inbox
+    // on disk, the mailbox set follows the ROLE, not the name (W-012).
+    const { client } = makeClient({ [COORD_A]: { agent: "build" } })
+    const ns = new NervousSystem(client, dir)
+    await ns.registerSession(COORD_A, "build")
+    expect(ns.mailboxBuckets(COORD_A)).toEqual(["_coordinator"])
+  })
+
+  test("a capability reads exactly its own short name", async () => {
+    const { client } = makeClient({
+      [COORD_A]: { agent: "build" },
+      [CAP_A]: { agent: "capabilities/hive-infra", parentID: COORD_A },
+    })
+    const ns = new NervousSystem(client, dir)
+    await ns.registerSession(CAP_A, "capabilities/hive-infra")
+    expect(ns.mailboxBuckets(CAP_A)).toEqual(["hive-infra"])
+  })
+
+  test("an unregistered session refuses with [] rather than guessing from a name (I-227)", () => {
+    const ns = new NervousSystem(makeClient({}).client, dir)
+    expect(ns.mailboxBuckets("ses_never000000000000000000")).toEqual([])
+  })
+
+  test("a coordinator with a capability-colliding name still reads ONLY _coordinator (W-012)", async () => {
+    // The pre-fix defect: a coordinator named "hive" or "build" had its mail
+    // read from inbox/<name>/. With a same-named capability bucket on disk,
+    // the old code would have read the CAPABILITY's mail as the coordinator's
+    // own. Role-derived buckets make that unexpressible.
+    const inboxDir = path.join(dir, ".opencode/hivemind/inbox")
+    fs.mkdirSync(path.join(inboxDir, "build"), { recursive: true })
+    fs.mkdirSync(path.join(inboxDir, "_coordinator"), { recursive: true })
+    const { sendMessage } = await import("../src/lib/hivemind.js")
+    sendMessage(dir, { sender: "x", recipient: "build", type: "info", content: "capability mail", groupId: COORD_A })
+    sendMessage(dir, { sender: "y", recipient: "_coordinator", type: "request", content: "coordinator mail", groupId: COORD_A })
+
+    const { client } = makeClient({ [COORD_A]: { agent: "build" } })
+    const ns = new NervousSystem(client, dir)
+    await ns.registerSession(COORD_A, "build")
+
+    const buckets = ns.mailboxBuckets(COORD_A)
+    const shown = buckets.flatMap((b) => ns.readMessages(b, COORD_A))
+    expect(shown.map((e) => e.msg.content)).toEqual(["coordinator mail"])
+  })
+})

@@ -219,8 +219,6 @@ export function createHiveTools(
       },
       async execute(args, context) {
         await ns.ensureIdentity(context.sessionID, context.agent)
-        const agent = ns.resolveAgent(context.sessionID, context.agent)
-        const isCoordinator = !ns.isCapabilitySession(context.sessionID)
         const groupID = ns.getGroupID(context.sessionID)
         if (!groupID) {
           // I-227: an unresolved group cannot be read around. Reading
@@ -230,10 +228,25 @@ export function createHiveTools(
           return "Cannot read messages: this session's dispatch group is unresolved, so a group-scoped inbox read is not possible. Messages remain queued on disk."
         }
 
-        let pending = ns.readMessages(agent, groupID)
-        if (isCoordinator) {
-          pending = [...pending, ...ns.readMessages("_coordinator", groupID)]
-        }
+        // Role-derived mailboxes (WI-083): the WI-070 registry already resolved
+        // WHO this session is from the server's parent chain — a durable
+        // identity, not a name string. The mailbox set follows from that role:
+        //   - a capability reads its own named inbox + _broadcast;
+        //   - a coordinator reads _coordinator + _broadcast ONLY.
+        // What a coordinator deliberately does NOT do is read a bucket named
+        // after its agent name ("build", "hive", ...): that was the W-012
+        // defect — the name-derived path either doesn't exist or is where
+        // someone else's same-named capability mail lives. Mail sent to a
+        // coordinator by name lands in the CAPABILITY of that name's bucket
+        // (the recipient name is the capability contract), so there is no
+        // legitimate per-coordinator-name bucket to read.
+        //
+        // getInbox unions "_broadcast" into every read itself, so it is not
+        // listed here. Read and acknowledge share this exact set (W-141: a
+        // mutating path must never act on messages the read didn't show).
+        const buckets = ns.mailboxBuckets(context.sessionID)
+
+        let pending = buckets.flatMap((b) => ns.readMessages(b, groupID))
 
         if (pending.length === 0) return "No pending messages."
 
@@ -243,8 +256,7 @@ export function createHiveTools(
           // group-filtered read would have shown. Other session groups'
           // messages stay pending for their own lineage — a capability in
           // group B must never retire group A's work it was never shown.
-          ns.acknowledgeMessages(agent, groupID)
-          if (isCoordinator) ns.acknowledgeMessages("_coordinator", groupID)
+          for (const b of buckets) ns.acknowledgeMessages(b, groupID)
         }
 
         return formatted || "No pending messages."
