@@ -565,16 +565,57 @@ function sessionOnlyCard(s: SessionCard, ctx: CardCtx): string {
 }
 
 function column(title: string, cardsHtml: string[], extra = ""): string {
-  return `<div class="col" data-key="col:${esc(title)}">
-    <div class="col-head">${esc(title)} <span class="count">(${cardsHtml.length})</span></div>
-    ${extra}
-    ${cardsHtml.length === 0 ? '<div class="empty">—</div>' : cardsHtml.join("\n")}
+  return `<div class="col" data-key="col:${esc(title)}" data-col="${esc(title)}">
+    <div class="col-head"><button type="button" class="col-toggle" data-col-toggle="${esc(title)}" aria-pressed="false" title="collapse/expand this column (survives refresh)">${esc(title)} <span class="count">(${cardsHtml.length})</span><span class="col-toggle-icon" aria-hidden="true">▾</span></button></div>
+    <div class="col-body">
+      ${extra}
+      ${cardsHtml.length === 0 ? '<div class="empty">—</div>' : cardsHtml.join("\n")}
+    </div>
   </div>`
+}
+
+/**
+ * Filter corpus — one embedded record per WORK ITEM (session-only cards stay
+ * out: a bare session has no tags/body to match, so filtering them would be a
+ * silent, inexplicable hide). Shipped as a JSON island inside #board-root so
+ * the browser-side filter module (filter.ts) never touches BoardState or any
+ * server import — render.ts is the ONLY bridge (I-192). `data-key` anchors it
+ * across the poll morph (same trick as data-key="create:*") so the island
+ * element survives and only its text is swapped.
+ *
+ * `untagged` is computed server-side and shipped verbatim: the client's
+ * always-visible "N untagged" count must be the count of the FULL board, never
+ * of a filtered subset — otherwise filtering would rewrite the very warning
+ * that explains what the filter cannot reach (W-019/SNG-018).
+ */
+interface CorpusEntry {
+  id: string
+  status: WorkItem["status"]
+  title: string
+  tags: string[]
+  hay: string
+}
+
+function filterCorpusJson(items: WorkItem[]): string {
+  const corpus: CorpusEntry[] = items.map((i) => {
+    const tags = Array.isArray(i.tags) ? i.tags : []
+    return {
+      id: i.id,
+      status: i.status,
+      title: i.title ?? "",
+      tags,
+      hay: `${i.id} ${i.title ?? ""} ${tags.join(" ")} ${i.body ?? ""}`.toLowerCase(),
+    }
+  })
+  // `</` escaped exactly as jsonIsland() does for BoardState — a body string
+  // must never be able to break out of the script element.
+  return JSON.stringify(corpus).replaceAll("</", "<\\/")
 }
 
 function kanbanSection(
   board: BoardColumns,
   ctx: CardCtx,
+  allItems: WorkItem[],
 ): string {
   const card = (i: WorkItem) => itemCard(i, ctx)
   // In Progress interleaves WI cards with session-only cards into ONE
@@ -597,7 +638,11 @@ function kanbanSection(
   ]
   progressEntries.sort((a, b) => (a.key !== b.key ? b.key.localeCompare(a.key) : b.tie.localeCompare(a.tie)))
   const inProgress = progressEntries.map((e) => e.html)
-  return `<div class="kanban">
+  // Work-item corpus for the client-side filter (WI-084). Session-only cards
+  // are deliberately EXCLUDED from the corpus — see filterCorpusJson — so the
+  // island carries exactly the set the filter can reason about.
+  const corpusIsland = `<script id="filter-corpus" type="application/json" data-key="filter:corpus">${filterCorpusJson(allItems)}</script>`
+  return `${corpusIsland}<div class="kanban">
     ${column("Backlog", board.backlog.map(card), ctx.writesEnabled ? createForm("backlog") : "")}
     ${column("Todo", board.todo.map(card), ctx.writesEnabled ? createForm("todo") : "")}
     ${column("In Progress", inProgress)}
@@ -744,9 +789,99 @@ tr.active-dream td { background:#1c2128; }
 .open-link { margin-left:auto; color:#58a6ff; text-decoration:none; font-size:.8rem; white-space:nowrap; }
 .open-link:hover { text-decoration:underline; }
 .open-link.disabled { color:#484f58; cursor:not-allowed; }
+/* ── Board controls (WI-084): filter bar + collapse strip ───────────────────
+   Lives in the page shell OUTSIDE #board-root (I-219) so typed text / focus /
+   chip selection survive the 15s poll morph for free. All styling is on the
+   controls themselves; the board-side verdicts ride as classes on the cards
+   (.filter-hidden / .collapsed above). */
+#board-controls { position:sticky; top:0; z-index:50; background:#0d1117; padding:.5rem 0 .6rem; margin-bottom:.4rem; }
+/* The whole-controls collapse (mobile-space follow-up): #controls-row is the
+   one-line compact strip that is ALWAYS visible (toggle + search + active-
+   filter summary); #controls-panel is everything below it. The client toggles
+   .controls-collapsed on #board-controls; the class is shell-side so the poll
+   morph cannot touch it. No fixed positioning — expanded, the panel is plain
+   normal flow and the page scrolls exactly as before; collapsing simply
+   returns the space. */
+#controls-row { display:flex; align-items:center; gap:.45rem; }
+#controls-toggle { flex:0 1 auto; min-width:0; background:#21262d; color:#8b949e; border:1px solid #30363d; border-radius:6px; font-size:.72rem; padding:.25rem .6rem; cursor:pointer; font-family:inherit; white-space:nowrap; }
+#controls-toggle:hover { background:#30363d; color:#c9d1d9; }
+/* When collapsed, the summary — not the search input — is the row's flexible
+   element (flex:1 1 auto): it takes exactly what the toggle + input leave.
+   Its own overflow is honest: children wider than the box are clipped by
+   overflow:hidden (that's how the query ellipsizes). Priority INSIDE the
+   summary: the query text (.summary-q) is the shrinkable element — it can
+   shrink to zero and ellipsize; chips, the "+N more" fold and the N/M
+   verdict are pinned flex:0 0 auto so the verdict can never be the element
+   that disappears (it is the most important one). */
+#board-controls.controls-collapsed #controls-row #filter-q { flex:0 1 11rem; }
+#board-controls.controls-collapsed #controls-summary { flex:1 1 auto; }
+#controls-summary { flex:0 1 auto; min-width:2rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#484f58; font-size:.75rem; display:none; align-items:center; gap:.3rem; }
+#controls-summary .tag-chip { cursor:default; flex:0 0 auto; }
+/* The query fragment truncates with an ellipsis when space is tight (raw text
+   nodes in a flex container do not ellipsize — it needs its own box). */
+#controls-summary .summary-q { flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+/* A lone remaining chip gets the same shrink-to-ellipsis treatment as the
+   query — the verdict must never be the element clipped off the row. */
+#controls-summary .tag-chip.summary-chip-shrink { flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; }
+/* The match count never truncates — it is the verdict. */
+#controls-summary .summary-n { flex:0 0 auto; }
+/* Overflowing active tags fold into this indicator (never clipped, row stays
+   one line) — visually quiet, it just says "more than shown". */
+#controls-summary .summary-more { flex:0 0 auto; font-size:.68rem; color:#8b949e; border:1px dashed #30363d; border-radius:10px; padding:.1rem .45rem; white-space:nowrap; }
+#board-controls.controls-collapsed #controls-panel { display:none; }
+#board-controls.controls-collapsed #controls-summary { display:inline-flex; }
+#board-controls.controls-collapsed #controls-summary.has-filter { color:#c9d1d9; }
+#board-controls:not(.controls-collapsed) #controls-row { margin-bottom:.5rem; }
+#filter-bar { display:flex; flex-wrap:wrap; gap:.5rem; align-items:center; }
+#filter-q { flex:1 1 220px; min-width:160px; background:#161b22; color:#c9d1d9; border:1px solid #30363d; border-radius:6px; font-size:.85rem; padding:.4rem .6rem; font-family:inherit; }
+#filter-q::placeholder { color:#484f58; }
+#controls-row #filter-q { flex:1 1 auto; min-width:5rem; }
+#filter-tags { display:flex; flex-wrap:wrap; gap:.35rem; align-items:center; }
+.tag-chip { background:#21262d; color:#8b949e; border:1px solid #30363d; border-radius:10px; font-size:.7rem; padding:.15rem .55rem; cursor:pointer; }
+.tag-chip:hover { background:#30363d; color:#c9d1d9; }
+.tag-chip.active { background:#1f6feb; color:#fff; border-color:#388bfd; }
+/* The untagged pseudo-chip is visually distinct (dashed) — it is a STRUCTURAL
+   filter ("items this corpus cannot tag-reach"), not a real tag (W-019). */
+.tag-chip[data-tag="__untagged__"] { border-style:dashed; font-style:italic; }
+.tag-chip[data-tag="__untagged__"].active { background:#9e6a03; border-color:#d29922; color:#fff; font-style:normal; }
+#filter-clear { background:#21262d; color:#c9d1d9; border:1px solid #30363d; border-radius:6px; font-size:.72rem; padding:.25rem .6rem; cursor:pointer; }
+#filter-clear:hover { background:#30363d; }
+/* The "+N more tags" disclosure folds the long tail of a large corpus. It is
+   shell-side (outside #board-root) so its open state survives the poll morph
+   for free — same reason the whole control bar lives out here. */
+#filter-tags-more > summary { font-size:.72rem; color:#58a6ff; cursor:pointer; min-height:auto; display:inline-flex; align-items:center; padding:.15rem .4rem; margin:0; }
+#filter-tags-more[open] > summary { margin-bottom:.35rem; }
+#filter-tags-more .tag-tail { display:flex; flex-wrap:wrap; gap:.35rem; }
+#collapse-strip { display:flex; flex-wrap:wrap; gap:.35rem; margin-top:.5rem; }
+#collapse-strip .col-toggle { width:auto; flex:0 0 auto; background:#161b22; border:1px solid #21262d; border-radius:6px; padding:.3rem .6rem; text-transform:none; letter-spacing:0; font-size:.75rem; font-weight:500; }
+#collapse-strip .col-toggle .col-toggle-icon { margin-left:.35rem; }
+#collapse-strip .col-toggle[aria-pressed="true"] { background:#10141a; color:#6e7681; }
 .kanban { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.8rem; align-items:start; }
 .col { background:#10141a; border:1px solid #21262d; border-radius:10px; padding:.6rem; min-height:80px; min-width:0; }
-.col-head { font-weight:600; font-size:.85rem; color:#8b949e; padding:.15rem .3rem .5rem; text-transform:uppercase; letter-spacing:.04em; }
+.col-head { padding:.15rem .3rem .5rem; }
+/* The collapse toggle is the WHOLE column header (name + count + chevron) —
+   one wide, obvious tap target. Rendered as a button so it is keyboard-
+   focusable and announces as an action. */
+.col-toggle { display:flex; align-items:center; gap:.4rem; width:100%; background:none; border:none; padding:0; margin:0; color:#8b949e; font:inherit; font-weight:600; font-size:.85rem; text-transform:uppercase; letter-spacing:.04em; cursor:pointer; text-align:left; }
+.col-toggle .count { color:#8b949e; font-weight:400; }
+.col-toggle-icon { margin-left:auto; font-size:.75rem; transition:transform .15s; }
+/* Collapsed state: the client toggles .collapsed on the column (and
+   aria-pressed on its header button). The body is display:none'd — the column
+   KEEPS its grid track and shrinks to its header, which stays readable (name +
+   count). Mobile wants it tight; on desktop the collapsed column just narrows. */
+.col.collapsed .col-body { display:none; }
+.col.collapsed .col-toggle-icon, .col-toggle[aria-pressed="true"] .col-toggle-icon { transform:rotate(-90deg); }
+/* Client-side filtering hides cards + empty shells with a class, never by
+   removing them — the morph owns the tree; the filter only annotates it. */
+.card.filter-hidden { display:none; }
+/* All-hidden hint (mobile feedback follow-up): when the filter hides EVERY
+   work-item card the board otherwise renders as bare column shells with no
+   card-shaped hint. The client stamps .filter-empty on #board-root; the
+   empty-shell rows and the Board heading dim so the all-hidden case reads as
+   "items exist but are filtered away", not as an empty board. The heading
+   text itself names the reason in words (filter.ts stampCount). */
+#board-root.filter-empty > h2:first-of-type { opacity:.55; }
+#board-root.filter-empty .col .empty { opacity:.3; }
 .card { background:#161b22; border:1px solid #21262d; border-radius:8px; padding:.6rem .8rem; margin-bottom:.6rem; min-width:0; overflow-wrap:anywhere; }
 .card.wi { border-left:3px solid #3fb950; }
 .card.wi.paused { opacity:.55; border-left-color:#8b949e; }
@@ -870,6 +1005,24 @@ details > summary { cursor:pointer; color:#8b949e; font-size:.85rem; margin:.5re
   .col { padding:.6rem .55rem; }
   .card { padding:.7rem .75rem; }
 
+  /* Board controls (WI-084): sticky so they stay reachable while scrolling the
+     stacked columns; generous 44px touch targets; the tag corpus wraps. The
+     collapse strip is the mobile headline feature — a collapsed board on a
+     phone is 4 tappable headers instead of a wall of cards. */
+  #board-controls { padding:.4rem 0 .5rem; }
+  /* The collapsed controls are ONE 44px row: toggle + search + summary. */
+  #controls-toggle { min-height:44px; font-size:.8rem; padding:.45rem .7rem; }
+  #controls-summary { font-size:.78rem; }
+  #controls-summary .tag-chip { min-height:0; padding:.1rem .5rem; }
+  #filter-q { flex-basis:100%; min-height:44px; font-size:.9rem; }
+  #controls-row #filter-q { flex:1 1 auto; min-width:4rem; }
+  .tag-chip { min-height:34px; padding:.3rem .7rem; font-size:.72rem; }
+  #filter-clear { min-height:44px; font-size:.85rem; }
+  #collapse-strip { gap:.45rem; }
+  #collapse-strip .col-toggle { min-height:44px; padding:.45rem .8rem; font-size:.85rem; flex:1 1 40%; }
+  /* Column header toggle is already the whole header — make it thumb-sized. */
+  .col-head .col-toggle { min-height:44px; align-items:center; }
+
   /* Comfortable, thumb-tappable interactive controls. 44px min height is the
      iOS/Android floor. Applies to every write affordance + navigation link. */
   .act, .act-select, .create-form button, .create-form input,
@@ -953,9 +1106,9 @@ export function renderBoardBody(state: BoardState, notices: Notice[] = []): stri
   return `<h1>${headerMark(deriveIconState(state))}hive-board <span class="phase">HIVE state · board transitions</span></h1>
 <div class="meta mono">workspace ${esc(state.workspaceRoot)} · generated ${esc(state.generatedAt)} · live refresh 15s · ${buildBadge(state.buildSha)}</div>
 
-<h2>Board <span class="count">(${state.items.length} items · ${state.board.sessionOnly.length} session-only)</span></h2>
+<h2>Board <span class="count">(${state.items.length} items · ${state.board.sessionOnly.length} session-only)</span> <span id="filter-count" class="count" title="how many work items the current filter shows / total — updated live by the filter bar"></span></h2>
 ${noticesHtml}
-${kanbanSection(state.board, cardCtx)}
+${kanbanSection(state.board, cardCtx, state.items)}
 ${state.writesEnabled ? "" : '<div class="meta">fixture mode — write affordances disabled (transitions only ever write the workspace board)</div>'}
 ${mirrorDiagnostics(state.sessions)}
 
@@ -1026,12 +1179,88 @@ ${headIconTags(icon)}
 <style>${CSS}</style>
 </head>
 <body>
+${boardControlsHtml(state)}
 <main id="board-root">${renderBoardBody(state, notices)}</main>
 ${confirmModalHtml()}
 <script id="board-state" type="application/json">${jsonIsland(state)}</script>
 <script type="module" src="/client.js"></script>
 </body>
 </html>`
+}
+
+/**
+ * Board controls — the search/filter bar + column-collapse strip (WI-084).
+ *
+ * Lives in the page SHELL, OUTSIDE #board-root, for exactly the reason the
+ * confirmation modal does (I-219): this is user-owned transient UI (typed
+ * search text, focus, chip selection, collapse choice), and a 15s poll morph
+ * must never be able to touch it. Keeping it out of the morphed subtree is the
+ * guarantee — no preserve-list, no re-binding. All its events reach the board
+ * via document-level DELEGATION in filter.ts, and it acts on the board by
+ * toggling classes/attributes on the re-morphed cards (the morph re-renders
+ * cards from BoardState and the filter re-derives its verdicts from the fresh
+ * corpus island after every tick — they can never drift).
+ *
+ * Rendered SERVER-side (part of renderPage, not renderBoardBody) so the
+ * first paint already has it; client.ts binds it once at startup. It is NOT
+ * re-rendered per poll — that's the point.
+ *
+ * The untagged affordance (W-019/I-289/SNG-018): the "N untagged" chip is
+ * ALWAYS visible — a filter over a partially-tagged corpus needs the reachable
+ * / unreachable split on screen at all times, or an empty result is
+ * ambiguous. The count is computed server-side from the FULL item list and is
+ * re-stated by the client from each fresh corpus island (never from a filtered
+ * subset).
+ */
+function boardControlsHtml(state: BoardState): string {
+  const tagCounts = new Map<string, number>()
+  let untagged = 0
+  for (const item of state.items) {
+    const tags = Array.isArray(item.tags) ? item.tags : []
+    if (tags.length === 0) untagged++
+    for (const t of tags) tagCounts.set(t, (tagCounts.get(t) ?? 0) + 1)
+  }
+  const tags = [...tagCounts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+  const chip = (value: string, label: string, title: string) =>
+    `<button type="button" class="tag-chip" data-tag="${esc(value)}" title="${esc(title)}">${esc(label)}</button>`
+  // A large corpus renders as a wall of chips that swamps a phone. Show the
+  // most-used tags and fold the long tail behind a disclosure the user expands
+  // only when hunting a rare tag. The untagged pseudo-chip is ALWAYS visible
+  // (it's the structural affordance, not part of the tail).
+  const TOP = 12
+  const top = tags.slice(0, TOP)
+  const rest = tags.slice(TOP)
+  return `<div id="board-controls">
+  <div id="controls-row">
+    <button type="button" id="controls-toggle" aria-expanded="true" aria-controls="controls-panel" title="collapse/expand the filter/tag controls">filters ▴</button>
+    <input id="filter-q" type="search" placeholder="filter — id, title, tag, spec…" autocomplete="off" spellcheck="false" aria-label="filter work items">
+    <span id="controls-summary" title="active filter — tap “filters” to change it"></span>
+  </div>
+  <div id="controls-panel">
+    <div id="filter-bar" role="search">
+      <div id="filter-tags" role="group" aria-label="filter by tag">
+        ${top.map(([t, n]) => chip(t, `${t} ${n}`, `${n} item${n === 1 ? "" : "s"} tagged ${t} — tap to filter`)).join("\n        ")}
+        ${
+          rest.length > 0
+            ? `<details id="filter-tags-more"><summary>+${rest.length} more tags</summary><div class="tag-tail">${rest
+                .map(([t, n]) => chip(t, `${t} ${n}`, `${n} item${n === 1 ? "" : "s"} tagged ${t} — tap to filter`))
+                .join("\n        ")}</div></details>`
+            : ""
+        }
+        ${chip("__untagged__", `untagged ${untagged}`, "show ONLY items with no tags — the tagging-backlog hunting set (W-019)")}
+      </div>
+      <button type="button" id="filter-clear" title="clear search text and all tag filters" hidden>clear</button>
+    </div>
+    <div id="collapse-strip" aria-label="collapse/expand columns">
+      ${["Backlog", "Todo", "In Progress", "Done"]
+        .map(
+          (c) =>
+            `<button type="button" class="col-toggle" data-col-toggle="${esc(c)}" title="collapse/expand the ${esc(c)} column">${esc(c)} <span class="col-toggle-icon" aria-hidden="true">▾</span></button>`,
+        )
+        .join("\n      ")}
+    </div>
+  </div>
+</div>`
 }
 
 /**
