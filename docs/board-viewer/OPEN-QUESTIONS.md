@@ -142,10 +142,16 @@ list, and the board never reads or writes opencode archive state. Kept here only
 
 ## Q10 — Which sessions does the board show? (avoiding ghost cards)  ✅ RESOLVED
 The board shows **only HIVE (awakened) sessions**. The plugin tracks awakened sessions in an
-`awakeSessions` list on disk — but that list is **never pruned** (the plugin's `pruneAwakeSessions`
-is a known un-called TODO), so it accumulates **stale ids** across restarts. Trusting it directly
-would render **ghost cards** for sessions that no longer exist — the W-030 "stale tracking lies"
-failure mode again.
+`awakeSessions` list on disk. That list accumulated **stale ids** across restarts and was never
+pruned, so trusting it directly would render **ghost cards** for sessions that no longer exist —
+the W-030 "stale tracking lies" failure mode again.
+
+**Update (WI-070, 2026-08-11):** the plugin now prunes `awakeSessions` at load, but only
+**referentially** — an awake id is dropped when its registry record is dropped (invalid id shape,
+or a role that participates in nothing). It is still *not* pruned by age, and still not by absence
+from any enumeration. Against the live 70-id list this removed exactly one id. So the reasoning
+below is unchanged: the board's own intersection remains the thing that excludes ghosts, and the
+plugin-side prune is a narrowing of the input, not a replacement for it.
 
 **Resolved (user): a session belongs on the board iff it is both persisted and awakened** — i.e.
 `session.list()` ∩ `awakeSessions`. **But note (see Q11):** this intersection is only actually

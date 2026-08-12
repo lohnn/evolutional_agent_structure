@@ -81,16 +81,29 @@ export function createEventHook(ctx: HooksContext) {
       // and wake the coordinator so it can route them. The block shape (and
       // its live-vs-stale bucketing, WI-051 D) is rendered ONCE in
       // ns.formatRoutingNeeded — the two routing sites had already drifted.
+      //
+      // WI-070: the wake's TARGET and its CONTENT now come from one
+      // resolution. ns.wakeForChild resolves the child's group, hands that
+      // groupID to the content builder, and prompts that group's coordinator —
+      // so the block can no longer describe one coordinator's queue while
+      // being delivered to another's session. A group it cannot resolve is
+      // SUPPRESSED, not substituted (I-227); the mail stays on disk.
       if (ns.isCapabilitySession(props.sessionID)) {
         const capName = ns.resolveAgent(props.sessionID)
-        const capGroupID = ns.getGroupID(props.sessionID)
-        const block = ns.formatRoutingNeeded(capGroupID)
-        if (block) {
-          const reason = `Capability ${capName} completed. Pending routing needed:\n${block}`
-          ns.wakeCoordinator(reason, props.sessionID).catch((err) => {
-            log("error", `[HIVE] wakeCoordinator failed: ${String(err)}`)
+        ns.wakeForChild(props.sessionID, (groupID) => {
+          const block = ns.formatRoutingNeeded(groupID)
+          return block ? `Capability ${capName} completed. Pending routing needed:\n${block}` : null
+        })
+          .then((outcome) => {
+            if (outcome.startsWith("SUPPRESSED_")) {
+              debugLog(`[HIVE] routing wake suppressed for ${capName}: ${outcome}`, {
+                sessionID: props.sessionID,
+              })
+            }
           })
-        }
+          .catch((err) => {
+            log("error", `[HIVE] wakeForChild failed: ${String(err)}`)
+          })
       }
     }
 
@@ -182,6 +195,13 @@ export function createSystemTransformHook(ctx: HooksContext) {
 
     if (!input.sessionID) return
 
+    // Resolve identity before ANY classification below. On the first turn of a
+    // headless run this hook fires BEFORE chat.message registers the session
+    // (I-308), so every check here would otherwise read an empty record and
+    // inject nothing — and, worse, a later group-scoped read would inherit the
+    // gap. One memoized session.get closes it; subsequent turns are free.
+    await ns.ensureIdentity(input.sessionID)
+
     // Check if HIVE is awake for this session — log BEFORE the guard (W-017) so gate
     // failures are visible when HIVE_DEBUG=1.
     const isAwake = ns.hasCapabilities() && ns.isSessionAwake(input.sessionID)
@@ -261,7 +281,12 @@ export function createChatMessageHook(ctx: HooksContext) {
   return async (input: { sessionID?: string; agent?: string }, _output: unknown) => {
     const { ns } = ctx
     if (input.sessionID && input.agent) {
-      ns.registerSession(input.sessionID, input.agent)
+      // Awaited: registration now resolves the session's group from the
+      // server's parent chain (I-043 — at registration, not lazily). Letting
+      // it float would leave the first turn's hooks reading a half-filled
+      // record, which is the state the old auto-assignment guessed its way out
+      // of.
+      await ns.registerSession(input.sessionID, input.agent)
     }
   }
 }
@@ -333,6 +358,11 @@ export function createToolExecuteAfterHook(ctx: HooksContext) {
 
     // Check for pending messages that need routing (scoped to caller's group).
     // Same shared renderer as the session.idle site — one shape, no drift.
+    // W-015: this hook receives the CALLER's sessionID, not the dispatched
+    // capability's — which is exactly what we want here (the caller is the
+    // coordinator that owns the routing), but it is the reason nothing in this
+    // hook may write a session-map entry for the capability.
+    await ns.ensureIdentity(input.sessionID)
     const callerGroupID = ns.getGroupID(input.sessionID)
     const block = ns.formatRoutingNeeded(callerGroupID)
     if (block) {

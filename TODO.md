@@ -8,43 +8,7 @@ Do not add speculative work here — only items with a clear diagnosis and actio
 
 ## Open items
 
-### 1. Remove `setParent()` from nervous-system.ts
-**File:** `src/lib/nervous-system.ts`
-**Status:** Defined and exported, never called externally.
-
-`setParent(childSessionID, coordinatorSessionID)` was intended for explicit coordinator→capability
-groupID linking. The auto-assignment in `registerSession` (via `findCoordinatorSession()`) now
-covers the same ground implicitly whenever `chat.message` fires for a new capability session.
-
-**Action:** Verify no external caller exists (grep confirmed zero as of the last audit), then delete
-the method. Before deleting, confirm that the `registerSession` auto-assignment is reliable across
-all observed dispatch patterns — in particular, check whether there's ever a boot-order race where
-`findCoordinatorSession()` returns `undefined` at registration time (coordinator not yet registered
-when capability registers first).
-
----
-
-### 2. Wire `pruneAwakeSessions()` — currently a no-op dead-end
-**File:** `src/lib/nervous-system.ts`
-**Status:** Defined, never called. The `awakeSessions` set grows unboundedly in the persisted
-`.nervous-system-state.json`.
-
-`pruneAwakeSessions(keepSessionIDs: Set<string>)` is fully implemented but has no call site.
-The persisted awakeSessions set accumulates stale coordinator session IDs across restarts.
-
-**Action:** Decide on a prune policy, then wire a call. Two sensible options:
-- **Referential prune:** on `session.created` (which already runs `tickEnergy`), call
-  `pruneAwakeSessions` with the set of session IDs currently present in `sessionMap`. This drops
-  awake entries for coordinators whose sessions are no longer tracked anywhere.
-- **TTL prune:** extend `SessionInfo` with a `createdAt` timestamp and prune entries older than N
-  days (e.g. 14). More robust to the case where a coordinator session was evicted from sessionMap
-  but is still meaningfully active.
-
-The referential approach is simpler and sufficient for the common case.
-
----
-
-### 3. Investigate vestigial `snapshotChanged` call in `session.created`
+### 1. Investigate vestigial `snapshotChanged` call in `session.created`
 **File:** `src/hooks.ts`, `createEventHook`
 **Status:** Computes a result but does nothing with it.
 
@@ -68,28 +32,18 @@ mounts), which may be why the session-based snapshot check existed as a fallback
 
 ---
 
-### 4. Cross-project routing wakes the wrong coordinator
-**File:** `src/lib/nervous-system.ts` (`wakeCoordinator`, `getCoordinatorSessionFor`), `src/hooks.ts` (`session.idle` handler)
-**Status:** Observed live. Misroutes cross-thread notifications; no data loss, but noisy and misleading.
+## Graduated (WI-070, 2026-08-11)
 
-When a dormant capability has pending inbox mail, the plugin wakes "a" coordinator via
-`getCoordinatorSessionFor()`, which falls back to *any* non-capability session when the group link
-is missing. In a multi-project workspace this surfaces another project's routing notifications to
-whichever coordinator happens to be active.
+Three items left this list when session identity was rebuilt on the server's parent chain
+(`src/lib/session-identity.ts` + `NervousSystem.ensureIdentity`). Recorded here rather than
+deleted silently, because each one turned out to be a face of the same defect:
 
-Observed: a HIVE-plugin coordinator session repeatedly received "routing needed" wakes for
-`game-systems` and `flutter-web` — capabilities whose pending work belonged to the Rain- and
-kindergarten-planner threads respectively, owned by different coordinator sessions.
-
-The active coordinator cannot act on that mail without pulling another project's work into the
-wrong thread (and results would route back to the wrong coordinator).
-
-**Action:** Make the wake target group-aware. Options:
-- Prefer the capability's own `groupID` coordinator; only fall back to "any coordinator" if that
-  session is genuinely gone. (`getCoordinatorSessionFor` already accepts a child session ID — the
-  `session.idle` path should pass the dormant capability's session so its group is used.)
-- If the owning coordinator is unavailable, consider suppressing the wake entirely rather than
-  waking an unrelated one — the mail is already durable on disk and will be delivered when the
-  owning coordinator next resumes that capability (verified behaviour since the groupID fix).
-- Optionally annotate the wake notification with the owning group/project so a receiving
-  coordinator can tell at a glance that it is not theirs.
+- **`setParent()` never called** — deleted. It existed to repair a group link that
+  `registerSession` was guessing; the group is now resolved authoritatively at registration, so
+  there is nothing to repair after the fact.
+- **`pruneAwakeSessions()` dead code** — replaced by `pruneAwake()` (pure, in
+  `session-identity.ts`), called from `loadPersistedState`. It prunes REFERENTIALLY (an awake id
+  whose registry record was dropped), never by age or by absence from an enumeration.
+- **Cross-project routing woke the wrong coordinator** — the fallback that selected "any
+  non-capability session" is gone. `selectWakeTarget` resolves the wake's target and its content
+  from one group resolution and SUPPRESSES when the owner cannot be established (I-227).
