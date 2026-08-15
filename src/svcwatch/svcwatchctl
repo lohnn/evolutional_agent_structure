@@ -1,0 +1,65 @@
+#!/bin/sh
+# svcwatchctl — dashboard + control shim for svcwatch.
+# Read side: /run/svc/status.json (a dashboard, not a raw dump).
+# Write side: one line into /run/svc/control.fifo — start|stop|restart <name>.
+exec_name="$(basename "$0")"
+STATUS=/run/svc/status.json
+FIFO=/run/svc/control.fifo
+LOGS=/run/svc/logs
+
+usage() {
+  cat >&2 <<EOF
+usage: $exec_name <command>
+  list                 dashboard of all services (state, pid, restarts, uptime)
+  status               raw status.json
+  start|stop|restart <name>
+  tail <name>          tail -f the service log ($LOGS/<name>.log)
+EOF
+  exit 2
+}
+
+[ $# -ge 1 ] || usage
+cmd="$1"; shift
+
+case "$cmd" in
+  list)
+    python3 - "$STATUS" <<'PY'
+import json, sys, time
+try:
+    d = json.load(open(sys.argv[1]))
+except (OSError, json.JSONDecodeError) as e:
+    print("svcwatch status unavailable: %s" % e, file=sys.stderr)
+    sys.exit(1)
+rows = []
+for s in d.get("services", []):
+    up = s["uptime_sec"]
+    up = ("%dh%02dm" % (up // 3600, (up % 3600) // 60)) if up >= 3600 else \
+         ("%dm%02ds" % (up // 60, up % 60)) if up >= 60 else ("%ds" % up)
+    rows.append((s["name"], s["state"], str(s["pid"] or "-"),
+                 str(s["restarts"]),
+                 str((s["last_exit"] or {}).get("code", "-")), up))
+w = [max([len(r[i]) for r in rows] + [len(h)]) for i, h in
+     enumerate(("NAME", "STATE", "PID", "RESTARTS", "EXIT", "UPTIME"))]
+print("  ".join(h.ljust(w[i]) for i, h in enumerate(("NAME", "STATE", "PID", "RESTARTS", "EXIT", "UPTIME"))))
+for r in rows:
+    print("  ".join(r[i].ljust(w[i]) for i in range(6)))
+for name, err in (d.get("config_errors") or {}).items():
+    print("CONFIG ERROR %s: %s" % (name, err), file=sys.stderr)
+PY
+    ;;
+  status)
+    cat "$STATUS"
+    ;;
+  start|stop|restart)
+    [ $# -eq 1 ] || usage
+    printf '%s %s\n' "$cmd" "$1" > "$FIFO" || exit 1
+    echo "sent: $cmd $1"
+    ;;
+  tail)
+    [ $# -eq 1 ] || usage
+    exec tail -f "$LOGS/$1.log"
+    ;;
+  *)
+    usage
+    ;;
+esac

@@ -15,6 +15,7 @@ from `projects/hive-board/` on 2026-08-03; that directory no longer holds the so
 | `src/index.ts`, `src/hooks.ts`, `src/tools.ts` | plugin runtime opencode loads every session | hive-infra |
 | `src/lib/` | shared modules: locked board store, transition module, dream/YAML parsers, HIVEmind | hive-infra |
 | `src/board-viewer/` | the hive-board viewer app | board-viewer |
+| `src/svcwatch/` | svcwatch — declarative process supervision for the dev container (PID 1 subtree) | hive-infra |
 | `test/board-viewer/`, `fixtures/`, `docs/board-viewer/` | the viewer's tests, fixtures, docs | board-viewer |
 | `package.json`, `tsconfig.json`, `exports`, `bin` | packaging | hive-infra |
 
