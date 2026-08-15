@@ -1,0 +1,15 @@
+name = "hive-board"
+command = ["bun", "run", "/workspace/projects/evolutional_agent_structure/src/board-viewer/server.ts",
+           "--root", "/workspace",
+           "--host", "0.0.0.0",
+           "--port", "4400",
+           "--opencode-url", "http://127.0.0.1:4096",
+           "--gui-url", "http://studio:3000"]
+cwd = "/workspace/projects/evolutional_agent_structure"
+restart = "always"
+restart_delay_sec = 2
+backoff_max_sec = 60
+start_grace_sec = 15
+# NOTE: the entrypoint currently hand-rolls this respawn loop. Migrating to
+# this TOML is OPTIONAL and future — when it happens, delete the hand-rolled
+# hive-board block from /entrypoint.sh so only one supervisor owns the viewer.

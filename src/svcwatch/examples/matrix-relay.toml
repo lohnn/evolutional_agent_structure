@@ -1,0 +1,18 @@
+name = "matrix-relay"
+command = ["node", "dist/relay.js"]
+cwd = "/workspace/scratch/matrix-bridge"
+restart = "always"
+restart_delay_sec = 2
+backoff_max_sec = 60
+start_grace_sec = 10
+
+# NOTE (matches chat-bridge's real /workspace/.opencode/services/matrix-relay.toml):
+# deliberately NO env_file. The relay reads the opencode basic-auth credential
+# from /workspace/scratch/.opencode-server-auth.json (chmod 600) AT CALL TIME,
+# and the Matrix token from /workspace/scratch/.matrix-digest-bot.json. Keeping
+# credentials OUT of the process env matters — env is world-readable via
+# /proc/<pid>/environ on this host. env_file exists for services that need it,
+# but this one carries its secrets in file references, never inline/env values.
+# liveness_cmd = ["curl", "-sf", "http://127.0.0.1:4510/health"]
+# liveness_interval_sec = 60
+# liveness_failures = 3
