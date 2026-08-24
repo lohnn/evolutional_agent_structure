@@ -15,6 +15,9 @@
  *
  * Usage:
  *   OC_SERVER=http://localhost:3000 node oc-browser-bridge.js
+ *
+ * Setup (Dockerfile Chromium layers, entrypoint svcwatch spawn, service TOML):
+ * see docs/OC-BROWSER-BRIDGE.md. Runs under svcwatch in the dev container.
  */
 
 import { chromium } from 'playwright-core';
