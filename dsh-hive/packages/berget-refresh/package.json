@@ -1,0 +1,14 @@
+{
+  "name": "dsh-berget-refresh",
+  "version": "0.1.0",
+  "private": true,
+  "files": [
+    "index.js"
+  ],
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./package.json": "./package.json"
+  }
+}

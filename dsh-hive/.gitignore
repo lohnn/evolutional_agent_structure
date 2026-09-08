@@ -1,0 +1,3 @@
+# Runtime HIVE state leaked by test/harness runs whose cwd was the monorepo
+# (dual-run parity fixtures, hivemind messages, hive-state.json). Not source.
+.opencode/

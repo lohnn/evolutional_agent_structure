@@ -1,0 +1,16 @@
+{
+  "name": "dsh-hive",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
+    "pack:all": "pnpm -r build && pnpm -r exec pnpm pack --pack-destination ../../../dsh-hive-dist",
+    "sync-models": "node scripts/berget-models-sync.mjs"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "@types/node": "^22.0.0"
+  }
+}

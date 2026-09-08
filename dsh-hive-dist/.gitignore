@@ -1,0 +1,2 @@
+# Reproducible build artifacts (pnpm pack) — do not commit
+*.tgz
