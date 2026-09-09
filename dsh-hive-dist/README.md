@@ -104,6 +104,17 @@ own workspace install), same `cordis.*.yml` scaffold, `pnpm install`, verify.
 - The `@deepseek-ai/*` versions the plugins were built and live-gated
   against: `0.1.2-rc.1`, cordis `^4.0.1`.
 
+## Run it as a service (the other machine)
+
+`dsh-hive-web.toml` (and the optional `dsh-hive-relay.toml`) are svcwatch
+service templates: copy them into the target machine's
+`<workspace-root>/.opencode/services/`, adjust the `<...>` placeholders
+(workspace root, profile name, port, trusted host), and the watcher picks
+them up by hot-reload. The HIVE stack then survives reboots and container
+recreations exactly like `dsh-web` + `dsh-relay` do on the dev machine. The
+relay is optional — only for exposing dsh beyond the machine (dsh refuses
+`--host 0.0.0.0` by design).
+
 ## Verification already done
 
 - `pnpm -r typecheck` / `build` / `test`: all green (35/35 incl. service harnesses)

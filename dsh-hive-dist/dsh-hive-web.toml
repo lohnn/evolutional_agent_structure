@@ -1,0 +1,38 @@
+# dsh-hive-web — the HIVE-on-dsh stack as a long-running service.
+#
+# TEMPLATE: copy into the TARGET machine's <workspace-root>/.opencode/services/
+# and adjust the <...> placeholders. svcwatch (shipped by the evolutional_
+# agent_structure plugin) picks it up by hot-reload — no restart of anything
+# else needed.
+#
+# ADJUST on the target machine:
+#   1. cwd              — your workspace root. The service plugins default
+#                         their `directory` config to the process cwd, so this
+#                         is where the HIVE state (…/.opencode/) lives.
+#   2. --profile        — the profile name the cohort was installed into
+#                         (Way A of dsh-hive-dist/README.md: `hive`).
+#   3. --port           — any free LOOPBACK port; the optional relay file
+#                         must point at the same one.
+#   4. --trusted-host   — the host name your browser actually uses (e.g. your
+#                         tailnet MagicDNS name); feeds the /api trust fence.
+#   5. pnpm binary      — this dev container uses /opt/toolbox/bin/pnpm; on
+#                         any machine with pnpm on PATH, plain `pnpm` works.
+#
+# Same contract as the proven dsh-web.toml on the source machine:
+#   - PIN the dsh version (0.1.2-rc.1) — never float on `latest`; bump
+#     deliberately with the gated checklist in the plugin-release skill.
+#   - The tee to /tmp/<name>.log is LOAD-BEARING: the `?token=` launch URL is
+#     printed on boot and rotates per restart — fetch the fresh one there.
+#   - If you run dsh-berget-refresh, BERGET_API_KEY must remain UNSET in this
+#     environment (a set env var shadows the credential ref and makes its
+#     ctx.credentials.set reject).
+#   - Cookie continuity: restarts do NOT log cookied browsers out (the launch
+#     token only mints a cookie signed by the durable secret in
+#     ~/.dsh/.credentials.yaml).
+name = "dsh-hive-web"
+command = ["bash", "-c", "exec pnpm dlx @deepseek-ai/dsh@0.1.2-rc.1 --profile hive --port 4501 --no-open --trusted-host <your-host> 2>&1 | tee /tmp/dsh-hive-web.log"]
+cwd = "<your-workspace-root>"
+restart = "always"
+restart_delay_sec = 3
+backoff_max_sec = 60
+start_grace_sec = 20

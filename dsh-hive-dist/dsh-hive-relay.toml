@@ -1,0 +1,17 @@
+# dsh-hive-relay — publish dsh-hive-web (loopback 4501) on 0.0.0.0:3080.
+#
+# OPTIONAL: only needed if you expose dsh beyond the machine itself
+# (dsh refuses --host 0.0.0.0 by design — RCE fence — so the relay is the
+# exposure path, e.g. Tailscale Serve 443 -> Mac 127.0.0.1:3080 -> docker
+# publish -> this relay). If you only use dsh locally, skip this file.
+#
+# ADJUST: keep the two ports consistent with dsh-hive-web.toml (listen here =
+# the published port people connect to; target = the --port you gave dsh).
+# Requires socat on the target machine.
+name = "dsh-hive-relay"
+command = ["socat", "TCP-LISTEN:3080,bind=0.0.0.0,reuseaddr,fork", "TCP:127.0.0.1:4501"]
+cwd = "."  # irrelevant for socat; svcwatch resolves it against the workspace root
+restart = "always"
+restart_delay_sec = 2
+backoff_max_sec = 60
+start_grace_sec = 5
