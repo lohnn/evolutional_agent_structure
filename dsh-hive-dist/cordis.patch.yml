@@ -1,0 +1,27 @@
+# hive profile: all 6 @hive plugins + the Berget auth refresh provider.
+#
+# Each service plugin takes an optional `directory` config: the workspace root
+# that CONTAINS `.opencode/` (where the HIVE state — dreams/, hivemind/,
+# painpoints — lives). It defaults to the process cwd, so when you launch dsh
+# from your workspace root you can omit it entirely (as below). Set it
+# explicitly only if you launch dsh from somewhere else, e.g.:
+#
+#    - id: dream-archive
+#      name: '@hive/dsh-dream-archive'
+#      config:
+#        directory: /absolute/path/to/your/workspace
+- insert:
+    - id: dsh-berget-refresh
+      name: dsh-berget-refresh
+    - id: dream-archive
+      name: '@hive/dsh-dream-archive'
+    - id: painpoints
+      name: '@hive/dsh-painpoints'
+    - id: hive-dream-tools
+      name: '@hive/dsh-tools'
+    - id: hive-agents
+      name: '@hive/dsh-agents'
+    - id: evolution
+      name: '@hive/dsh-evolution'
+    - id: hivemind
+      name: '@hive/dsh-hivemind'
