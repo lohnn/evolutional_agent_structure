@@ -115,6 +115,27 @@ recreations exactly like `dsh-web` + `dsh-relay` do on the dev machine. The
 relay is optional — only for exposing dsh beyond the machine (dsh refuses
 `--host 0.0.0.0` by design).
 
+## Stay up to date (pre_start)
+
+`dsh-hive-web.toml` declares a `pre_start`: **`dsh-hive-update.sh` runs
+before every (re)start of the service** and re-runs the one-command
+`dsh plugin add` for the cohort against the configured `DSH_HIVE_REF`
+(`env = { DSH_HIVE_REF = "main" }` in the TOML; default `main`). So:
+
+- svcwatch boot, crash-restart, or def-change ⇒ plugins re-resolve first,
+  and the fresh dsh web boots on what it just updated.
+- `svcwatchctl restart dsh-hive-web` is the manual "pull now".
+- First run also bootstraps the profile scaffold from the kit dir next to
+  the script — the script is self-teaching; existing files are never
+  overwritten.
+- Offline with an existing install ⇒ keeps it and boots anyway (stale-but-up
+  beats down). Offline with nothing installed ⇒ the start aborts and backs
+  off until it succeeds.
+- Requires a svcwatch with `pre_start` support (this plugin version); a
+  running old watcher must be restarted once (or the container recreated).
+  `svcwatch pre_start` also fixed a latent marker bug: ctl-stop of a
+  first-boot service could resurrect it; stops now always stay down.
+
 ## Verification already done
 
 - `pnpm -r typecheck` / `build` / `test`: all green (35/35 incl. service harnesses)
@@ -126,3 +147,9 @@ relay is optional — only for exposing dsh beyond the machine (dsh refuses
   bun-based prepare runner (incl. tools' sibling-build step and the
   `workspaces`-field + `norewrite` fixes it required); `--dump-config`
   exit 0 with all 7 rows
+- Update path: `dsh-hive-update.sh` exercised cold (bootstrap + install,
+  15s), idempotent re-run, offline-tolerant (bogus ref + existing install ⇒
+  warn + exit 0) and fail-closed (bogus ref + fresh profile ⇒ exit 1)
+- svcwatch `pre_start`: 18-check behavioral driver over the real classes
+  (success gates main, failure + backoff, timeout SIGKILL + retry,
+  stop-during-pre resolves down, ctl-stop stays down, restart comes back)

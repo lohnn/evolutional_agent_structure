@@ -16,6 +16,11 @@ Schema (per *.toml in --dir, one file per service):
     restart_delay_sec = 2                # initial backoff
     backoff_max_sec = 60                 # exponential cap
     start_grace_sec = 10                 # exit within grace => crash-loop
+    # pre_start = ["/opt/hive/update.sh"] # optional argv, run before EVERY
+    # pre_start_timeout_sec = 120        # (re)start in the same session/env/
+                                        # cwd/log; non-zero exit or timeout
+                                        # aborts that start and enters backoff
+                                        # (boot-time self-update of the service)
     # liveness_cmd = ["curl", "-sf", "http://127.0.0.1:PORT/health"]
     # liveness_interval_sec = 60
     # liveness_failures = 3
@@ -145,6 +150,15 @@ class ServiceCfg:
         self.backoff_max = num("backoff_max_sec", 60, 0.1, 86400)
         self.start_grace = num("start_grace_sec", 10, 0, 3600)
 
+        self.pre_start = data.get("pre_start")
+        if self.pre_start is not None:
+            if not isinstance(self.pre_start, list) or not self.pre_start \
+                    or not all(isinstance(x, str) for x in self.pre_start):
+                bad("pre_start must be a non-empty argv array (no shell)")
+            self.pre_start_timeout = num("pre_start_timeout_sec", 120, 1, 86400)
+        else:
+            self.pre_start_timeout = None
+
         self.liveness_cmd = data.get("liveness_cmd")
         if self.liveness_cmd is not None:
             if not isinstance(self.liveness_cmd, list) or not self.liveness_cmd:
@@ -173,6 +187,10 @@ class Service:
         self.probe_pid = None         # in-flight liveness probe child
         self.pending_stop = None      # (deadline, sigkill_sent)
         self.deleted = False          # definition removed — stop, never restart
+        self.restart_pending = False  # stop was issued by a restart/redeploy —
+                                      # come back up once the stop resolves
+        self.pre_pid = None           # in-flight pre_start child
+        self.pre_deadline = 0.0       # pre_start hard timeout
         self._log = None
 
     # ── process lifecycle ────────────────────────────────────────────────────
@@ -199,8 +217,17 @@ class Service:
         return env
 
     def start(self, now):
-        if self.pid is not None:
+        if self.pid is not None or self.pre_pid is not None:
             return
+        if self.cfg.pre_start:
+            self._spawn(now, self.cfg.pre_start, pre=True)
+            return
+        self._spawn(now, self.cfg.command)
+
+    def _spawn(self, now, argv, pre=False):
+        """Fork/exec one argv into the service's session, env, cwd and log.
+        A pre_start spawn gates the main command: the service is not 'up'
+        until the pre step exits 0 — its exit is resolved by on_pre_exit."""
         try:
             pid = os.fork()
         except OSError as e:
@@ -218,7 +245,7 @@ class Service:
                 os.dup2(devnull, 0)
                 if self.cfg.cwd:
                     os.chdir(self.cfg.cwd)
-                os.execvpe(self.cfg.command[0], self.cfg.command, self.build_env())
+                os.execvpe(argv[0], argv, self.build_env())
             except BaseException as e:
                 try:
                     os.write(2, ("[svcwatch] exec failed: %s\n" % e).encode())
@@ -226,6 +253,13 @@ class Service:
                     pass
             os._exit(127)
         # ── parent ──
+        if pre:
+            self.pre_pid = pid
+            self.pre_deadline = now + self.cfg.pre_start_timeout
+            self.state = "pre_start"
+            log("%s: pre_start pid %d (timeout %ds)"
+                % (self.cfg.name, pid, int(self.cfg.pre_start_timeout)))
+            return
         self.pid = pid
         self.started = now
         self.state = "running"
@@ -236,20 +270,67 @@ class Service:
         log("%s: started pid %d" % (self.cfg.name, pid))
 
     def request_stop(self, sig=signal.SIGTERM):
-        """Signal the process GROUP — the service's whole tree goes together."""
-        if self.pid is None:
+        """Signal the process GROUP — the service's whole tree goes together
+        (the in-flight pre_start child is part of the service too)."""
+        have_main = self.pid is not None
+        have_pre = self.pre_pid is not None
+        if not have_main and not have_pre:
             return False
         if self.state != "stopping":
             self.state = "stopping"
-            self.pending_stop = (time.monotonic() + STOP_GRACE_SEC, False)
+            if have_main:
+                self.pending_stop = (time.monotonic() + STOP_GRACE_SEC, False)
+        ok = False
+        if have_main:
+            try:
+                os.killpg(self.pid, sig)
+                ok = True
+            except ProcessLookupError:
+                ok = True  # already gone; waitpid will collect it
+            except OSError as e:
+                log("%s: killpg failed: %s" % (self.cfg.name, e))
+        if have_pre:
+            self.kill_pre(sig)
+            ok = True
+        return ok
+
+    def kill_pre(self, sig=signal.SIGKILL):
+        if self.pre_pid is None:
+            return False
         try:
-            os.killpg(self.pid, sig)
+            os.killpg(self.pre_pid, sig)
             return True
         except ProcessLookupError:
-            return True  # already gone; waitpid will collect it
+            return True
         except OSError as e:
-            log("%s: killpg failed: %s" % (self.cfg.name, e))
+            log("%s: killpg(pre) failed: %s" % (self.cfg.name, e))
             return False
+
+    def on_pre_exit(self, status, now):
+        code = os.waitstatus_to_exitcode(status)
+        self.pre_pid = None
+        # A pre_start cut short by a stop request follows the same three-way
+        # resolution as on_exit (deleted / restart-pending / stay-down).
+        if self.state == "stopping":
+            self.backoff = self.cfg.restart_delay
+            if self.deleted:
+                self.state = "stopped"
+            elif self.restart_pending:
+                self.restart_pending = False
+                self.state = "backoff"
+            else:
+                self.state = "stopped"
+            return
+        if code != 0:
+            log("%s: pre_start FAILED (code %s) — no start, backing off"
+                % (self.cfg.name, code))
+            self.restarts += 1
+            self.state = "backoff"
+            self.next_start = now + self.backoff
+            self.backoff = min(self.backoff * 2, self.cfg.backoff_max)
+            return
+        log("%s: pre_start ok — starting" % self.cfg.name)
+        self._spawn(now, self.cfg.command)
 
     def on_exit(self, status, now):
         code = os.waitstatus_to_exitcode(status)
@@ -261,17 +342,18 @@ class Service:
         log("%s: exited code %s after %.1fs" % (self.cfg.name, code, uptime))
         if was_stopping:
             self.backoff = self.cfg.restart_delay
-            # Three post-stop intents, in priority order:
-            #   deleted           -> stay DOWN (definition is gone)
-            #   next_start == 0.0 -> restart marker (changed def / ctl restart)
-            #   otherwise         -> stay DOWN (ctl stop)
-            if self.deleted:
-                self.state = "stopped"
-            elif self.next_start == 0.0:
-                self.state = "backoff"
-            else:
-                self.state = "stopped"
-            return
+        # Three post-stop intents, in priority order:
+        #   deleted          -> stay DOWN (definition is gone)
+        #   restart_pending  -> come back UP (changed def / ctl restart)
+        #   otherwise        -> stay DOWN (ctl stop)
+        if self.deleted:
+            self.state = "stopped"
+        elif self.restart_pending:
+            self.restart_pending = False
+            self.state = "backoff"
+        else:
+            self.state = "stopped"
+        return
         # Policy: never restart if disabled or clean-exit-on-failure-only.
         if self.cfg.restart == "never" or (self.cfg.restart == "on-failure" and code == 0):
             self.state = "stopped"
@@ -409,8 +491,8 @@ class Watcher:
                 svc.deleted = False  # re-added
                 svc.cfg = cfg
                 log("%s: definition changed — restarting" % name)
-                svc.next_start = 0.0  # marker: bring it back up after the stop
-                if svc.pid is not None:
+                svc.restart_pending = True
+                if svc.pid is not None or svc.pre_pid is not None:
                     svc.request_stop()
                 else:
                     svc.start(now)
@@ -435,6 +517,9 @@ class Watcher:
                 for svc in self.services.values():
                     if svc.pid == pid:
                         svc.on_exit(status, now)
+                        break
+                    if svc.pre_pid == pid:
+                        svc.on_pre_exit(status, now)
                         break
                     if svc.probe_pid == pid:
                         svc.on_probe_exit(status)
@@ -462,6 +547,13 @@ class Watcher:
                     log("%s: stop grace expired — SIGKILL" % svc.cfg.name)
                     svc.request_stop(signal.SIGKILL)
                     svc.pending_stop = (deadline, True)
+        # pre_start timeout: a hung update step must never wedge the service —
+        # kill it outright; on_pre_exit takes the normal failure path (backoff)
+        for svc in self.services.values():
+            if svc.pre_pid is not None and now >= svc.pre_deadline:
+                log("%s: pre_start timed out after %ds — SIGKILL"
+                    % (svc.cfg.name, int(svc.cfg.pre_start_timeout)))
+                svc.kill_pre()
 
     # ── control FIFO ─────────────────────────────────────────────────────────
 
@@ -483,8 +575,8 @@ class Watcher:
                 svc.next_start = 0.0
                 svc.start(now)
         elif cmd == "restart" and svc:
-            svc.next_start = 0.0  # marker: bring it back up after the stop
-            if svc.pid is not None:
+            svc.restart_pending = True  # come back up after the stop
+            if svc.pid is not None or svc.pre_pid is not None:
                 svc.request_stop()
             else:
                 svc.start(now)

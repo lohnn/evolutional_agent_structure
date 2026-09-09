@@ -29,7 +29,23 @@
 #   - Cookie continuity: restarts do NOT log cookied browsers out (the launch
 #     token only mints a cookie signed by the durable secret in
 #     ~/.dsh/.credentials.yaml).
+#
+# pre_start = plugin auto-update. Runs dsh-hive-update.sh BEFORE every
+# (re)start: it (re)installs the 7-package cohort from DSH_HIVE_REF, then the
+# fresh dsh web boots on it. Offline with an existing install -> keeps it and
+# boots anyway; offline with NOTHING installed -> start aborts and backs off.
+#   - first run bootstraps the profile scaffold from the kit dir next to the
+#     script; existing files are never overwritten
+#   - `restart` the service (svcwatchctl restart dsh-hive-web) to pull a new
+#     ref mid-flight; a dsh version bump here should be deliberate (with the
+#     same update of dsh-hive-update.sh's DSH_VERSION pin)
+#   - REQUIRES a svcwatch that supports pre_start (carried by this plugin
+#     version) — on a running watcher, restart svcwatch (or recreate the
+#     container) once after the plugin lands
 name = "dsh-hive-web"
+env = { DSH_HIVE_REF = "main" }
+pre_start = ["<path-to-kit>/dsh-hive-update.sh"]
+pre_start_timeout_sec = 900
 command = ["bash", "-c", "exec pnpm dlx @deepseek-ai/dsh@0.1.2-rc.1 --profile hive --port 4501 --no-open --trusted-host <your-host> 2>&1 | tee /tmp/dsh-hive-web.log"]
 cwd = "<your-workspace-root>"
 restart = "always"
