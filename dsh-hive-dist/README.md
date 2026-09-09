@@ -115,6 +115,13 @@ own workspace install), same `cordis.*.yml` scaffold, `pnpm install`, verify.
   `BERGET_API_KEY` UNSET in the service environment (a set var shadows the
   credential ref). Any other OpenAI-compatible provider works the same way
   via a settings.yaml route; only the refresh plugin is Berget-specific.
+  **Bonus:** if the machine already has a Berget Code login (opencode's
+  `auth login` — `~/.local/share/opencode/auth.json`, key `"berget"`), the
+  update script seeds `~/.dsh/berget-credentials.json` from it on first run
+  (copy only — the refresh endpoint rotates tokens, so the script never
+  calls it; the plugin takes over from there). Never overwrites an existing
+  state file; source path overridable with `BERGET_AUTH_SOURCE`; debug with
+  `dsh-hive-update.sh --berget-only`.
 - **HIVE state survives nothing by accident**: the plugins create their
   state dirs on demand (`.opencode/dreams|hivemind|…` in the workspace,
   `mkdir -p` on first write), so a fresh machine starts empty. To carry

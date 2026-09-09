@@ -26,7 +26,16 @@
 #     exit non-zero — svcwatch aborts the start and backs off.
 set -u
 
-PROFILE="${1:-${HOME}/.dsh/profiles/hive}"
+BERGET_ONLY=0
+PROFILE=""
+for a in "$@"; do
+  case "$a" in
+    --berget-only) BERGET_ONLY=1 ;;
+    -h|--help) sed -n '2,20p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    *) PROFILE="$a" ;;
+  esac
+done
+PROFILE="${PROFILE:-${HOME}/.dsh/profiles/hive}"
 REF="${DSH_HIVE_REF:-main}"
 REPO="${DSH_HIVE_REPO:-github:lohnn/evolutional_agent_structure}"
 DSH_VERSION="${DSH_VERSION:-0.1.2-rc.1}"
@@ -43,6 +52,67 @@ command -v pnpm >/dev/null 2>&1 || die "pnpm not on PATH"
 command -v node >/dev/null 2>&1 || die "node not on PATH"
 
 mkdir -p "$PROFILE" || die "cannot create $PROFILE"
+mkdir -p "${HOME}/.dsh" || die "cannot create ${HOME}/.dsh"
+
+# ── berget credentials: adopt an existing Berget Code (opencode) login ──────
+# If the machine has already authenticated (opencode auth login for berget —
+# the artifact lives in ~/.local/share/opencode/auth.json under "berget"),
+# seed ~/.dsh/berget-credentials.json from it so dsh-berget-refresh has its
+# state from the first boot. COPY ONLY: we never call the refresh endpoint
+# here (it ROTATES the refresh token; racing the plugin's own rotation would
+# be destructive). The plugin adopts refresh-token-wise from auth.json
+# anyway; this just gives it the full state + sync-seedable access token
+# earlier. Never overwrites an existing state file (it may hold a rotated
+# token NEWER than auth.json).
+adopt_berget_credentials() {
+  local cred="$HOME/.dsh/berget-credentials.json"
+  local auth="${BERGET_AUTH_SOURCE:-$HOME/.local/share/opencode/auth.json}"
+  if [ -s "$cred" ]; then
+    log "berget: credentials already present — leaving untouched"
+    return 0
+  fi
+  if [ ! -s "$auth" ]; then
+    warn "berget: no existing Berget Code login found ($auth) — \
+run 'opencode auth login' (berget) or set BERGET_AUTH_SOURCE; continuing"
+    return 0
+  fi
+  node - "$auth" "$cred" <<'NODE'
+const fs = require("node:fs")
+const { readFileSync, writeFileSync, renameSync, mkdirSync, chmodSync } = fs
+const [authPath, credPath] = process.argv.slice(2)
+const auth = JSON.parse(readFileSync(authPath, "utf8"))
+const b = auth?.berget
+const fail = (m) => { console.error(`[dsh-hive-update] berget: ${m}`); process.exit(2) }
+if (!b || typeof b !== "object") fail(`no \"berget\" entry in ${authPath}`)
+if (b.type !== "oauth") fail(`berget auth type \"${b.type}\" — OAuth expected; not adopted`)
+if (typeof b.refresh !== "string" || b.refresh.length === 0) fail("berget entry has no refresh token")
+const state = {
+  type: "oauth",
+  refresh: b.refresh,
+  access: typeof b.access === "string" ? b.access : "",
+  expires: typeof b.expires === "number" ? b.expires : 0,
+  updatedAt: new Date().toISOString(),
+}
+mkdirSync(require("node:path").dirname(credPath), { recursive: true, mode: 0o700 })
+const tmp = `${credPath}.tmp.${process.pid}`
+writeFileSync(tmp, JSON.stringify(state, null, 2), { mode: 0o600 })
+renameSync(tmp, credPath)
+chmodSync(credPath, 0o600)
+NODE
+  case $? in
+    0) log "berget: adopted Berget Code login from $auth -> $cred (0600)" ;;
+    *) warn "berget: could not adopt from $auth (see above) — setup continues"
+       return 1 ;;
+  esac
+  return 0
+}
+
+if [ "$BERGET_ONLY" = 1 ]; then
+  adopt_berget_credentials
+  exit $?
+fi
+
+adopt_berget_credentials
 
 # ── scaffold: copy-if-absent from THIS kit directory ────────────────────────
 for f in .pnpmfile.cjs cordis.yml cordis.patch.yml; do
