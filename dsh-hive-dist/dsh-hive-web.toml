@@ -18,9 +18,9 @@
 #                         the hook) and the main command (bash expands
 #                         ${DSH_VERSION:?...}) read it. Never float latest.
 #
-# Everything else has sane defaults; the only literals to touch if ports
-# collide are --port 4501 here and the matching pair in dsh-hive-relay.toml
-# (socat is argv-exec'd, no env expansion, hence the literals).
+# Everything else has sane defaults; ports are env too:
+#   - DSH_PORT            the port dsh web listens on (loopback) — MUST match
+#                         DSH_PORT in dsh-hive-relay.toml's target side
 #
 # THE KIT IS FETCHED, NOT COPIED: pre_start syncs dsh-hive-update.sh +
 # .pnpmfile.cjs + the cordis ymls from the repo (raw.githubusercontent, TLS,
@@ -54,7 +54,7 @@
 # boot. REQUIRES a svcwatch with pre_start support (this plugin version) —
 # restart a running old watcher (or recreate the container) once.
 name = "dsh-hive-web"
-env = { DSH_WORKSPACE_ROOT = "/home/you/your-workspace", DSH_TRUSTED_HOST = "your-host.example.net", DSH_HIVE_REF = "main", DSH_VERSION = "0.1.2-rc.1" }
+env = { DSH_WORKSPACE_ROOT = "/home/you/your-workspace", DSH_TRUSTED_HOST = "127.0.0.1", DSH_HIVE_REF = "main", DSH_VERSION = "0.1.2-rc.1", DSH_PORT = "4501" }
 pre_start = ["bash", "-c", '''
 d="$HOME/.dsh/hive-kit"; mkdir -p "$d"
 base="${DSH_HIVE_RAW:-https://raw.githubusercontent.com/lohnn/evolutional_agent_structure}/${DSH_HIVE_REF:-main}/dsh-hive-dist"
@@ -73,7 +73,7 @@ exit 1
 # cwd: svcwatch chdirs LITERALLY (no env expansion), so keep it relative —
 # the workspace root is applied by the cd inside the command instead.
 cwd = "."
-command = ["bash", "-c", 'cd "${DSH_WORKSPACE_ROOT:?DSH_WORKSPACE_ROOT must be set -- see env line}" && exec pnpm dlx @deepseek-ai/dsh@${DSH_VERSION:?DSH_VERSION must be set -- see env line} --profile hive --port 4501 --no-open --trusted-host "${DSH_TRUSTED_HOST:?DSH_TRUSTED_HOST must be set -- see env line}" 2>&1 | tee /tmp/dsh-hive-web.log']
+command = ["bash", "-c", 'cd "${DSH_WORKSPACE_ROOT:?DSH_WORKSPACE_ROOT must be set -- see env line}" && exec pnpm dlx @deepseek-ai/dsh@${DSH_VERSION:?DSH_VERSION must be set -- see env line} --profile hive --port ${DSH_PORT:?DSH_PORT must be set -- see env line} --no-open --trusted-host "${DSH_TRUSTED_HOST:?DSH_TRUSTED_HOST must be set -- see env line}" 2>&1 | tee /tmp/dsh-hive-web.log']
 restart = "always"
 restart_delay_sec = 3
 backoff_max_sec = 60

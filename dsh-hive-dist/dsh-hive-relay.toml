@@ -1,15 +1,21 @@
-# dsh-hive-relay — publish dsh-hive-web (loopback 4501) on 0.0.0.0:3080.
+# dsh-hive-relay — publish dsh-hive-web on 0.0.0.0, reachable past dsh's RCE
+# fence (dsh refuses --host 0.0.0.0 by design; the relay is the exposure
+# path). OPTIONAL: only needed if you expose dsh beyond the machine itself
+# (e.g. Tailscale Serve 443 -> host port -> docker publish -> this relay).
+# If you only use dsh locally on the host, skip this file entirely — with
+# compose publishing 127.0.0.1:DSH_PORT -> container:DSH_PORT your browser
+# reaches dsh directly and no relay exists.
 #
-# OPTIONAL: only needed if you expose dsh beyond the machine itself
-# (dsh refuses --host 0.0.0.0 by design — RCE fence — so the relay is the
-# exposure path, e.g. Tailscale Serve 443 -> Mac 127.0.0.1:3080 -> docker
-# publish -> this relay). If you only use dsh locally, skip this file.
+# ADJUST the env line (see dsh-hive-web.toml for the full setup story):
+#   - DSH_RELAY_PORT  the published/listen port — must match your compose
+#                     publish for this service
+#   - DSH_PORT        must equal dsh-hive-web.toml's DSH_PORT (the target
+#                     dsh web listens on, loopback)
 #
-# ADJUST: keep the two ports consistent with dsh-hive-web.toml (listen here =
-# the published port people connect to; target = the --port you gave dsh).
-# Requires socat on the target machine.
+# socat itself is argv-exec'd with no env expansion, hence the bash wrapper.
 name = "dsh-hive-relay"
-command = ["socat", "TCP-LISTEN:3080,bind=0.0.0.0,reuseaddr,fork", "TCP:127.0.0.1:4501"]
+env = { DSH_RELAY_PORT = "3080", DSH_PORT = "4501" }
+command = ["bash", "-c", 'exec socat "TCP-LISTEN:${DSH_RELAY_PORT:?DSH_RELAY_PORT must be set -- see env line},bind=0.0.0.0,reuseaddr,fork" "TCP:127.0.0.1:${DSH_PORT:?DSH_PORT must be set -- must match DSH_PORT in dsh-hive-web.toml}"']
 cwd = "."  # irrelevant for socat; svcwatch resolves it against the workspace root
 restart = "always"
 restart_delay_sec = 2
