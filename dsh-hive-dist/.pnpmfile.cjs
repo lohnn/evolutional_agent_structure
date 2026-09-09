@@ -41,7 +41,27 @@ const TARBALLS = {
 // git+https://…/repo.git#ref&path:…  or  github:owner/repo#ref&path:…
 const GIT_SPEC = /^(.+?)#([^&]+)&path:.+$/
 
-let gitTemplate = null // { base, ref } once a git spec for a hive package is seen
+// Default git template for git-mode first installs: a manifest scan can miss
+// the profile's own new specs (pnpm `add` injects them in-memory), and
+// readPackage call order is not guaranteed, so the fallback must not depend
+// on having seen a spec. Default ref = main; override with env
+// DSH_HIVE_REPO / DSH_HIVE_REF if you install from a fork or branch.
+const GIT_FALLBACK = {
+  base: process.env.DSH_HIVE_REPO ?? "git+https://github.com/lohnn/evolutional_agent_structure.git",
+  ref: process.env.DSH_HIVE_REF ?? "main",
+}
+
+// TARBALL mode only when the packed tarballs sit next to this hook.
+const HAS_TARBALLS = (() => {
+  try {
+    // eslint-disable-next-line no-undef -- this file is CommonJS
+    return require("node:fs").existsSync(`${__dirname}/hive-dsh-dream-archive-0.0.1.tgz`)
+  } catch {
+    return false
+  }
+})()
+
+let gitTemplate = HAS_TARBALLS ? null : GIT_FALLBACK
 
 function depsOf(pkg, field) {
   return Object.entries(pkg[field] ?? {})
