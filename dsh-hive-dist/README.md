@@ -125,6 +125,10 @@ before every (re)start of the service** and re-runs the one-command
 - svcwatch boot, crash-restart, or def-change ⇒ plugins re-resolve first,
   and the fresh dsh web boots on what it just updated.
 - `svcwatchctl restart dsh-hive-web` is the manual "pull now".
+- The dsh version pin lives ONCE, in the service's `env`
+  (`DSH_VERSION`): `pre_start` inherits it from svcwatch, the main command
+  expands `${DSH_VERSION:?...}` from it (bash fails loudly if the line is
+  removed) — bump in one place, both sides follow.
 - First run also bootstraps the profile scaffold from the kit dir next to
   the script — the script is self-teaching; existing files are never
   overwritten.

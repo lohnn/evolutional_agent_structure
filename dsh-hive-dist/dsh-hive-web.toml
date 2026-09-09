@@ -19,8 +19,12 @@
 #                         any machine with pnpm on PATH, plain `pnpm` works.
 #
 # Same contract as the proven dsh-web.toml on the source machine:
-#   - PIN the dsh version (0.1.2-rc.1) — never float on `latest`; bump
-#     deliberately with the gated checklist in the plugin-release skill.
+#   - PIN the dsh version below in `env` — the single source of truth: BOTH
+#     pre_start (svcwatch passes the service env to the hook) and the main
+#     command (bash expands ${DSH_VERSION:?...}) read it. Bump = one edit.
+#     Never float on `latest`; bump deliberately with the gated checklist in
+#     the plugin-release skill. Hand-running dsh-hive-update.sh outside this
+#     service falls back to its own DSH_VERSION default (0.1.2-rc.1).
 #   - The tee to /tmp/<name>.log is LOAD-BEARING: the `?token=` launch URL is
 #     printed on boot and rotates per restart — fetch the fresh one there.
 #   - If you run dsh-berget-refresh, BERGET_API_KEY must remain UNSET in this
@@ -37,16 +41,15 @@
 #   - first run bootstraps the profile scaffold from the kit dir next to the
 #     script; existing files are never overwritten
 #   - `restart` the service (svcwatchctl restart dsh-hive-web) to pull a new
-#     ref mid-flight; a dsh version bump here should be deliberate (with the
-#     same update of dsh-hive-update.sh's DSH_VERSION pin)
+#     ref mid-flight; the dsh version bump flows from the env line above
 #   - REQUIRES a svcwatch that supports pre_start (carried by this plugin
 #     version) — on a running watcher, restart svcwatch (or recreate the
 #     container) once after the plugin lands
 name = "dsh-hive-web"
-env = { DSH_HIVE_REF = "main" }
+env = { DSH_HIVE_REF = "main", DSH_VERSION = "0.1.2-rc.1" }
 pre_start = ["<path-to-kit>/dsh-hive-update.sh"]
 pre_start_timeout_sec = 900
-command = ["bash", "-c", "exec pnpm dlx @deepseek-ai/dsh@0.1.2-rc.1 --profile hive --port 4501 --no-open --trusted-host <your-host> 2>&1 | tee /tmp/dsh-hive-web.log"]
+command = ["bash", "-c", "exec pnpm dlx @deepseek-ai/dsh@${DSH_VERSION:?DSH_VERSION must be set -- see env line} --profile hive --port 4501 --no-open --trusted-host <your-host> 2>&1 | tee /tmp/dsh-hive-web.log"]
 cwd = "<your-workspace-root>"
 restart = "always"
 restart_delay_sec = 3

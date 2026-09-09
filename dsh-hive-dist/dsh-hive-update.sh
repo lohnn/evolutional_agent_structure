@@ -9,7 +9,9 @@
 # Env:
 #   DSH_HIVE_REF   git ref to track                        (default: main)
 #   DSH_HIVE_REPO  git base for the specs                  (default: github:lohnn/evolutional_agent_structure)
-#   DSH_VERSION    pinned harness version for `dsh plugin` (default: 0.1.2-rc.1)
+#   DSH_VERSION    pinned harness version for `dsh plugin` (default: 0.1.2-rc.1;
+#                  when run under the dsh-hive-web service, the TOML `env` sets
+#                  this — that line is then the single version source)
 #
 # Behavior:
 #   - First run: creates the profile scaffold next to what a `pnpm install`
