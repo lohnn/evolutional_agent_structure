@@ -10,6 +10,10 @@ to install on a new machine, pick one:
 | **B. tarballs + scaffold (this dir)** | offline / pinned-freeze installs | this directory |
 | **C. `link:` to a checkout** | development on the plugins themselves | a built monorepo checkout |
 
+Prereqs for all ways: **Node 22+, pnpm 11, git** (Way A's cohort is
+git-hosted; pnpm `dlx` likewise needs it), and a model-provider credential —
+see "Shared notes" (the step people miss).
+
 ## Way A — `dsh plugin add` from git (recommended)
 
 The repo declares `workspaces` and each package self-builds on install
@@ -96,6 +100,26 @@ own workspace install), same `cordis.*.yml` scaffold, `pnpm install`, verify.
 - **Run dsh from your workspace root** — the dir containing `.opencode/`.
   The service plugins default their `directory` config to the process cwd;
   `cordis.patch.yml` shows how to pin it explicitly.
+- **Setup is copy-paste now**: in `dsh-hive-web.toml`, the five `>>> EDIT`
+  values (workspace root, trusted host, hive ref, dsh version, kit path) are
+  the only edits; workspace root/host/dsh-version/reach svcwatch's children
+  through the service `env` — no other placeholders. `cwd` stays `.` because
+  svcwatch chdirs literally (no env expansion); the command `cd`s to
+  `DSH_WORKSPACE_ROOT` itself.
+- **Model provider + credentials** (the step people miss): dsh needs a model
+  route. For the Berget setup these plugins were gated with:
+  `~/.dsh/berget-credentials.json` (login/token file, rotated in place by
+  `dsh-berget-refresh`), a hand-declared `llm-pi-ai.providers.berget` models
+  block in `~/.dsh/settings.yaml` — refresh it with
+  `node dsh-hive/scripts/berget-models-sync.mjs` from a checkout — and
+  `BERGET_API_KEY` UNSET in the service environment (a set var shadows the
+  credential ref). Any other OpenAI-compatible provider works the same way
+  via a settings.yaml route; only the refresh plugin is Berget-specific.
+- **HIVE state survives nothing by accident**: the plugins create their
+  state dirs on demand (`.opencode/dreams|hivemind|…` in the workspace,
+  `mkdir -p` on first write), so a fresh machine starts empty. To carry
+  history over, copy those dirs from an existing workspace BEFORE first
+  boot.
 - **Dreamcatcher preset** (needed for `hive_dispatch(capability:
   "dreamcatcher")`): copy `node_modules/@hive/dsh-agents/presets/dreamcatcher/`
   into `~/.dsh/.agent-presets/dreamcatcher/`.
