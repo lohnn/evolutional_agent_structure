@@ -139,19 +139,39 @@ own workspace install), same `cordis.*.yml` scaffold, `pnpm install`, verify.
 
 `dsh-hive-web.toml` (and the optional `dsh-hive-relay.toml`) are svcwatch
 service templates: copy them into the target machine's
-`<workspace-root>/.opencode/services/`, adjust the `<...>` placeholders
-(workspace root, profile name, port, trusted host), and the watcher picks
-them up by hot-reload. The HIVE stack then survives reboots and container
+`<workspace-root>/.opencode/services/` and fill in the `env` line. The
+watcher hot-reloads them; the HIVE stack then survives reboots and container
 recreations exactly like `dsh-web` + `dsh-relay` do on the dev machine. The
 relay is optional — only for exposing dsh beyond the machine (dsh refuses
 `--host 0.0.0.0` by design).
 
+**The TOML is the only locally maintained artifact.** Its `pre_start` is a
+short fetcher: on every (re)start it syncs the kit (`dsh-hive-update.sh`,
+`.pnpmfile.cjs`, both cordis ymls) from this repo at the pinned
+`DSH_HIVE_REF` into `~/.dsh/hive-kit` (repo is public; raw.githubusercontent,
+TLS), then execs the freshly fetched script. So the kit itself is
+always-current too — hand-copying `dsh-hive-dist/` is only needed for the
+tarball flow (Way B). Consequences, verified from a cold fake-HOME:
+
+- cold bootstrap: kit fetch + profile scaffold + cohort from the public
+  GitHub transport in ~25s, then `--dump-config` exit 0 / 7 rows
+- offline with a cached kit → boots on the cached copy (stale-but-up)
+- offline with nothing fetched yet → pre_start fails, start backs off until
+  egress works
+- `DSH_HIVE_REF=main` runs the repo's latest on every restart — the intent;
+  pin a tag/SHA (or set `DSH_HIVE_RAW` for forks) to freeze
+
+Future road (when wanted): the TOML itself can move into the repo the same
+way — the pre_start chain is already built so the TOML is the only moving
+part.
+
 ## Stay up to date (pre_start)
 
-`dsh-hive-web.toml` declares a `pre_start`: **`dsh-hive-update.sh` runs
-before every (re)start of the service** and re-runs the one-command
-`dsh plugin add` for the cohort against the configured `DSH_HIVE_REF`
-(`env = { DSH_HIVE_REF = "main" }` in the TOML; default `main`). So:
+`dsh-hive-web.toml` declares a `pre_start` that runs on every (re)start of
+the service: first it syncs the kit from the repo (see above), then
+`dsh-hive-update.sh` re-runs the one-command `dsh plugin add` for the cohort
+against the configured `DSH_HIVE_REF` (`env` in the TOML; default `main`).
+So:
 
 - svcwatch boot, crash-restart, or def-change ⇒ plugins re-resolve first,
   and the fresh dsh web boots on what it just updated.

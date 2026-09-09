@@ -1,32 +1,41 @@
 # dsh-hive-web — the HIVE-on-dsh stack as a long-running service.
 #
 # TEMPLATE: copy into the TARGET machine's <workspace-root>/.opencode/services/
-# and fill in the env line + the pre_start path. svcwatch (shipped by the
-# evolutional_agent_structure plugin) hot-reloads it.
+# and fill in the env line. svcwatch (shipped by the evolutional_agent_
+# structure plugin) hot-reloads it.
 #
-# SETUP = 5 values in the lines marked `>>> EDIT` and nothing else:
+# SETUP = 4 values in the env line below and nothing else:
 #   - DSH_WORKSPACE_ROOT  absolute path of the workspace the HIVE state
 #                         (.opencode/) lives in; the plugins default their
 #                         `directory` config to the process cwd, and the main
 #                         command cds there before exec
 #   - DSH_TRUSTED_HOST    the host name your browser actually uses (e.g. your
 #                         tailnet MagicDNS name) — feeds the /api trust fence
-#   - DSH_HIVE_REF        git ref the plugin cohort tracks for updates
+#   - DSH_HIVE_REF        git ref the plugin cohort AND the kit itself track
+#        # default: main - for updates both are refreshed on every (re)start
 #   - DSH_VERSION         pinned harness version — SINGLE source of truth:
 #                         BOTH pre_start (svcwatch passes the service env to
 #                         the hook) and the main command (bash expands
 #                         ${DSH_VERSION:?...}) read it. Never float latest.
-#   - pre_start path      absolute path to the kit's dsh-hive-update.sh
-#                         (copy the whole dsh-hive-dist/ dir somewhere fixed,
-#                         e.g. ~/.dsh/hive-kit/)
 #
 # Everything else has sane defaults; the only literals to touch if ports
-# collide are --port 4501 here and the matching pair in dsh-hive-relay.toml.
+# collide are --port 4501 here and the matching pair in dsh-hive-relay.toml
+# (socat is argv-exec'd, no env expansion, hence the literals).
 #
-# Preconditions on the target machine: Node 22+, pnpm AND git on svcwatch's
-# PATH (BASE_ENV covers /usr/local/… through /usr/bin — else add a PATH= in
-# env), network for the first bootstrap (harness download + git clone + 7
-# tsc prepares), and a model provider credential (see README "Shared notes").
+# THE KIT IS FETCHED, NOT COPIED: pre_start syncs dsh-hive-update.sh +
+# .pnpmfile.cjs + the cordis ymls from the repo (raw.githubusercontent, TLS,
+# the pinned DSH_HIVE_REF) into ~/.dsh/hive-kit on EVERY (re)start, then runs
+# the freshly fetched script. That means: the only locally maintained
+# artifact is THIS TOML. Consequences:
+#   - offline with a cached kit -> boots on the cached copy (stale-but-up)
+#   - offline with NEVER-fetched kit -> pre_start fails, start backs off
+#   - DSH_HIVE_REF=main runs THIS REPO's latest on every restart — that is
+#     the intent (self-updating cohort + kit), tighten the ref to a tag/SHA
+#     if you want frozen behavior. Fork hosts: override DSH_HIVE_RAW env.
+#   - prereqs on the machine: Node 22+, pnpm AND git AND curl on svcwatch's
+#     PATH (BASE_ENV covers /usr/local/… through /usr/bin — else add a PATH
+#     in env), network for the first bootstrap, a model-provider credential
+#     (README "Shared notes" — the step people miss).
 #
 # Also note:
 #   - The tee to /tmp/<name>.log is LOAD-BEARING: the `?token=` launch URL is
@@ -38,21 +47,29 @@
 #     token only mints a cookie signed by the durable secret in
 #     ~/.dsh/.credentials.yaml).
 #
-# pre_start = plugin auto-update. Runs dsh-hive-update.sh BEFORE every
-# (re)start: it (re)installs the 7-package cohort from DSH_HIVE_REF, then the
-# fresh dsh web boots on it. Offline with an existing install -> keeps it and
-# boots anyway; offline with NOTHING installed -> start aborts and backs off.
-#   - first run bootstraps the profile scaffold from the kit dir next to the
-#     script; existing files are never overwritten
-#   - `restart` the service (svcwatchctl restart dsh-hive-web) to pull a new
-#     ref mid-flight; the dsh version bump flows from the env line above
-#   - REQUIRES a svcwatch that supports pre_start (carried by this plugin
-#     version) — on a running watcher, restart svcwatch (or recreate the
-#     container) once after the plugin lands
+# pre_start = kit + plugin auto-update. Fetches the 4 kit files from the
+# repo, then dsh-hive-update.sh does the one-command `dsh plugin add` for the
+# 7-package cohort from DSH_HIVE_REF, seeds Berget credentials from an
+# existing Berget Code login if there is one, and hands over a fresh dsh web
+# boot. REQUIRES a svcwatch with pre_start support (this plugin version) —
+# restart a running old watcher (or recreate the container) once.
 name = "dsh-hive-web"
 env = { DSH_WORKSPACE_ROOT = "/home/you/your-workspace", DSH_TRUSTED_HOST = "your-host.example.net", DSH_HIVE_REF = "main", DSH_VERSION = "0.1.2-rc.1" }
-pre_start = ["<path-to-kit>/dsh-hive-update.sh"]
-pre_start_timeout_sec = 900
+pre_start = ["bash", "-c", '''
+d="$HOME/.dsh/hive-kit"; mkdir -p "$d"
+base="${DSH_HIVE_RAW:-https://raw.githubusercontent.com/lohnn/evolutional_agent_structure}/${DSH_HIVE_REF:-main}/dsh-hive-dist"
+for f in dsh-hive-update.sh .pnpmfile.cjs cordis.yml cordis.patch.yml; do
+  if curl -fsSL --max-time 60 "$base/$f" -o "$d/.tmp.$f"; then
+    mv "$d/.tmp.$f" "$d/$f"
+    chmod 755 "$d/dsh-hive-update.sh"
+  fi
+done
+if [ -x "$d/dsh-hive-update.sh" ]; then
+  exec "$d/dsh-hive-update.sh"
+fi
+echo "[dsh-hive-pre-start] FATAL: kit not fetched from $base and no cached copy in $d" >&2
+exit 1
+''']
 # cwd: svcwatch chdirs LITERALLY (no env expansion), so keep it relative —
 # the workspace root is applied by the cd inside the command instead.
 cwd = "."
