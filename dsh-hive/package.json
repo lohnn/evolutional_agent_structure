@@ -2,6 +2,9 @@
   "name": "dsh-hive",
   "private": true,
   "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "build": "pnpm -r build",
     "test": "pnpm -r test",
