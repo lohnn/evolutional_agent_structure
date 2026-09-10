@@ -14,7 +14,7 @@
 #
 # socat itself is argv-exec'd with no env expansion, hence the bash wrapper.
 name = "dsh-hive-relay"
-env = { DSH_RELAY_PORT = "3080", DSH_PORT = "4501" }
+env = { DSH_RELAY_PORT = "3080", DSH_PORT = "3002" }
 command = ["bash", "-c", 'exec socat "TCP-LISTEN:${DSH_RELAY_PORT:?DSH_RELAY_PORT must be set -- see env line},bind=0.0.0.0,reuseaddr,fork" "TCP:127.0.0.1:${DSH_PORT:?DSH_PORT must be set -- must match DSH_PORT in dsh-hive-web.toml}"']
 cwd = "."  # irrelevant for socat; svcwatch resolves it against the workspace root
 restart = "always"
