@@ -73,7 +73,7 @@ exit 1
 # cwd: svcwatch chdirs LITERALLY (no env expansion), so keep it relative —
 # the workspace root is applied by the cd inside the command instead.
 cwd = "."
-command = ["bash", "-c", 'cd "${DSH_WORKSPACE_ROOT:?DSH_WORKSPACE_ROOT must be set -- see env line}" && exec pnpm dlx @deepseek-ai/dsh@${DSH_VERSION:?DSH_VERSION must be set -- see env line} --profile hive --port ${DSH_PORT:?DSH_PORT must be set -- see env line} --no-open --trusted-host "${DSH_TRUSTED_HOST:?DSH_TRUSTED_HOST must be set -- see env line}" 2>&1 | tee /tmp/dsh-hive-web.log']
+command = ["bash", "-c", 'cd "${DSH_WORKSPACE_ROOT:?DSH_WORKSPACE_ROOT must be set -- see env line}" && exec pnpm dlx --allow-build @deepseek-ai/dsh-subprocess-local --allow-build @google/genai --allow-build koffi --allow-build node-pty --allow-build protobufjs @deepseek-ai/dsh@${DSH_VERSION:?DSH_VERSION must be set -- see env line} --profile hive --port ${DSH_PORT:?DSH_PORT must be set -- see env line} --no-open --trusted-host "${DSH_TRUSTED_HOST:?DSH_TRUSTED_HOST must be set -- see env line}" 2>&1 | tee /tmp/dsh-hive-web.log']
 restart = "always"
 restart_delay_sec = 3
 backoff_max_sec = 60
