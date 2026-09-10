@@ -169,7 +169,14 @@ SPECS+=("$REPO#$REF&path:dsh-hive/packages/berget-refresh")
 
 log "dsh plugin add — profile=$NAME ref=$REF (7 packages)"
 if DSH_HIVE_REF="$REF" DSH_HIVE_REPO="$REPO" \
-   pnpm dlx "@deepseek-ai/dsh@$DSH_VERSION" plugin --profile "$NAME" add "${SPECS[@]}"; then
+   pnpm dlx \
+     --allow-build @deepseek-ai/dsh-subprocess-local \
+     --allow-build @google/genai \
+     --allow-build koffi \
+     --allow-build node-pty \
+     --allow-build protobufjs \
+     "@deepseek-ai/dsh@$DSH_VERSION" \
+     plugin --profile "$NAME" add "${SPECS[@]}"; then
   log "cohort up to date (ref $REF)"
   exit 0
 fi

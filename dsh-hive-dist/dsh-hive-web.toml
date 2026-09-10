@@ -54,7 +54,7 @@
 # boot. REQUIRES a svcwatch with pre_start support (this plugin version) —
 # restart a running old watcher (or recreate the container) once.
 name = "dsh-hive-web"
-env = { DSH_WORKSPACE_ROOT = "/home/you/your-workspace", DSH_TRUSTED_HOST = "127.0.0.1", DSH_HIVE_REF = "main", DSH_VERSION = "0.1.2-rc.1", DSH_PORT = "4501" }
+env = { DSH_WORKSPACE_ROOT = "/home/you/your-workspace", DSH_TRUSTED_HOST = "127.0.0.1", DSH_HIVE_REF = "main", DSH_VERSION = "0.1.2-rc.1", DSH_PORT = "3002" }
 pre_start = ["bash", "-c", '''
 d="$HOME/.dsh/hive-kit"; mkdir -p "$d"
 base="${DSH_HIVE_RAW:-https://raw.githubusercontent.com/lohnn/evolutional_agent_structure}/${DSH_HIVE_REF:-main}/dsh-hive-dist"
