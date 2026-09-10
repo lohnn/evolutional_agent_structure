@@ -247,7 +247,7 @@ export async function apply(ctx) {
     catalogTimer = setTimeout(async () => {
       try {
         await new Promise((resolve, reject) => {
-          const child = spawn(process.execPath, [CATALOG_SYNC_SCRIPT, '--only-new-models'], { stdio: 'ignore' });
+          const child = spawn(process.execPath, [CATALOG_SYNC_SCRIPT], { stdio: 'ignore' });
           child.once('error', reject);
           child.once('exit', (code) => code === 0 ? resolve() : reject(new Error(`exit ${code}`)));
         });

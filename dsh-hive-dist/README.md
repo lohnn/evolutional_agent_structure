@@ -124,7 +124,10 @@ own workspace install), same `cordis.*.yml` scaffold, `pnpm install`, verify.
   `dsh-hive-update.sh --berget-only`.
 - **Catalog refresh:** the refresh plugin runs the fetched catalog sync once
   per day. Metadata refreshes do not generate completion tokens; reasoning
-  probes run only for models newly added since the previous saved catalog.
+  probes run only until each model has a conclusive result. Quota limits,
+  timeouts, and server errors remain pending and retry on the next daily run;
+  completed per-model probe state is kept in
+  `~/.dsh/berget-reasoning-probes.json`.
 - **HIVE state survives nothing by accident**: the plugins create their
   state dirs on demand (`.opencode/dreams|hivemind|…` in the workspace,
   `mkdir -p` on first write), so a fresh machine starts empty. To carry

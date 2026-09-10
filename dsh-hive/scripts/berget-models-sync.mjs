@@ -33,8 +33,6 @@
  *                  came from verified sweeps; re-run with this flag to re-verify
  *                  everything, ideally when Berget is quiet)
  *   --no-models-dev skip the models.dev maxTokens lookup for new ids
- *   --only-new-models probe reasoning effort only for models absent from the
- *                  current settings file; intended for the daily refresh.
  *
  * Idempotent: running twice yields no diff. Writes are atomic; the previous
  * settings.yaml is kept as settings.yaml.bak-<timestamp>.
@@ -51,6 +49,7 @@ const API = process.env.BERGET_API_URL || 'https://api.berget.ai';
 const SETTINGS = join(homedir(), '.dsh', 'settings.yaml');
 const STATE_FILE = join(homedir(), '.dsh', 'berget-credentials.json');
 const AUTH_JSON = join(homedir(), '.local', 'share', 'opencode', 'auth.json');
+const PROBE_STATE_FILE = join(homedir(), '.dsh', 'berget-reasoning-probes.json');
 
 const EFFORT_LADDER = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 // offered (picker-visible) ladder — full wire-verified set, no exotic gaps
@@ -200,13 +199,15 @@ function effortMap(sweep, k, prevLevels) {
   return lines.join('\n');
 }
 
+const isConclusiveSweep = (sweep) =>
+  Object.values(sweep).every((outcome) => outcome === 'ok' || outcome === 'HTTP 400');
+
 // ── main ──────────────────────────────────────────────────────────────────────
 
 const args = new Set(process.argv.slice(2));
 const DRY = args.has('--dry');
 const NO_PROBE = args.has('--no-probe');
 const NO_MODELS_DEV = args.has('--no-models-dev');
-const ONLY_NEW_MODELS = args.has('--only-new-models');
 
 const token = await bearer();
 process.stderr.write('[berget-models-sync] credential ok\n');
@@ -230,15 +231,14 @@ process.stderr.write(`[berget-models-sync] ${ids.length} chat models on the endp
 
 const settingsText = await readFile(SETTINGS, 'utf8');
 const prevModels = parsePreviousModels(settingsText);
+const probeState = (await readJson(PROBE_STATE_FILE)) ?? {};
 
 // ── effort sweep (parallel, cheap 16-token probes) ───────────────────────────
 const sweeps = new Map();
 if (!NO_PROBE) {
   const targets = args.has('--probe-all')
     ? ids
-    : ONLY_NEW_MODELS
-      ? ids.filter((id) => !prevModels.has(id) && !(KNOWN[id] ?? {}).omitAllEfforts)
-    : ids.filter((id) => prevModels.get(id)?.effortsRaw === undefined && !(KNOWN[id] ?? {}).omitAllEfforts);
+    : ids.filter((id) => !probeState[id]?.complete && !(KNOWN[id] ?? {}).omitAllEfforts);
   if (targets.length < ids.length) {
     process.stderr.write(`[berget-models-sync] sweeping ${targets.length}/${ids.length} models (use --probe-all to re-verify mapped ones)\n`);
   }
@@ -310,7 +310,7 @@ for (const id of ids) {
       : prevModels.get(id)?.effortsRaw;
   if (k.note) head.push(`          # ${k.note}`);
   if (mapText) head.push(`          reasoningEfforts:\n${mapText}`);
-  if (!NO_PROBE && sweep && !effortMap(sweep, id) && !k.omitAllEfforts && !k.note) {
+  if (!NO_PROBE && sweep && isConclusiveSweep(sweep) && !effortMap(sweep, id) && !k.omitAllEfforts && !k.note) {
     head.push(`          # sweep: no reasoning_effort values accepted on the wire`);
   }
 
@@ -329,6 +329,14 @@ for (const [id] of prevModels) {
 
 const block = lines.join('\n');
 
+// A non-200/non-400 response says nothing about the selected effort: quota,
+// temporary outages, and transport errors must be retried on a later sync.
+for (const [id, sweep] of sweeps) {
+  if (isConclusiveSweep(sweep)) {
+    probeState[id] = { complete: true, at: new Date().toISOString() };
+  }
+}
+
 // default-model safety net
 const dm = settingsText.match(/agent-default-model:\n  provider: \S+\n  model: (\S+)/);
 const defaultModel = dm?.[1];
@@ -342,6 +350,7 @@ if (start < 0 || end < 0 || end < start) {
   console.error('[berget-models-sync] could not locate the berget models block — refusing to write');
   process.exit(1);
 }
+
 const needle = cur.slice(start + 1, end + 1); // includes trailing newline of block
 
 if (needle === block + '\n') {
@@ -358,6 +367,8 @@ if (needle === block + '\n') {
     console.log(`[berget-models-sync] wrote settings.yaml (backup: ${bak})`);
   }
 }
+
+if (!DRY && sweeps.size) await writeJsonAtomic(PROBE_STATE_FILE, probeState);
 
 if (changes.length) console.log('changes:\n  ' + changes.join('\n  '));
 if (!defaultLive) {
