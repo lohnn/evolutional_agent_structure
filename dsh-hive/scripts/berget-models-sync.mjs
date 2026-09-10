@@ -33,6 +33,8 @@
  *                  came from verified sweeps; re-run with this flag to re-verify
  *                  everything, ideally when Berget is quiet)
  *   --no-models-dev skip the models.dev maxTokens lookup for new ids
+ *   --only-new-models probe reasoning effort only for models absent from the
+ *                  current settings file; intended for the daily refresh.
  *
  * Idempotent: running twice yields no diff. Writes are atomic; the previous
  * settings.yaml is kept as settings.yaml.bak-<timestamp>.
@@ -204,6 +206,7 @@ const args = new Set(process.argv.slice(2));
 const DRY = args.has('--dry');
 const NO_PROBE = args.has('--no-probe');
 const NO_MODELS_DEV = args.has('--no-models-dev');
+const ONLY_NEW_MODELS = args.has('--only-new-models');
 
 const token = await bearer();
 process.stderr.write('[berget-models-sync] credential ok\n');
@@ -233,6 +236,8 @@ const sweeps = new Map();
 if (!NO_PROBE) {
   const targets = args.has('--probe-all')
     ? ids
+    : ONLY_NEW_MODELS
+      ? ids.filter((id) => !prevModels.has(id) && !(KNOWN[id] ?? {}).omitAllEfforts)
     : ids.filter((id) => prevModels.get(id)?.effortsRaw === undefined && !(KNOWN[id] ?? {}).omitAllEfforts);
   if (targets.length < ids.length) {
     process.stderr.write(`[berget-models-sync] sweeping ${targets.length}/${ids.length} models (use --probe-all to re-verify mapped ones)\n`);

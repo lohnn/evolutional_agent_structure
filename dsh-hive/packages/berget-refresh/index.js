@@ -31,6 +31,7 @@ import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
 import { readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
+import { spawn } from 'node:child_process';
 
 // credentialRef is a brand + a POSIX-identifier check; inlining it keeps this
 // plugin dependency-free (a link: dep cannot resolve @deepseek-ai/* from the
@@ -57,6 +58,9 @@ const STATE_FILE = join(homedir(), '.dsh', 'berget-credentials.json');
 const EXPIRY_MARGIN_MS = 90 * 1000;
 // Poll cadence fallback / retry backoff.
 const RETRY_MS = 60 * 1000;
+const CATALOG_SYNC_MS = 24 * 60 * 60 * 1000;
+const CATALOG_SYNC_STATE = join(homedir(), '.dsh', 'berget-catalog-sync.json');
+const CATALOG_SYNC_SCRIPT = join(homedir(), '.dsh', 'hive-kit', 'berget-models-sync.mjs');
 
 export async function apply(ctx) {
   const log = ctx.logger ?? console;
@@ -71,6 +75,7 @@ export async function apply(ctx) {
   let stopped = false;
   let timer = null;
   let inFlight = null;
+  let catalogTimer = null;
 
   // Synchronous seed at apply()-time: if the persisted state file still holds a
   // valid access token, push it into the credential store BEFORE any request
@@ -235,9 +240,32 @@ export async function apply(ctx) {
     return inFlight;
   }
 
+  async function syncCatalog() {
+    let lastSync = 0;
+    try { lastSync = JSON.parse(await readFile(CATALOG_SYNC_STATE, 'utf8')).at ?? 0; } catch {}
+    const delay = Math.max(0, lastSync + CATALOG_SYNC_MS - Date.now());
+    catalogTimer = setTimeout(async () => {
+      try {
+        await new Promise((resolve, reject) => {
+          const child = spawn(process.execPath, [CATALOG_SYNC_SCRIPT, '--only-new-models'], { stdio: 'ignore' });
+          child.once('error', reject);
+          child.once('exit', (code) => code === 0 ? resolve() : reject(new Error(`exit ${code}`)));
+        });
+        await writeJsonAtomic(CATALOG_SYNC_STATE, { at: Date.now() });
+        log.info?.('[dsh-berget-refresh] refreshed Berget model catalog');
+      } catch (e) {
+        log.warn?.('[dsh-berget-refresh] catalog refresh failed: %s', e?.message ?? e);
+      } finally {
+        syncCatalog();
+      }
+    }, delay);
+    catalogTimer.unref?.();
+  }
+
   ctx.on?.('dispose', () => {
     stopped = true;
     clearTimeout(timer);
+    clearTimeout(catalogTimer);
   });
 
   // Boot refresh: re-refresh-on-boot and seed the store BEFORE dsh proceeds to
@@ -253,6 +281,8 @@ export async function apply(ctx) {
   } catch (e) {
     log.warn?.('[dsh-berget-refresh] boot refresh failed (non-fatal): %s', e?.message ?? e);
   }
+
+  syncCatalog();
 
   log.info?.('[dsh-berget-refresh] plugin applied (endpoint %s)', REFRESH_ENDPOINT);
 }

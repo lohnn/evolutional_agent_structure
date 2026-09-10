@@ -47,7 +47,8 @@
 #     token only mints a cookie signed by the durable secret in
 #     ~/.dsh/.credentials.yaml).
 #
-# pre_start = kit + plugin auto-update. Fetches the 4 kit files from the
+# pre_start = kit + plugin auto-update. Fetches the kit files and model
+# catalog synchronizer from the
 # repo, then dsh-hive-update.sh does the one-command `dsh plugin add` for the
 # 7-package cohort from DSH_HIVE_REF, seeds Berget credentials from an
 # existing Berget Code login if there is one, and hands over a fresh dsh web
@@ -64,6 +65,9 @@ for f in dsh-hive-update.sh .pnpmfile.cjs cordis.yml cordis.patch.yml; do
     chmod 755 "$d/dsh-hive-update.sh"
   fi
 done
+if curl -fsSL --max-time 60 "${base%/dsh-hive-dist}/dsh-hive/scripts/berget-models-sync.mjs" -o "$d/.tmp.berget-models-sync.mjs"; then
+  mv "$d/.tmp.berget-models-sync.mjs" "$d/berget-models-sync.mjs"
+fi
 if [ -x "$d/dsh-hive-update.sh" ]; then
   exec "$d/dsh-hive-update.sh"
 fi
