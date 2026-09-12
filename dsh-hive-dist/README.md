@@ -18,7 +18,7 @@ see "Shared notes" (the step people miss).
 
 The repo declares `workspaces` and each package self-builds on install
 (`prepare`), so git-hosted installs carry a built `dist/`. Run ONE add
-command with all seven packages (they are one cohort; tools needs its
+command with all eight packages (they are one cohort; tools needs its
 siblings in the same install):
 
 ```sh
@@ -33,13 +33,14 @@ for p in agents dream-archive evolution hivemind painpoints tools; do
   SPECS+=("github:lohnn/evolutional_agent_structure#$REF&path:dsh-hive/packages/$p")
 done
 SPECS+=("github:lohnn/evolutional_agent_structure#$REF&path:dsh-hive/packages/berget-refresh")
+SPECS+=("github:lohnn/evolutional_agent_structure#$REF&path:dsh-hive/packages/berget-usage")
 
 DSH_HIVE_REF=$REF pnpm dlx --allow-build @deepseek-ai/dsh-subprocess-local --allow-build @google/genai --allow-build koffi --allow-build node-pty --allow-build protobufjs @deepseek-ai/dsh plugin --profile hive add "${SPECS[@]}"
 ```
 
 Notes:
 
-- **All seven in ONE add command.** The `.pnpmfile.cjs` hook rewrites the
+- **All eight in ONE add command.** The `.pnpmfile.cjs` hook rewrites the
   inter-package specs to the same repo+ref; installing one alone leaves its
   siblings unresolved.
 - **`DSH_HIVE_REF`** seeds the hook's default template on the first add (the
@@ -48,7 +49,7 @@ Notes:
 - **Re-running the same `add` command upgrades** the whole cohort to the new
   commit of `$REF`.
 - Verify: `pnpm dlx --allow-build @deepseek-ai/dsh-subprocess-local --allow-build @google/genai --allow-build koffi --allow-build node-pty --allow-build protobufjs @deepseek-ai/dsh --profile hive --dump-config` → exit 0,
-  7 plugin rows.
+  8 plugin rows.
 
 ### Profile pnpm-workspace.yaml
 
@@ -78,7 +79,7 @@ Do NOT delete `.pnpmfile.cjs` from the profile — without it, tools' sibling
 
 ## Way B — tarballs + scaffold (this directory, offline)
 
-1. In a repo checkout: `cd dsh-hive && pnpm pack:all` regenerates the 7
+1. In a repo checkout: `cd dsh-hive && pnpm pack:all` regenerates the 8
    tarballs into this directory.
 2. Copy this whole directory to `~/.dsh/profiles/hive/` on the other machine
    — tarballs + scaffold (`.pnpmfile.cjs`, `cordis.yml`, `cordis.patch.yml`,
@@ -114,7 +115,9 @@ own workspace install), same `cordis.*.yml` scaffold, `pnpm install`, verify.
   `node dsh-hive/scripts/berget-models-sync.mjs` from a checkout — and
   `BERGET_API_KEY` UNSET in the service environment (a set var shadows the
   credential ref). Any other OpenAI-compatible provider works the same way
-  via a settings.yaml route; only the refresh plugin is Berget-specific.
+  via a settings.yaml route; only the refresh plugin and the usage panel
+  (`dsh-berget-usage`, the web sidebar panel showing rolling seat budgets,
+  per-model caps, subscription period and API credits) are Berget-specific.
   **Bonus:** if the machine already has a Berget Code login (opencode's
   `auth login` — `~/.local/share/opencode/auth.json`, key `"berget"`), the
   update script seeds `~/.dsh/berget-credentials.json` from it on first run

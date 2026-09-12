@@ -1,4 +1,5 @@
-# hive profile: all 6 @hive plugins + the Berget auth refresh provider.
+# hive profile: all 6 @hive plugins + the Berget pairing (dsh-berget-refresh
+# feeds the model credentials; dsh-berget-usage renders the seat-usage panel).
 #
 # Each service plugin takes an optional `directory` config: the workspace root
 # that CONTAINS `.opencode/` (where the HIVE state — dreams/, hivemind/,
@@ -13,6 +14,8 @@
 - insert:
     - id: dsh-berget-refresh
       name: dsh-berget-refresh
+    - id: dsh-berget-usage
+      name: dsh-berget-usage
     - id: dream-archive
       name: '@hive/dsh-dream-archive'
     - id: painpoints
