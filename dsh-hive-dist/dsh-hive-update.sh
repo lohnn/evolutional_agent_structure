@@ -154,11 +154,28 @@ if [ ! -f "$PKG" ]; then
 {
   "name": "dsh-profile-$NAME",
   "private": true,
-  "dsh": { "profile": { "bundles": ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-headless"] } }
+  "dsh": { "profile": { "bundles": ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app"] } }
 }
 EOF
   log "profile: wrote package.json"
 fi
+
+# The service passes web-only flags, so repair profiles created by earlier
+# versions of this script that selected the headless bundle.
+node - "$PKG" <<'NODE'
+const fs = require("node:fs")
+const path = process.argv[2]
+const pkg = JSON.parse(fs.readFileSync(path, "utf8"))
+const profile = pkg.dsh?.profile
+if (!profile || !Array.isArray(profile.bundles)) process.exit(0)
+const headless = "@deepseek-ai/dsh-headless"
+const web = "@deepseek-ai/dsh-web-app"
+const index = profile.bundles.indexOf(headless)
+if (index < 0) process.exit(0)
+profile.bundles[index] = web
+profile.bundles = profile.bundles.filter((bundle, i, bundles) => bundle !== web || i === bundles.indexOf(web))
+fs.writeFileSync(path, `${JSON.stringify(pkg, null, 2)}\n`)
+NODE
 
 # ── install / update: all eight in ONE add (cohort + hook template needs it) ─
 SPECS=()
@@ -170,7 +187,14 @@ SPECS+=("$REPO#$REF&path:dsh-hive/packages/berget-usage")
 
 log "dsh plugin add — profile=$NAME ref=$REF (8 packages)"
 if DSH_HIVE_REF="$REF" DSH_HIVE_REPO="$REPO" \
-   pnpm dlx "@deepseek-ai/dsh@$DSH_VERSION" plugin --profile "$NAME" add "${SPECS[@]}"; then
+   pnpm dlx \
+     --allow-build @deepseek-ai/dsh-subprocess-local \
+     --allow-build @google/genai \
+     --allow-build koffi \
+     --allow-build node-pty \
+     --allow-build protobufjs \
+     "@deepseek-ai/dsh@$DSH_VERSION" \
+     plugin --profile "$NAME" add "${SPECS[@]}"; then
   log "cohort up to date (ref $REF)"
   exit 0
 fi

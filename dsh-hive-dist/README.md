@@ -35,7 +35,7 @@ done
 SPECS+=("github:lohnn/evolutional_agent_structure#$REF&path:dsh-hive/packages/berget-refresh")
 SPECS+=("github:lohnn/evolutional_agent_structure#$REF&path:dsh-hive/packages/berget-usage")
 
-DSH_HIVE_REF=$REF pnpm dlx @deepseek-ai/dsh plugin --profile hive add "${SPECS[@]}"
+DSH_HIVE_REF=$REF pnpm dlx --allow-build @deepseek-ai/dsh-subprocess-local --allow-build @google/genai --allow-build koffi --allow-build node-pty --allow-build protobufjs @deepseek-ai/dsh plugin --profile hive add "${SPECS[@]}"
 ```
 
 Notes:
@@ -48,7 +48,7 @@ Notes:
   You can skip it once `REF=main`.
 - **Re-running the same `add` command upgrades** the whole cohort to the new
   commit of `$REF`.
-- Verify: `pnpm dlx @deepseek-ai/dsh --profile hive --dump-config` → exit 0,
+- Verify: `pnpm dlx --allow-build @deepseek-ai/dsh-subprocess-local --allow-build @google/genai --allow-build koffi --allow-build node-pty --allow-build protobufjs @deepseek-ai/dsh --profile hive --dump-config` → exit 0,
   8 plugin rows.
 
 ### Profile pnpm-workspace.yaml
@@ -133,8 +133,9 @@ own workspace install), same `cordis.*.yml` scaffold, `pnpm install`, verify.
 - **Dreamcatcher preset** (needed for `hive_dispatch(capability:
   "dreamcatcher")`): copy `node_modules/@hive/dsh-agents/presets/dreamcatcher/`
   into `~/.dsh/.agent-presets/dreamcatcher/`.
-- **Web client instead of headless:** swap `"@deepseek-ai/dsh-headless"` for
-  `"@deepseek-ai/dsh-web-app"` in the profile's `dsh.profile.bundles`.
+- **Web client:** `dsh-hive-update.sh` configures the profile with
+  `"@deepseek-ai/dsh-web-app"` and repairs earlier service profiles that used
+  `"@deepseek-ai/dsh-headless"`.
 - The `@deepseek-ai/*` versions the plugins were built and live-gated
   against: `0.1.2-rc.1`, cordis `^4.0.1`.
 
