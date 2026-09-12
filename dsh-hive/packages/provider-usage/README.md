@@ -1,0 +1,111 @@
+# dsh-provider-usage — the shared, tabbed usage panel
+
+The **general shape** of the provider usage surface: one sidebar entry ("Usage")
+that opens one panel with **one tab per provider**. It owns no provider-specific
+logic. Provider plugins ship as separate dsh packages and plug in from both
+halves:
+
+| Package | Role |
+|---|---|
+| `dsh-provider-usage` (**this**) | client: sidebar entry, `main` panel, tab chrome, the `provider-usage.tab` extension seat · host: optional `providerUsage` registry service + `GET /api/provider-usage/providers` debug route |
+| `dsh-berget-usage` | one provider plugin: Berget Code seat subscription (its own API client, its own snapshot route, its own tab) |
+
+This split exists so a second provider (e.g. the one on the other machine,
+living next to Berget Code there) is just **another provider package** — both
+tabs then show up inside the same panel and switch via the tab bar.
+
+## Extension contract
+
+### Client side (required)
+
+Shared boot facts you do NOT need to re-implement: the core's `main`
+registration declares the child slot `provider-usage.tab`
+(`{ kind: 'list', scope: 'root' }`). Your client half registers one list entry
+there — the same pattern the shell's own `sidebar.panellist` uses:
+
+```js
+// my-provider/client.js (the dsh client-module contract)
+window.__ModuleLoader__.load({
+  id: 'dsh-my-usage',
+  factory: (require) => {
+    const React = require('react');
+
+    function MyPanel() {
+      // Fetch YOUR snapshot route, render YOUR cards. Self-contained:
+      // no props are required; `{ active }` is passed today (always true —
+      // only the active tab is mounted).
+      return React.createElement('div', { style: { padding: '24px 28px 40px' } }, '…');
+    }
+
+    return {
+      name: 'dsh-my-usage',
+      inject: ['slots', 'timer'],
+      apply(ctx) {
+        const slots = ctx.get('slots');
+        if (slots === undefined) return;
+        ctx.effect(() => { /* YOUR <style data-plugin-css="…"> styles */ }, 'my styles');
+        slots.inject('provider-usage.tab', () => slots.register(
+          { name: 'provider-usage.tab', id: 'my-provider', order: 200, label: 'MyProvider' },
+          () => React.createElement(MyPanel),
+        ));
+      },
+    };
+  },
+});
+```
+
+Rules:
+
+- **Never touch `main` or `sidebar.panellist`** — those are the core's.
+- `id` (stable slug) must be unique among provider tabs; `order` sorts the tab
+  bar (berget uses `100` — pick `200+`); `label` is a plain string shown in the
+  tab button.
+- Only the **active** tab is mounted (`renderSlot(..., { only: active })`), so
+  your component may mount/unmount on every tab switch. Do your own fetch in a
+  `useEffect` (mount = initial load; keep any polling inside your own fiber
+  via `ctx.interval`).
+- If the core client is missing, you may register your own standalone
+  `main`/`sidebar.panellist` pair as a fallback — dsh-berget-usage does exactly
+  this by checking `window.__DSH_BOOT__.entries` for `dsh-provider-usage`
+  before choosing its registration route.
+
+### Host side (optional)
+
+A provider serves **its own** snapshot route under a provider-owned path (its
+credential handling and sanitizers stay in the provider package — the core
+never abstracts HTTP or tokens). The debug route
+`GET /api/provider-usage/providers` answers:
+
+```json
+{ "ok": true, "providers": [{ "id": "berget", "label": "Berget",
+                               "route": "/api/berget-usage/snapshot", "note": null }] }
+```
+
+To appear there, announce from your host half:
+
+```js
+const providerUsage = ctx.get('providerUsage');   // OPTIONAL — never `inject` it
+if (providerUsage && typeof providerUsage.register === 'function') {
+  ctx.effect(() => providerUsage.register({
+    id: 'my-provider', label: 'MyProvider', route: '/api/my-provider-usage/snapshot',
+  }), 'my providerUsage row');
+}
+```
+
+Reading the service via `ctx.get` (optional) instead of `inject` keeps your
+provider package fully bootable on machines that do not run this core.
+
+## Files
+
+- `index.js` — host half: `providerUsage` service + registry route.
+- `client.js` — client half: tabbed panel, sidebar entry, `provider-usage.tab` seat.
+- `test/` — node-only micro tests (registry state machine, route handler).
+
+## Wiring a machine
+
+1. `dsh-hive/packages/provider-usage` linked into the dsh `web` profile
+   (`link:` row in `$DSH_HOME/profiles/web/package.json` + hand pnpm install /
+   the matching node_modules symlink, same as the berget cohort).
+2. `- id: provider-usage` / `name: dsh-provider-usage` in the profile's
+   `cordis.patch.yml` insert list, before the provider rows.
+3. Add one package per provider (skeleton above) and register its tab.

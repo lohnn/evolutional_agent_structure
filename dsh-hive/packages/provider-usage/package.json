@@ -1,8 +1,8 @@
 {
-  "name": "dsh-berget-usage",
-  "version": "0.2.0",
+  "name": "dsh-provider-usage",
+  "version": "0.1.0",
   "private": true,
-  "description": "Berget provider plugin for the shared usage panel: a 'Berget' tab (rolling budget windows, per-model breakdown and caps, subscription period and API credits) fed by its own /api/berget-usage/snapshot route. Standalone-panel fallback when dsh-provider-usage is absent.",
+  "description": "Provider-usage general shape: one shared, tabbed usage panel whose tabs are contributed by per-provider subscription plugins (client tab chrome + host registry).",
   "type": "module",
   "main": "./index.js",
   "exports": {
@@ -12,7 +12,8 @@
   },
   "files": [
     "index.js",
-    "client.js"
+    "client.js",
+    "README.md"
   ],
   "scripts": {
     "test": "node --test"
