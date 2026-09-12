@@ -1,0 +1,9 @@
+# dsh-berget-refresh profile bundle: joins the load stack of any profile that
+# adds this package as a dependency (`dsh plugin add` reconciles
+# dsh.bundle packages automatically — no user-patch rows needed).
+# Config-free by design: the refresher is entirely environment-driven
+# (state file + auth.json under the user's home; BERGET_API_KEY must stay
+# UNSET in the process environment so the credential ref wins).
+- insert:
+    - id: dsh-berget-refresh
+      name: dsh-berget-refresh
