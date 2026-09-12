@@ -288,6 +288,7 @@ window.__ModuleLoader__.load({
     }
 
     let apply_ctx = null;
+    let applied_once = false;
 
     function PanelIcon(props) {
       const size = props && typeof props.size === 'number' ? props.size : 20;
@@ -299,7 +300,14 @@ window.__ModuleLoader__.load({
 
     return {
       name: 'dsh-berget-usage',
+      // Hard dependencies: registration goes through the slots service, and
+      // the panel's refresh/tick effects use ctx.interval. The client context
+      // guard throws "cannot get property X without inject" for any undeclared
+      // service property, so both must be declared for the loader to sequence.
+      inject: ['slots', 'timer'],
       apply(ctx) {
+        if (applied_once) return; // idempotent: duplicate apply would re-register the same slot keys and throw
+        applied_once = true;
         apply_ctx = ctx;
         const slots = ctx.get('slots');
         if (slots === undefined) {
