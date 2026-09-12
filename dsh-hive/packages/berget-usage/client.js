@@ -6,6 +6,14 @@
 // Loader imports the package row and mounts it on the client context like any
 // other plugin.
 //
+// SPLIT NOTE — this is now a PROVIDER plugin. The general shape (one sidebar
+// entry, one panel, a tab per provider) lives in dsh-provider-usage; this
+// package contributes the "Berget" TAB into that panel via the
+// `provider-usage.tab` list slot. See the registration block at the bottom:
+// when the provider-usage core is composed into this boot (checked from
+// window.__DSH_BOOT__) it registers there; otherwise it keeps the standalone
+// `main` + `sidebar.panellist` surface for core-less machines.
+//
 // Differences vs the dynamic-plug-in twin (session-scoped berget-1):
 //   - CSS: a fiber-owned <style data-plugin-css="dsh-berget-usage"> tag
 //     (the module system recognizes that attribute) instead of the dynamic
@@ -298,6 +306,27 @@ window.__ModuleLoader__.load({
         React.createElement('rect', { x: 16, y: 3, width: 4, height: 16, rx: 1, fill: 'currentColor' }));
     }
 
+    // ── registration ────────────────────────────────────────────────────────
+    //
+    // Provider plugin for the shared, tabbed usage panel (dsh-provider-usage).
+    // When that core's client half is composed into THIS boot, register as a
+    // provider tab and let the core own the sidebar + panel chrome. When it is
+    // absent (older compositions, or machines that want only the Berget
+    // panel), fall back to the standalone surface this package owned before
+    // the split: its own `main` panel + `sidebar.panellist` entry.
+    //
+    // The decision reads the boot manifest (window.__DSH_BOOT__) — static
+    // truth about this boot's composition — so there is no timing race with
+    // the core's fiber: after a composition that includes the core, the tab
+    // route is taken from the very first render.
+    const PROVIDER_USAGE_CORE = 'dsh-provider-usage';
+    function coreClientComposed() {
+      if (typeof window === 'undefined') return false;
+      const boot = window.__DSH_BOOT__;
+      return !!(boot && Array.isArray(boot.entries) &&
+        boot.entries.some((row) => row && row.id === PROVIDER_USAGE_CORE));
+    }
+
     return {
       name: 'dsh-berget-usage',
       // Hard dependencies: registration goes through the slots service, and
@@ -321,9 +350,19 @@ window.__ModuleLoader__.load({
           document.head.appendChild(style);
           return () => style.remove();
         }, 'berget-usage panel styles');
-        slots.inject('main', () => { slots.register({ name: 'main', key: 'berget-usage' }, () => React.createElement(BergetPanel)); });
-        slots.inject('sidebar.panellist', () => { slots.register({ name: 'sidebar.panellist', id: 'berget-usage', order: 100, label: 'Berget usage' }, (props) => React.createElement(PanelIcon, props)); });
-        console.log('[dsh-berget-usage] client plugin applied (panel + rolling budget needles)');
+        if (coreClientComposed()) {
+          slots.inject('provider-usage.tab', () => {
+            slots.register(
+              { name: 'provider-usage.tab', id: 'berget', order: 100, label: 'Berget' },
+              () => React.createElement(BergetPanel),
+            );
+          });
+          console.log('[dsh-berget-usage] client plugin applied (provider-usage tab: Berget)');
+        } else {
+          slots.inject('main', () => { slots.register({ name: 'main', key: 'berget-usage' }, () => React.createElement(BergetPanel)); });
+          slots.inject('sidebar.panellist', () => { slots.register({ name: 'sidebar.panellist', id: 'berget-usage', order: 100, label: 'Berget usage' }, (props) => React.createElement(PanelIcon, props)); });
+          console.log('[dsh-berget-usage] client plugin applied (standalone panel + rolling budget needles)');
+        }
       },
     };
   },
