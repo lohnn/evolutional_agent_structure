@@ -18,7 +18,7 @@
 #     needs (.pnpmfile.cjs, cordis ymls, pnpm-workspace.yaml with the two
 #     settings git-hosted cohorts require, minimal package.json). Existing
 #     files are NEVER overwritten — adjust them in place afterward.
-#   - Every run: `dsh plugin add` for all SEVEN packages in one command
+#   - Every run: `dsh plugin add` for all EIGHT packages in one command
 #     (same repo+ref). pnpm re-resolves the ref; re-running upgrades.
 #   - Offline tolerance: if the add fails BUT the profile already has the
 #     cohort installed, we keep the existing install and exit 0 so the
@@ -160,14 +160,15 @@ EOF
   log "profile: wrote package.json"
 fi
 
-# ── install / update: all seven in ONE add (cohort + hook template needs it) ─
+# ── install / update: all eight in ONE add (cohort + hook template needs it) ─
 SPECS=()
 for p in agents dream-archive evolution hivemind painpoints tools; do
   SPECS+=("$REPO#$REF&path:dsh-hive/packages/$p")
 done
 SPECS+=("$REPO#$REF&path:dsh-hive/packages/berget-refresh")
+SPECS+=("$REPO#$REF&path:dsh-hive/packages/berget-usage")
 
-log "dsh plugin add — profile=$NAME ref=$REF (7 packages)"
+log "dsh plugin add — profile=$NAME ref=$REF (8 packages)"
 if DSH_HIVE_REF="$REF" DSH_HIVE_REPO="$REPO" \
    pnpm dlx "@deepseek-ai/dsh@$DSH_VERSION" plugin --profile "$NAME" add "${SPECS[@]}"; then
   log "cohort up to date (ref $REF)"

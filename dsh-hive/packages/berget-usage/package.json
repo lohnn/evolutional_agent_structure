@@ -1,0 +1,24 @@
+{
+  "name": "dsh-berget-usage",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Berget Code seat-usage panel: rolling budget windows, per-model breakdown and caps, subscription period and API credits.",
+  "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "client.js"
+  ],
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "inject": [],
+      "external": []
+    }
+  }
+}
