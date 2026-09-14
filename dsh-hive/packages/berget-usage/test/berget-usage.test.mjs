@@ -3,8 +3,8 @@
 // These keep the provider-plugin split from silently regressing on either
 // half: the client must offer BOTH registration routes (provider tab +
 // standalone fallback), and the host must announce itself to the optional
-// providerUsage registry with ctx.get (inject would park boot on a machine
-// without dsh-provider-usage).
+// providerUsage registry through a ctx.inject WAIT (order-agnostic across
+// bundle orders; absent core = callback never fires, boot never parks).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -33,11 +33,57 @@ test('client: fetches its own snapshot route (provider-owned, core-independent)'
   assert.match(clientSrc, /\/api\/berget-usage\/snapshot/, 'snapshot URL present');
 });
 
-test('host: optional providerUsage row via ctx.get, never inject', () => {
-  assert.match(hostSrc, /export const inject = \['credentials', 'subprocess'\]/, 'host inject list unchanged');
-  assert.match(hostSrc, /ctx\.get\('providerUsage'\)/, 'registry lookup is optional via ctx.get');
-  assert.doesNotMatch(hostSrc, /inject: \[[^\]]*providerUsage/, 'registry must NOT be an inject dependency');
+test('host: registry row rides a ctx.inject wait (order-agnostic), never an inject dep', () => {
+  assert.match(hostSrc, /export const inject = \['credentials', 'subprocess'\]/, 'host inject list unchanged (boot never parks on the core)');
+  assert.ok(hostSrc.includes("ctx.inject?.(['providerUsage']"), 'registry row waits via ctx.inject — no apply-time ctx.get race across bundle orders');
+  assert.match(hostSrc, /providerUsage\.register\(\{/, 'registry call present');
   assert.match(hostSrc, /id: 'berget',/, 'registry row id');
   assert.match(hostSrc, /new RegExp|ROUTE_PATH/, 'route constant still declared');
   assert.match(hostSrc, /\/api\/berget-usage\/snapshot/, 'snapshot route path unchanged');
+});
+
+test('host: registry row registers on late core arrival and is a no-op absent one', async () => {
+  // Simulate the other machine's ordering: this plugin applies BEFORE
+  // dsh-provider-usage provides the service. The wait must fire when it
+  // arrives, and must not require it.
+  // berget apply() early-returns without a webServer; provide a stub route
+  // sink so the registry-wait block is reached.
+  const provided = new Map([['webServer', { register: () => () => {} }]]);
+  const effects = [];
+  const waiters = [];
+  let registered = null;
+  const ctx = {
+    logger: { info() {}, warn() {}, error() {} },
+    effect(cb, label) {
+      effects.push(cb());
+      return cb;
+    },
+    get(name) {
+      return provided.get(name);
+    },
+    inject(names, cb) {
+      const missing = names.filter((n) => !provided.has(n));
+      if (missing.length > 0) {
+        waiters.push(cb);
+        return;
+      }
+      cb({ get: (name) => provided.get(name), effect: ctx.effect });
+    },
+  };
+  const host = await import(join(here, '..', 'index.js'));
+  host.apply(ctx);
+  assert.equal(registered, null, 'no row before the core provides');
+  assert.equal(waiters.length, 1, 'row waits on providerUsage');
+
+  // The core boots later and provides the service.
+  provided.set('providerUsage', {
+    register: (row) => {
+      registered = row;
+      return () => {};
+    },
+  });
+  waiters[0]({ get: (name) => provided.get(name), effect: ctx.effect });
+  assert.ok(registered, 'row registered once the core arrives');
+  assert.equal(registered.id, 'berget');
+  assert.equal(registered.route, '/api/berget-usage/snapshot');
 });

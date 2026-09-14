@@ -18,7 +18,7 @@ see "Shared notes" (the step people miss).
 
 The repo declares `workspaces` and each package self-builds on install
 (`prepare`), so git-hosted installs carry a built `dist/`. Run ONE add
-command with all eight packages (they are one cohort; tools needs its
+command with all nine packages (they are one cohort; tools needs its
 siblings in the same install):
 
 ```sh
@@ -34,9 +34,18 @@ for p in agents dream-archive evolution hivemind painpoints tools; do
 done
 SPECS+=("github:lohnn/evolutional_agent_structure#$REF&path:dsh-hive/packages/berget-refresh")
 SPECS+=("github:lohnn/evolutional_agent_structure#$REF&path:dsh-hive/packages/berget-usage")
+SPECS+=("github:lohnn/evolutional_agent_structure#$REF&path:dsh-hive/packages/provider-usage")
 
 DSH_HIVE_REF=$REF pnpm dlx --allow-build @deepseek-ai/dsh-subprocess-local --allow-build @google/genai --allow-build koffi --allow-build node-pty --allow-build protobufjs @deepseek-ai/dsh plugin --profile hive add "${SPECS[@]}"
 ```
+
+The Berget/usage trio ships its own `dsh.bundle.patch` rows — the add above
+joins them into the profile's `dsh.profile.bundles` automatically, so do NOT
+hand-insert them into the profile's `cordis.patch.yml` (a bundle row and a
+patch row with the same id hard-fail the compose as a duplicate loader
+entry id). The kit's scaffold patch carries only the six `@hive` rows;
+`dsh-hive-update.sh` also strips legacy hand rows for the trio from
+profiles installed by older kit versions.
 
 Notes:
 
