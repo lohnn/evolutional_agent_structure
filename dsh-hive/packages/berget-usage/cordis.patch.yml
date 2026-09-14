@@ -1,0 +1,9 @@
+# dsh-berget-usage profile bundle: the Berget provider plugin joins the load
+# stack of any web-surface profile that adds this package as a dependency
+# (`dsh plugin add` reconciles dsh.bundle packages automatically). Its
+# client half decides at load time whether it renders as a tab of
+# dsh-provider-usage or as its own standalone panel (see the client's
+# registration block). Config-free by design.
+- insert:
+    - id: dsh-berget-usage
+      name: dsh-berget-usage

@@ -3,12 +3,18 @@
   "version": "0.1.0",
   "private": true,
   "files": [
-    "index.js"
+    "index.js",
+    "cordis.patch.yml"
   ],
   "type": "module",
   "main": "index.js",
   "exports": {
     ".": "./index.js",
     "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
   }
 }

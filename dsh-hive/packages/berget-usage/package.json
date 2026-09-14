@@ -12,7 +12,8 @@
   },
   "files": [
     "index.js",
-    "client.js"
+    "client.js",
+    "cordis.patch.yml"
   ],
   "scripts": {
     "test": "node --test"
@@ -22,6 +23,9 @@
       "platform": "web",
       "inject": [],
       "external": []
+    },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
     }
   }
 }

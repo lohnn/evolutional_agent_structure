@@ -103,9 +103,21 @@ provider package fully bootable on machines that do not run this core.
 
 ## Wiring a machine
 
-1. `dsh-hive/packages/provider-usage` linked into the dsh `web` profile
-   (`link:` row in `$DSH_HOME/profiles/web/package.json` + hand pnpm install /
-   the matching node_modules symlink, same as the berget cohort).
-2. `- id: provider-usage` / `name: dsh-provider-usage` in the profile's
-   `cordis.patch.yml` insert list, before the provider rows.
-3. Add one package per provider (skeleton above) and register its tab.
+The trio (this package, `dsh-berget-usage`, `dsh-berget-refresh`) are
+**profile bundles**: each package's `package.json` declares
+`dsh.bundle.patch: ./cordis.patch.yml`, which makes the dependency auto-join
+the load stack of any profile that has it — no user-patch rows needed.
+
+1. `dsh plugin --profile <name> add /path/to/dsh-hive/packages/<pkg>`
+   (or a tarball) — the reconcile adds the dependency **and** the bundle
+   layer automatically. A `link:` dependency in the profile's
+   `package.json` joins the stack the same way on the next boot.
+2. Restart/update the dsh instance for that profile.
+3. Add one package per provider (skeleton above) — same bundle mechanics;
+   keep any *machine-specific* config (directories, paths) in the profile's
+   own `cordis.patch.yml` as id-targeted rows, never inside the packages.
+
+If the profile is set up without the bundle mechanism, the legacy form still
+works: link the package and insert `{ id: provider-usage, name: dsh-provider-usage }`
+in `cordis.patch.yml` yourself — just remember a bundle row and a user-patch
+row with the SAME id must never both exist (duplicate loader entry id).

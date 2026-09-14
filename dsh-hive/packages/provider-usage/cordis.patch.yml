@@ -1,0 +1,9 @@
+# dsh-provider-usage profile bundle: the usage-tab core joins the load stack
+# of any web-surface profile that adds this package as a dependency
+# (`dsh plugin add` reconciles dsh.bundle packages automatically). Its own
+# row comes first so provider plugins below compose after the core.
+# Config-free by design; provider packages carry their own rows (see
+# dsh-berget-usage and the README contract in this package).
+- insert:
+    - id: provider-usage
+      name: dsh-provider-usage
