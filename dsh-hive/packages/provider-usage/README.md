@@ -84,16 +84,23 @@ never abstracts HTTP or tokens). The debug route
 To appear there, announce from your host half:
 
 ```js
-const providerUsage = ctx.get('providerUsage');   // OPTIONAL — never `inject` it
-if (providerUsage && typeof providerUsage.register === 'function') {
-  ctx.effect(() => providerUsage.register({
+// Rides a ctx.inject WAIT — order-agnostic: fires whenever the core provides
+// the service, and never runs (harmlessly) on machines without it.
+ctx.inject?.(['providerUsage'], (usageCtx) => {
+  const providerUsage = usageCtx.get('providerUsage');
+  if (!providerUsage || typeof providerUsage.register !== 'function') return;
+  usageCtx.effect(() => providerUsage.register({
     id: 'my-provider', label: 'MyProvider', route: '/api/my-provider-usage/snapshot',
   }), 'my providerUsage row');
-}
+});
 ```
 
-Reading the service via `ctx.get` (optional) instead of `inject` keeps your
-provider package fully bootable on machines that do not run this core.
+The wait (rather than an apply-time `ctx.get` probe) matters because profile
+reconcile orders bundle rows by dependency name — on some machines your
+plugin applies before this core. The wait keeps the row order-independent
+while never parking boot on an absent core (the callback simply never
+fires). Register nothing else into `main` or `sidebar.panellist` — your
+client tab is covered in the skeleton above.
 
 ## Files
 

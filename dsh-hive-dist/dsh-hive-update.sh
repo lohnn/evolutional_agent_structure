@@ -9,17 +9,24 @@
 # Env:
 #   DSH_HIVE_REF   git ref to track                        (default: main)
 #   DSH_HIVE_REPO  git base for the specs                  (default: github:lohnn/evolutional_agent_structure)
-#   DSH_VERSION    pinned harness version for `dsh plugin` (default: 0.1.2-rc.1;
-#                  when run under the dsh-hive-web service, the TOML `env` sets
-#                  this — that line is then the single version source)
+#   DSH_VERSION   pinned harness version for `dsh plugin` (default: 0.1.5-rc.2;
+#                 the usage-panel split + bundle auto-join target the rc.2-era
+#                 loader; when run under the dsh-hive-web service, the TOML
+#                 `env` sets this and remains the single version source —
+#                 bump THAT line to >= 0.1.5-rc.2 there)
 #
 # Behavior:
 #   - First run: creates the profile scaffold next to what a `pnpm install`
 #     needs (.pnpmfile.cjs, cordis ymls, pnpm-workspace.yaml with the two
 #     settings git-hosted cohorts require, minimal package.json). Existing
 #     files are NEVER overwritten — adjust them in place afterward.
-#   - Every run: `dsh plugin add` for all EIGHT packages in one command
-#     (same repo+ref). pnpm re-resolves the ref; re-running upgrades.
+#   - Every run: moves hand-written Berget/usage rows OUT of the profile's
+#     cordis.patch.yml if present (the trio now ships its own
+#     dsh.bundle.patch rows; a bundle row + a patch row with the same id
+#     hard-fails the compose), then `dsh plugin add` for all NINE packages
+#     in one command (same repo+ref). pnpm re-resolves the ref; re-running
+#     upgrades. The trio's bundle rows land in the profile's
+#     dsh.profile.bundles automatically via that add.
 #   - Offline tolerance: if the add fails BUT the profile already has the
 #     cohort installed, we keep the existing install and exit 0 so the
 #     service still boots (stale-but-up beats down). If nothing is installed,
@@ -38,7 +45,7 @@ done
 PROFILE="${PROFILE:-${HOME}/.dsh/profiles/hive}"
 REF="${DSH_HIVE_REF:-main}"
 REPO="${DSH_HIVE_REPO:-github:lohnn/evolutional_agent_structure}"
-DSH_VERSION="${DSH_VERSION:-0.1.2-rc.1}"
+DSH_VERSION="${DSH_VERSION:-0.1.5-rc.2}"
 KIT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NAME="$(basename "$PROFILE")"
 STAMP="[dsh-hive-update]"
@@ -177,6 +184,59 @@ profile.bundles = profile.bundles.filter((bundle, i, bundles) => bundle !== web 
 fs.writeFileSync(path, `${JSON.stringify(pkg, null, 2)}\n`)
 NODE
 
+# Moved to bundle rows: strip hand-written Berget/usage rows from the
+# profile's cordis.patch.yml. Since PR "promote the berget/usage trio to
+# self-declared profile bundles" the trio's packages carry their own
+# dsh.bundle.patch — and a surviving hand row with the same id would
+# hard-fail every boot with "duplicate loader entry id". Profiles created
+# from the current kit scaffold are already clean; this repairs older ones.
+# Idempotent, and the profile's OTHER editing is untouched.
+node - "$PROFILE/cordis.patch.yml" <<'NODE'
+const fs = require("node:fs")
+const path = process.argv[2]
+const LEGACY = new Map([
+  ["dsh-berget-refresh", "dsh-berget-refresh"],
+  ["dsh-berget-usage", "dsh-berget-usage"],
+  ["provider-usage", "dsh-provider-usage"],
+])
+let text = fs.readFileSync(path, "utf8") // exits 1 if scaffold failed earlier
+const lines = text.split("\n")
+const out = []
+let removed = 0
+for (let i = 0; i < lines.length; i++) {
+  const idLine = lines[i]
+  const idMatch = idLine.match(/^(\s*)-\s+id:\s*(\S+)\s*$/)
+  const nameLine = idMatch ? lines[i + 1] : undefined
+  const nameMatch =
+    idMatch && nameLine ? nameLine.match(/^(\s*)name:\s*'?([^'\n]+?)'?\s*$/) : undefined
+  if (idMatch && nameMatch && LEGACY.get(idMatch[2]) === nameMatch[2]) {
+    // Drop the id+name pair and any following `config:` block (deeper- or
+    // equal-indentation lines, plus blank separators) that belongs to it.
+    removed += 1
+    const indent = idMatch[1]
+    let j = i + 2
+    while (
+      j < lines.length &&
+      (lines[j].trim() === "" ||
+        lines[j].startsWith(`${indent}  `) ||
+        (lines[j].startsWith(`${indent}config:`) ?? false))
+    ) {
+      if (lines[j].trim() === "" && !/^[\s]*[^\s]/.test(lines[j + 1] ?? "")) break
+      j += 1
+    }
+    i = j - 1
+    continue
+  }
+  out.push(idLine)
+}
+if (removed > 0) {
+  fs.writeFileSync(path, out.join("\n"))
+  console.log(
+    `[dsh-hive-update] patch: removed ${removed} hand row(s) for the bundle-carried Berget/usage trio (prevents duplicate loader entry id)`,
+  )
+}
+NODE
+
 # ── install / update: all eight in ONE add (cohort + hook template needs it) ─
 SPECS=()
 for p in agents dream-archive evolution hivemind painpoints tools; do
@@ -184,8 +244,9 @@ for p in agents dream-archive evolution hivemind painpoints tools; do
 done
 SPECS+=("$REPO#$REF&path:dsh-hive/packages/berget-refresh")
 SPECS+=("$REPO#$REF&path:dsh-hive/packages/berget-usage")
+SPECS+=("$REPO#$REF&path:dsh-hive/packages/provider-usage")
 
-log "dsh plugin add — profile=$NAME ref=$REF (8 packages)"
+log "dsh plugin add — profile=$NAME ref=$REF (9 packages)"
 if DSH_HIVE_REF="$REF" DSH_HIVE_REPO="$REPO" \
    pnpm dlx \
      --allow-build @deepseek-ai/dsh-subprocess-local \

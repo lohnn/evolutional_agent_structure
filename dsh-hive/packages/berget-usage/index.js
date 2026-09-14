@@ -25,11 +25,12 @@
  * The refresh call itself is NEVER made from here — refresh_token rotates and
  * dsh-berget-refresh owns that state machine.
  *
- * Provider-plugin contract (the "general shape" side): this half optionally
- * announces itself to dsh-provider-usage's host registry via
- * ctx.get('providerUsage') — optional on purpose, so this package still boots
- * and serves where the usage-tab core is not composed. The client half makes
- * the same tab-vs-standalone decision from the boot manifest.
+ * Provider-plugin contract (the "general shape" side): this half announces
+ * itself to dsh-provider-usage's host registry through a ctx.inject wait —
+ * order-agnostic (fires whenever, or ever, the core appears), so this
+ * package still boots and serves where the usage-tab core is not composed.
+ * The client half makes the same tab-vs-standalone decision from the boot
+ * manifest.
  */
 
 export const name = 'dsh-berget-usage';
@@ -290,15 +291,22 @@ export function apply(ctx) {
   log.info?.('[dsh-berget-usage] snapshot route registered at %s', ROUTE_PATH);
 
   // Optional provider-usage registry row (see dsh-provider-usage/README.md).
-  // ctx.get — never inject — so this package remains bootable standalone.
-  const providerUsage = ctx.get('providerUsage');
-  if (providerUsage && typeof providerUsage.register === 'function') {
-    ctx.effect(() => providerUsage.register({
+  // Rides a ctx.inject WAIT rather than a ctx.get-at-apply-time probe:
+  // composition order must not decide whether the row registers (reconcile
+  // orders bundles by dependency name, so on some machines this plugin
+  // applies before the core provides the service — the callback then parks
+  // and fires whenever the core arrives, in this plugin's fiber). If the
+  // core is never composed, the callback simply never runs. The row is
+  // metadata only; the snapshot route above is order-independent.
+  ctx.inject?.(['providerUsage'], (usageCtx) => {
+    const providerUsage = usageCtx.get('providerUsage');
+    if (!providerUsage || typeof providerUsage.register !== 'function') return;
+    usageCtx.effect(() => providerUsage.register({
       id: 'berget',
       label: 'Berget',
       route: ROUTE_PATH,
       note: 'Berget Code seat subscription (api.berget.ai)',
     }), 'berget providerUsage registry row');
     log.info?.('[dsh-provider-usage] registry row: berget -> %s', ROUTE_PATH);
-  }
+  }) ?? log.warn?.('[dsh-provider-usage] ctx.inject unavailable on this host — registry row skipped (route still serves)');
 }
