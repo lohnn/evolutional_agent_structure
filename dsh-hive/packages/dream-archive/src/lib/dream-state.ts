@@ -539,8 +539,24 @@ export function completeDream(
   // Update the file content WITHOUT reserializing (see function doc).
   const original = fs.readFileSync(activeFull, "utf8")
   let content = rewriteCompletionScalars(original, exitTime)
+  // Replace-or-append the artifacts section, never stack it (DRM-043
+  // lesson): beginDream ends the template with an empty
+  // `# Artifacts (populated during dream)` block, and appending a populated
+  // block behind it produces DUPLICATED YAML keys — readability then rides
+  // on last-wins readers instead of the file contract. Strip any existing
+  // artifacts keys (empty template or an earlier populated write) wherever
+  // they sit, then bake the populated block once. The line anchors keep the
+  // strip off list items and quoted retain_* payloads, which never start a
+  // line with these keys.
+  const artifactsKeyLine = /^(insights|warnings|songlines|shadows):\s*\[[^\]]*\]\s*$/
+  const artifactsCommentLine = /^# Artifacts \(populated during dream\)\s*$/
+  content = content
+    .split("\n")
+    .filter((line) => !artifactsKeyLine.test(line) && !artifactsCommentLine.test(line))
+    .join("\n")
   content = content.replace(/\s*$/, "\n")
   content += [
+    "# Artifacts (populated during dream)",
     flowArray("insights", insights),
     flowArray("warnings", warnings),
     flowArray("songlines", songlines),
