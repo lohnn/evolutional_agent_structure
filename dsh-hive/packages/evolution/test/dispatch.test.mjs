@@ -20,6 +20,7 @@ import {
   parseModelSpec,
   parseDispatchTarget,
   composeDispatchPersona,
+  composeDispatchLabel,
   DREAMCATCHER_READ_ONLY_TOOL_FILTER,
   assertCapabilityNameUsable,
   RESERVED_CAPABILITY_NAMES,
@@ -138,6 +139,30 @@ test("canonical persona.md, preset agent.cordis.yml text, and the dispatch expor
 
   assert.equal(DREAMCATCHER_DISPATCH_PERSONA, personaMd.trimEnd(), "export must equal persona.md")
   assert.equal(presetText, personaMd.trimEnd(), "preset yml persona must equal persona.md (keep in sync)")
+})
+
+// ── durable-label composition (list_agents identity carrier) ─────────────────
+
+test("child labels carry the dispatch address as a prefix, composed after custom labels", () => {
+  // Default: the plain address.
+  assert.equal(composeDispatchLabel("capability/fitd26-admin-ui"), "capability/fitd26-admin-ui")
+  assert.equal(composeDispatchLabel("builtin/dreamcatcher"), "builtin/dreamcatcher")
+  // A custom label is a SUFFIX, never a replacement — list_agents has no other
+  // capability-identity field, so the address must survive every label.
+  assert.equal(
+    composeDispatchLabel("capability/fitd26-admin-ui", "show-fix"),
+    "capability/fitd26-admin-ui · show-fix"
+  )
+  // Non-resident shapes get a shape suffix (a one-shot is not a steerable child).
+  assert.equal(
+    composeDispatchLabel("builtin/dreamcatcher", "checks", "one-shot"),
+    "builtin/dreamcatcher (one-shot) · checks"
+  )
+  assert.equal(composeDispatchLabel("builtin/dreamcatcher", undefined, "one-shot"), "builtin/dreamcatcher (one-shot)")
+  // Already-prefixed labels don't double up; resident adds no shape suffix.
+  assert.equal(composeDispatchLabel("capability/fitd26-admin-ui", "capability/fitd26-admin-ui"), "capability/fitd26-admin-ui")
+  const composed = composeDispatchLabel("capability/fitd26-admin-ui", "already prefixed", "resident")
+  assert.equal(composed, "capability/fitd26-admin-ui · already prefixed")
 })
 
 // ── reserved names & read-only filter (regression pins) ──────────────────────

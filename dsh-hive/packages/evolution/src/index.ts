@@ -374,7 +374,7 @@ export class Evolution extends Service {
           name: "hive_dispatch",
           description:
             "Dispatch a HIVE worker as a child agent. Address forms: 'capability/<name>' (workspace capability from the roster), 'builtin/<id>' (plugin-owned agent — currently only builtin/dreamcatcher), or bare '<name>' (= capability/<name>).\n" +
-            "ALWAYS starts a NEW instance. To CONTINUE ongoing work on an existing child, do NOT re-dispatch: send_message its durable session id (from the dispatch result, or list_agents for live instances). New parallel work on the same capability = dispatch again.\n" +
+            "ALWAYS starts a NEW instance. To CONTINUE ongoing work on an existing child, do NOT re-dispatch: send_message its durable session id (from the dispatch result, or list_agents for live instances — every child label carries its dispatch address as a prefix). New parallel work on the same capability = dispatch again.\n" +
             "Default shape 'resident': background child — you receive its session id, its report arrives as a message, `send_message` can steer it, and it survives restarts. Shape 'one-shot': synchronous consult — the call blocks until the child finishes and its final output is returned directly as this tool's result (no resident session, nothing to steer). Rule: one-shot only for short, self-contained, result-shaped consults (dreamcatcher Recall); everything else stays resident.\n" +
             "builtin/dreamcatcher is read-only by construction (mutation tools denied at spawn) and carries its full Recall/Audit method on the plugin side — the prompt need only state the job (its mode and scope), not the method.",
           parameters: {
@@ -407,7 +407,10 @@ export class Evolution extends Service {
             },
             label: {
               type: "string",
-              description: "Short display label for the child session (defaults to the capability/builtin name).",
+              description:
+                "Human-readable suffix for the child's durable label — the dispatch ADDRESS is always its prefix " +
+                "(e.g. 'capability/fitd26-admin-ui · my-task', 'builtin/dreamcatcher (one-shot) · checks'), so " +
+                "list_agents always identifies which capability a child belongs to. Omit for the plain address.",
             },
           },
           execute: async (args, exec) => {
@@ -434,12 +437,17 @@ export class Evolution extends Service {
             }
             const persona = def ? def.persona : composeDispatchPersona(target.id)
             const agentOptions = args.model ? parseModelSpec(args.model) : undefined
+            // The durable label always carries the dispatch address as its
+            // prefix (see composeDispatchLabel) — list_agents has no other
+            // capability-identity field, so a custom orchestrator label must
+            // never erase which capability a child belongs to.
+            const address = target.kind === "builtin" ? `builtin/${target.id}` : `capability/${target.id}`
 
             if (shape === "one-shot") {
               const def2 = def!
               const run = await this.ctx.subagents.start("spawn", {
                 parent,
-                label: args.label ?? `builtin/${target.id} (one-shot)`,
+                label: composeDispatchLabel(address, args.label, "one-shot"),
                 prompt: [{ type: "text", text: args.prompt }] as ContentBlock[],
                 persona: def2.persona,
                 toolFilter: { deny: [...def2.toolFilter.deny] },
@@ -465,7 +473,7 @@ export class Evolution extends Service {
 
             const start = await this.ctx.subagents.startContinuable({
               provider: "spawn",
-              label: args.label ?? (target.kind === "builtin" ? `builtin/${target.id}` : target.id),
+              label: composeDispatchLabel(address, args.label),
               request: {
                 parent,
                 prompt: [{ type: "text", text: args.prompt }] as ContentBlock[],
@@ -792,6 +800,21 @@ export function parseDispatchTarget(spec: string): { kind: "builtin" | "capabili
     throw new Error(`invalid capability id "${id}" (lowercase letters, digits, dashes)`)
   }
   return { kind: "capability", id }
+}
+
+/**
+ * Compose the child's DURABLE label. `list_agents` entries carry id / activity
+ * / mode / label and nothing else — the label is the only identity carrier —
+ * so the dispatch address is ALWAYS its prefix: an orchestrator label is
+ * composed AFTER the address, never replacing it. A label that already starts
+ * with the address is used as-is (no double prefix). Non-resident shapes get a
+ * shape suffix so a one-shot consult is never confused with a steerable child.
+ */
+export function composeDispatchLabel(address: string, label?: string, shape?: DispatchShape): string {
+  const shapeSuffix = shape && shape !== "resident" ? ` (${shape})` : ""
+  if (!label) return `${address}${shapeSuffix}`
+  if (label.startsWith(address)) return `${label}${shapeSuffix}`
+  return `${address}${shapeSuffix} · ${label}`
 }
 
 /**
