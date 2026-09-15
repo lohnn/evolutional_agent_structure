@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # dsh-hive-update.sh — install-or-update the @hive/* DSH plugin cohort into a
 # dsh profile. Designed to run as a svcwatch `pre_start` step on EVERY
-# (re)start of dsh-hive-web: egress costs one git re-resolve when nothing
-# changed; a moved ref upgrades the cohort before the fresh dsh web boots.
+# (re)start of dsh-hive-web: each run force-re-resolves the floating git ref;
+# a moved ref upgrades the cohort before the fresh dsh web boots.
 #
 # Usage:
 #   dsh-hive-update.sh [profile-dir]        (default: ~/.dsh/profiles/hive)
@@ -23,12 +23,12 @@
 #   - Every run: moves hand-written Berget/usage rows OUT of the profile's
 #     cordis.patch.yml if present (the trio now ships its own
 #     dsh.bundle.patch rows; a bundle row + a patch row with the same id
-#     hard-fails the compose), then `dsh plugin add` for all NINE packages
-#     in one command (same repo+ref). pnpm re-resolves the ref; re-running
-#     upgrades. The trio's bundle rows land in the profile's
-#     dsh.profile.bundles automatically via that add.
-#   - Offline tolerance: if the add fails BUT the profile already has the
-#     cohort installed, we keep the existing install and exit 0 so the
+#     hard-fails the compose), then `dsh plugin add` bootstraps all NINE
+#     packages (same repo+ref) and `dsh plugin update` force-re-resolves their
+#     unchanged floating specs. The trio's bundle rows land in the profile's
+#     dsh.profile.bundles automatically via the add.
+#   - Offline tolerance: if either plugin command fails BUT the profile already
+#     has the cohort installed, we keep the existing install and exit 0 so the
 #     service still boots (stale-but-up beats down). If nothing is installed,
 #     exit non-zero — svcwatch aborts the start and backs off.
 set -u
@@ -237,7 +237,7 @@ if (removed > 0) {
 }
 NODE
 
-# ── install / update: all eight in ONE add (cohort + hook template needs it) ─
+# ── install / update: bootstrap, then force-re-resolve the floating git ref ──
 SPECS=()
 for p in agents dream-archive evolution hivemind painpoints tools; do
   SPECS+=("$REPO#$REF&path:dsh-hive/packages/$p")
@@ -246,22 +246,47 @@ SPECS+=("$REPO#$REF&path:dsh-hive/packages/berget-refresh")
 SPECS+=("$REPO#$REF&path:dsh-hive/packages/berget-usage")
 SPECS+=("$REPO#$REF&path:dsh-hive/packages/provider-usage")
 
+PACKAGES=(
+  @hive/dsh-agents
+  @hive/dsh-dream-archive
+  @hive/dsh-evolution
+  @hive/dsh-hivemind
+  @hive/dsh-painpoints
+  @hive/dsh-tools
+  dsh-berget-refresh
+  dsh-berget-usage
+  dsh-provider-usage
+)
+
+run_dsh_plugin() {
+  DSH_HIVE_REF="$REF" DSH_HIVE_REPO="$REPO" \
+    pnpm dlx \
+      --allow-build @deepseek-ai/dsh-subprocess-local \
+      --allow-build @google/genai \
+      --allow-build koffi \
+      --allow-build node-pty \
+      --allow-build protobufjs \
+      "@deepseek-ai/dsh@$DSH_VERSION" \
+      plugin --profile "$NAME" "$@"
+}
+
 log "dsh plugin add — profile=$NAME ref=$REF (9 packages)"
-if DSH_HIVE_REF="$REF" DSH_HIVE_REPO="$REPO" \
-   pnpm dlx \
-     --allow-build @deepseek-ai/dsh-subprocess-local \
-     --allow-build @google/genai \
-     --allow-build koffi \
-     --allow-build node-pty \
-     --allow-build protobufjs \
-     "@deepseek-ai/dsh@$DSH_VERSION" \
-     plugin --profile "$NAME" add "${SPECS[@]}"; then
+if ! run_dsh_plugin add "${SPECS[@]}"; then
+  if [ -e "$PROFILE/node_modules/@hive/dsh-dream-archive/dist/index.js" ]; then
+    warn "add FAILED but an install already exists — keeping it (offline?)"
+    exit 0
+  fi
+  die "add FAILED and no existing install — service start must be aborted"
+fi
+
+log "dsh plugin update — force-re-resolving ref=$REF (9 packages)"
+if run_dsh_plugin update "${PACKAGES[@]}"; then
   log "cohort up to date (ref $REF)"
   exit 0
 fi
 
 if [ -e "$PROFILE/node_modules/@hive/dsh-dream-archive/dist/index.js" ]; then
-  warn "add FAILED but an install already exists — keeping it (offline?)"
+  warn "update FAILED but an install already exists — keeping it (offline?)"
   exit 0
 fi
-die "add FAILED and no existing install — service start must be aborted"
+die "update FAILED and no existing install — service start must be aborted"
