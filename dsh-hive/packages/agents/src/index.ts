@@ -18,6 +18,12 @@
  *    read-only; Audit adds rank/detect — both are read-only; mutation tools
  *    stay reachable for the dreamtime CLOSURE path which is the workflow's
  *    write step, matching the OpenCode agent definition).
+ *
+ *    The persona body ALSO feeds `@hive/dsh-evolution`: `hive_dispatch`
+ *    composes it into the dispatched dreamcatcher child's persona (via the
+ *    `DREAMCATCHER_DISPATCH_PERSONA` export below), so dispatch is self-
+ *    contained on the plugin side — no preset install, no orchestrator-side
+ *    method spec.
  */
 
 import fs from "fs"
@@ -27,6 +33,20 @@ import { fileURLToPath } from "url"
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 
 const SKILL_MD = fs.readFileSync(path.join(HERE, "../skills/dreamtime/SKILL.md"), "utf8")
+
+// The canonical dreamcatcher persona (Recall/Audit method, output formats,
+// constraints, read-only statement) — the SINGLE SOURCE the dsh preset AND
+// the evolution dispatch path both carry. The preset mounts it via
+// presets/dreamcatcher/agent.cordis.yml; `@hive/dsh-evolution` embeds it in
+// `hive_dispatch`'s per-child persona so a dispatched dreamcatcher child gets
+// the full method WITHOUT any orchestrator-side spec and WITHOUT the preset
+// being installed under $DSH_HOME. The dispatch wrapper (identity line +
+// READ-ONLY statement) lives in evolution; this file is the persona body.
+// A drift-guard test in evolution asserts this file and the preset yml text
+// block stay identical.
+const DREAMCATCHER_PERSONA_BODY = fs.readFileSync(path.join(HERE, "../presets/dreamcatcher/persona.md"), "utf8")
+
+export const DREAMCATCHER_DISPATCH_PERSONA = DREAMCATCHER_PERSONA_BODY.trimEnd()
 
 // Strip YAML frontmatter for the runtime registration (the dsh filesystem
 // provider parses it from files; for a runtime registration the fields are

@@ -145,9 +145,29 @@ own workspace install), same `cordis.*.yml` scaffold, `pnpm install`, verify.
   `mkdir -p` on first write), so a fresh machine starts empty. To carry
   history over, copy those dirs from an existing workspace BEFORE first
   boot.
-- **Dreamcatcher preset** (needed for `hive_dispatch(capability:
-  "dreamcatcher")`): copy `node_modules/@hive/dsh-agents/presets/dreamcatcher/`
-  into `~/.dsh/.agent-presets/dreamcatcher/`.
+- **Dreamcatcher preset (OPTIONAL — only for standalone named-agent use):**
+  `hive_dispatch(capability: "builtin/dreamcatcher")` is fully self-contained —
+  the dispatch composes the full Recall/Audit persona from the
+  `@hive/dsh-agents` package and enforces read-only via the request
+  `toolFilter` (I-070); no preset install and no orchestrator-side method
+  spec are needed for it. Copy `node_modules/@hive/dsh-agents/presets/dreamcatcher/`
+  into `~/.dsh/.agent-presets/dreamcatcher/` ONLY if you also want to spawn
+  dreamcatcher as a named dsh agent (a persona session outside the HIVE
+  dispatcher).
+- **Capability names:** `dreamcatcher` is reserved for the built-in
+  dream-archive agent — `/spawn` refuses to manifest it. hive_dispatch
+  addresses are namespaced: `capability/<name>` for workspace workers,
+  `builtin/<id>` for plugin-owned agents (currently only `builtin/dreamcatcher`),
+  bare `<name>` as compat for `capability/<name>` — a bare built-in name
+  refuses with the canonical form, so the two namespaces never collide.
+- **Dispatch shapes:** `resident` (default — background child, report arrives
+  as a message, `send_message` steers, cold-resumes across restarts) and
+  `one-shot` (synchronous consult — the finished output returns inline as the
+  tool result; no resident session). Dispatches always start a NEW instance —
+  continuing existing work is `send_message` to the child's durable id
+  (`list_agents` lists live instances). The per-builtin rule lives in the
+  plugin: dreamcatcher Recall may run one-shot (short, read-only, inline
+  dossier); everything else (incl. Audit) stays resident.
 - **Web client:** `dsh-hive-update.sh` configures the profile with
   `"@deepseek-ai/dsh-web-app"` and repairs earlier service profiles that used
   `"@deepseek-ai/dsh-headless"`.

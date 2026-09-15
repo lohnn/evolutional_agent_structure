@@ -54,6 +54,7 @@ import {
   type HiveState,
   type TickResult,
 } from "./lib/energy.js"
+import { DREAMCATCHER_DISPATCH_PERSONA } from "@hive/dsh-agents"
 
 declare module "@deepseek-ai/cordis" {
   interface Context {
@@ -169,12 +170,15 @@ export class Evolution extends Service {
     // ── Continuable-child capability composition (rc.1) ─────────────────────
     // alpha.3's `registerContinuableSetup` contribution point is GONE at rc.1:
     // per-child composition is DATA on the start request (`persona` /
-    // `toolFilter` on `SubagentStartRequest`), snapshotted into the child's
-    // durable descriptor and applied by the continuation manager via
-    // `applyChildComposition` — on creation and, from the descriptor, on cold
-    // resume. The capability-facing roster therefore travels as the dispatch
-    // request's `persona` (a scoped shadow of the deployment persona) — see
-    // `hive_dispatch` below. There is nothing to register at service boot.
+    // `toolFilter` / `agentOptions` on `SubagentStartRequest`), snapshotted
+    // into the child's durable descriptor and applied by the continuation
+    // manager via `applyChildComposition` — on creation and on cold resume.
+    // The child-identity line rides the request's `persona` (see
+    // `composeDispatchPersona`); the capability roster itself travels ONLY
+    // via the process-level `hive:roster` systemPrompt section above, which
+    // dsh composes into every in-process agent (dispatched children
+    // included) with live re-evaluation per assembly. There is nothing to
+    // register at service boot.
 
     // ── Energy tick on session-start ────────────────────────────────────────
     // `agent/session-start` is the dsh analogue of OpenCode's
@@ -351,33 +355,59 @@ export class Evolution extends Service {
     })
 
     // ── Capability dispatch (the Phase-5 seam) ────────────────────────────────
-    // The coordinator-facing dispatch tool: starts a capability as a RESIDENT,
-    // continuable child of the calling agent. Dreamcatcher dispatches pass the
-    // canonical read-only toolFilter (I-070: enforcement is caller-side — the
-    // preset cannot self-declare it). Capability usage feeds the energy tick.
+    // The coordinator-facing dispatch tool: ONE tool, TWO address forms
+    // (capability/<name> for workspace workers, builtin/<id> for plugin-owned
+    // agents), TWO shapes (resident background child = the worker shape;
+    // one-shot = synchronous consult returning the output inline), ONE
+    // always-starts-new rule (continuation of an existing child goes through
+    // send_message to its durable id — the echo text and the tool docs teach
+    // this). Dreamcatcher dispatches are read-only by construction (I-070
+    // caller-side toolFilter) and carry their full method plugin-side.
+    // Optional `model` rides SubagentStartRequest.agentOptions (the spawn
+    // provider advertises agentOptions: true; resolveChildAgentOptions merges
+    // the override over the parent's route, dropping the parent's
+    // reasoningEffort when the route changes and the caller didn't pin one).
+    // Capability usage feeds the energy tick for both shapes.
     ctx.effect(() =>
       ctx.tools.register(
         defineTool({
           name: "hive_dispatch",
           description:
-            "Dispatch a HIVE capability (or the dreamcatcher) as a resident, continuable child agent. " +
-            "The child runs in the background; follow up on it via the session it reports from. " +
-            "Dreamcatcher dispatches are read-only by construction (mutation tools are denied at spawn).",
+            "Dispatch a HIVE worker as a child agent. Address forms: 'capability/<name>' (workspace capability from the roster), 'builtin/<id>' (plugin-owned agent — currently only builtin/dreamcatcher), or bare '<name>' (= capability/<name>).\n" +
+            "ALWAYS starts a NEW instance. To CONTINUE ongoing work on an existing child, do NOT re-dispatch: send_message its durable session id (from the dispatch result, or list_agents for live instances). New parallel work on the same capability = dispatch again.\n" +
+            "Default shape 'resident': background child — you receive its session id, its report arrives as a message, `send_message` can steer it, and it survives restarts. Shape 'one-shot': synchronous consult — the call blocks until the child finishes and its final output is returned directly as this tool's result (no resident session, nothing to steer). Rule: one-shot only for short, self-contained, result-shaped consults (dreamcatcher Recall); everything else stays resident.\n" +
+            "builtin/dreamcatcher is read-only by construction (mutation tools denied at spawn) and carries its full Recall/Audit method on the plugin side — the prompt need only state the job (its mode and scope), not the method.",
           parameters: {
             capability: {
               type: "string",
               required: true,
               description:
-                "Capability name from the Active Capabilities roster, or 'dreamcatcher' for the dream-archive agent.",
+                "Dispatch address: 'capability/<name>' for a workspace capability (the roster), 'builtin/<id>' for a plugin-owned agent (currently only 'builtin/dreamcatcher'), or bare '<name>' as compat for 'capability/<name>'.",
             },
             prompt: {
               type: "string",
               required: true,
-              description: "The complete task brief for the child: full scope, constraints, and acceptance criteria.",
+              description:
+                "The task for the child. For builtin/dreamcatcher, state mode and scope (e.g. 'Mode: Recall — what the archive knows about X' or 'Mode: Audit') — " +
+                "the recall/audit method itself comes with the child. For capabilities, the complete task brief: full scope, constraints, and acceptance criteria.",
+            },
+            shape: {
+              type: "string",
+              description:
+                "'resident' (default) — background child; its report arrives as a message and send_message can steer it later. " +
+                "'one-shot' — synchronous consult; the result returns inline as this tool's output. " +
+                "Guidance: dreamcatcher Recall is the canonical one-shot; Audit (minutes over the whole archive) stays resident. " +
+                "Capability dispatches are always resident (workers are steerable services, not calls).",
+            },
+            model: {
+              type: "string",
+              description:
+                'Optional model override for the child, as "<provider>/<model-id>" — everything before the first "/" is the provider route name, and the model id may itself contain slashes (e.g. "berget/zai-org/GLM-5.3-Flash", "berget/Qwen/Qwen3.8-27B-FP8"). ' +
+                'A value without "/" is a bare model id on this session\'s own provider. Leave unset to inherit the session\'s model.',
             },
             label: {
               type: "string",
-              description: "Short display label for the child session (defaults to the capability name).",
+              description: "Short display label for the child session (defaults to the capability/builtin name).",
             },
           },
           execute: async (args, exec) => {
@@ -385,45 +415,79 @@ export class Evolution extends Service {
             if (!parent) {
               throw new Error("hive_dispatch must be called from within an agent turn (no calling agent in scope)")
             }
-            const isDreamcatcher = args.capability === "dreamcatcher"
-            // rc.1 per-child composition: the capability-facing roster rides
-            // the start request's `persona` field — a scoped shadow of the
-            // deployment persona installed by the continuation manager via
-            // `applyChildComposition`, and re-installed from the child's
-            // durable descriptor on cold resume. The first line names the
-            // child's own capability so its roster row is the highlighted one
-            // (the SHADOW-009 resolution: the live-verifiable replacement for
-            // the scoped `hive:roster` shadow `registerContinuableSetup` used
-            // to inject). The text carries no `{{…}}` sequences, so the
-            // persona template's strict interpolation passes it through.
-            const persona = [
-              isDreamcatcher
-                ? "You are the dreamcatcher — the HIVE dream-archive recall agent, dispatched READ-ONLY (dream mutation tools are denied at spawn)."
-                : `You are the \`${args.capability}\` HIVE capability, dispatched as a resident continuable child of the coordinator.`,
-              ``,
-              this.buildRoster(),
-            ].join("\n")
+            const target = parseDispatchTarget(args.capability)
+            const def = target.kind === "builtin" ? BUILTIN_AGENTS[target.id] : undefined
+            const shape = (args.shape as DispatchShape | undefined) ?? (def ? def.shapes[0] : "resident")
+            if (shape !== "resident" && shape !== "one-shot") {
+              throw new Error(`invalid shape "${args.shape}" — use "resident" or "one-shot"`)
+            }
+            if (shape === "one-shot" && !def) {
+              throw new Error(
+                `shape "one-shot" is only available for built-ins; capability dispatches are always resident ` +
+                  `(workers stay steerable and cold-resumable)`
+              )
+            }
+            if (def && !def.shapes.includes(shape)) {
+              throw new Error(
+                `builtin/${target.id} does not support shape "${shape}" — allowed: ${def.shapes.join(", ")}. ${def.shapeGuidance}`
+              )
+            }
+            const persona = def ? def.persona : composeDispatchPersona(target.id)
+            const agentOptions = args.model ? parseModelSpec(args.model) : undefined
+
+            if (shape === "one-shot") {
+              const def2 = def!
+              const run = await this.ctx.subagents.start("spawn", {
+                parent,
+                label: args.label ?? `builtin/${target.id} (one-shot)`,
+                prompt: [{ type: "text", text: args.prompt }] as ContentBlock[],
+                persona: def2.persona,
+                toolFilter: { deny: [...def2.toolFilter.deny] },
+                ...(agentOptions ? { agentOptions } : {}),
+                signal: exec.signal,
+              })
+              this.markUsed(target.id, String(run.id))
+              const result = await run.result
+              try {
+                await run.dispose()
+              } catch {
+                // disposal is best-effort after settlement
+              }
+              const text = (result.output ?? [])
+                .map((b) => (b.type === "text" ? b.text : ""))
+                .join("\n")
+                .trim()
+              if (result.stopReason !== "completed") {
+                return `[one-shot ended: ${result.stopReason}${result.diagnostic ? ` — ${result.diagnostic}` : ""}]\n${text}`
+              }
+              return text || "(child produced no output)"
+            }
+
             const start = await this.ctx.subagents.startContinuable({
               provider: "spawn",
-              label: args.label ?? args.capability,
+              label: args.label ?? (target.kind === "builtin" ? `builtin/${target.id}` : target.id),
               request: {
                 parent,
                 prompt: [{ type: "text", text: args.prompt }] as ContentBlock[],
                 persona,
                 // I-070: read-only enforcement stays caller-side — passed in
                 // as the request's `toolFilter`, applied as a scoped
-                // tools.restrict() in the child's creation window.
-                ...(isDreamcatcher
-                  ? { toolFilter: { deny: [...DREAMCATCHER_READ_ONLY_TOOL_FILTER.deny] } }
-                  : {}),
+                // tools.restrict() in the child's creation window. Built-ins
+                // carry the canonical filter from BUILTIN_AGENTS.
+                ...(def ? { toolFilter: { deny: [...def.toolFilter.deny] } } : {}),
+                // Orchestrator-chosen model route (AgentOptions: provider? +
+                // model; dsh merges it over the parent's route child-side).
+                ...(agentOptions ? { agentOptions } : {}),
               },
               signal: exec.signal,
             })
-            this.markUsed(args.capability, String(start.childId))
-            return `Dispatched ${args.capability} as a resident continuable child (session ${String(start.childId)}).` +
-              (isDreamcatcher
-                ? " Read-only filter applied via the start request's toolFilter field: dream mutation tools denied."
-                : "")
+            this.markUsed(target.id, String(start.childId))
+            return (
+              `Dispatched ${target.kind === "builtin" ? `builtin/${target.id}` : `capability/${target.id}`} as a resident continuable child (session ${String(start.childId)}).` +
+              (agentOptions ? ` Model override: ${args.model}.` : "") +
+              (def ? " Read-only filter applied via the start request's toolFilter field." : "") +
+              ` Continue THIS child with send_message(${String(start.childId)}) when it holds relevant context; list_agents lists your live instances; dispatch again only for fresh or parallel work.`
+            )
           },
           output: TEXT_OUT,
         })
@@ -546,6 +610,7 @@ export class Evolution extends Service {
     if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) {
       throw new Error(`invalid capability name "${name}" (lowercase letters, digits, dashes only)`)
     }
+    assertCapabilityNameUsable(name)
     const dir = path.join(this.capabilitiesPath, name)
     if (fs.existsSync(dir) || fs.existsSync(path.join(this.capabilitiesPath, `${name}.md`))) {
       throw new Error(`capability "${name}" already exists`)
@@ -622,6 +687,19 @@ export class Evolution extends Service {
 }
 
 /**
+ * How a dispatched child runs (the dsh subagent matrix, restricted to the two
+ * legs HIVE uses):
+ * - "resident" — background continuable child: the dispatch returns the child's
+ *   durable session id, the report arrives as a message, `send_message` can
+ *   steer the child later, and it cold-resumes across process restarts. The
+ *   ONLY shape for capability workers (they are services, not calls).
+ * - "one-shot" — synchronous consult: blocks until the child settles and
+ *   returns its final output as the tool result directly. For short,
+ *   self-contained, result-shaped tasks only.
+ */
+export type DispatchShape = "resident" | "one-shot"
+
+/**
  * Read-only enforcement contract for capability presets that must not mutate
  * state (the Phase-1/2 follow-up). `toolFilter` is a field on the
  * continuable-spawn REQUEST (`SubagentStartRequest.toolFilter`), snapshotted
@@ -647,6 +725,129 @@ export const DREAMCATCHER_READ_ONLY_TOOL_FILTER = {
     "hive_dream_complete",
   ],
 } as const
+
+/** A plugin-owned built-in dispatchable through hive_dispatch's `builtin/` prefix. */
+export interface BuiltinAgentDef {
+  id: string
+  description: string
+  /** Full persona composed into the child — plugin-side material, no preset install needed. */
+  persona: string
+  /** Caller-side tool restriction (I-070: enforcement is caller-side, never preset-declared). */
+  toolFilter: { deny: readonly string[] }
+  /** Permitted shapes, FIRST entry = default. */
+  shapes: readonly [DispatchShape, ...DispatchShape[]]
+  /** When to pick which shape — surfaced in the dispatch contract. */
+  shapeGuidance: string
+}
+
+/**
+ * The plugin-owned built-ins. One table row is the whole cost of adding the
+ * next one: persona material ships in the package, the shape policy carries
+ * the "when which shape" rules, and dispatch stays a single tool.
+ */
+export const BUILTIN_AGENTS: Record<string, BuiltinAgentDef> = {
+  dreamcatcher: {
+    id: "dreamcatcher",
+    description: "the dream-archive agent — Recall consults and Audit scans over the workspace's `.opencode/dreams/`",
+    persona: DREAMCATCHER_DISPATCH_PERSONA,
+    toolFilter: DREAMCATCHER_READ_ONLY_TOOL_FILTER,
+    shapes: ["resident", "one-shot"],
+    shapeGuidance:
+      "resident (default) for Recall-integrated task work and Audit scans — audit runs minutes over the whole " +
+      "archive and its findings arrive as a report message; one-shot for Recall consults — short, read-only, " +
+      "and the dossier returns inline as this tool's result",
+  },
+}
+
+/**
+ * Parse a hive_dispatch address into its target. Three forms:
+ * - `builtin/<id>`   — plugin-owned built-in (BUILTIN_AGENTS).
+ * - `capability/<name>` — a workspace capability from the roster.
+ * - `<name>` (bare)  — compat form, canonicalized to `capability/<name>`.
+ * Bare names of built-ins are refused with the canonical form in the message,
+ * so the address type is always explicit at the call site.
+ */
+export function parseDispatchTarget(spec: string): { kind: "builtin" | "capability"; id: string } {
+  const trimmed = spec.trim()
+  if (!trimmed) {
+    throw new Error(`hive_dispatch: empty address — pass "capability/<name>", "builtin/<id>", or a bare "<name>"`)
+  }
+  if (trimmed.startsWith("builtin/")) {
+    const id = trimmed.slice("builtin/".length)
+    if (!BUILTIN_AGENTS[id]) {
+      throw new Error(
+        `unknown built-in "${id}" — known: ${Object.keys(BUILTIN_AGENTS).map((b) => `builtin/${b}`).join(", ")}`
+      )
+    }
+    return { kind: "builtin", id }
+  }
+  const id = trimmed.startsWith("capability/") ? trimmed.slice("capability/".length) : trimmed
+  if (BUILTIN_AGENTS[id]) {
+    throw new Error(
+      `"${id}" is a plugin-owned built-in — dispatch it as "builtin/${id}". ` +
+        `Bare names address workspace capabilities only, so the two never collide.`
+    )
+  }
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(id)) {
+    throw new Error(`invalid capability id "${id}" (lowercase letters, digits, dashes)`)
+  }
+  return { kind: "capability", id }
+}
+
+/**
+ * Capability names owned by the plugin itself. With dispatch addressing this
+ * guard has ONE job left: `/spawn` never manifests a capability whose name
+ * would read as the built-in to muscle memory and tooling written before the
+ * `builtin/` prefix existed. Dispatching the built-in goes through
+ * `builtin/<id>`, so no shadowing is possible by construction.
+ */
+export const RESERVED_CAPABILITY_NAMES = ["dreamcatcher"] as const
+
+/** Refuse to manifest a reserved name. Creation-time only. */
+export function assertCapabilityNameUsable(name: string): void {
+  if (!RESERVED_CAPABILITY_NAMES.includes(name as (typeof RESERVED_CAPABILITY_NAMES)[number])) return
+  throw new Error(
+    `capability name "${name}" is reserved for the built-in dream-archive agent — dispatch it as ` +
+      `"builtin/dreamcatcher" and pick another name for the capability`
+  )
+}
+
+/**
+ * Parse the dispatch `model` argument into dsh's composite route parts.
+ *
+ * The string form is `"<provider>/<model-id>"` — everything before the FIRST
+ * "/" is the provider route name, everything after is the model id (model
+ * ids may themselves contain slashes: `"berget/zai-org/GLM-5.3-Flash"` or
+ * `"berget/Qwen/Qwen3.8-27B-FP8"`). A value WITHOUT "/" is a bare model id
+ * on the dispatching agent's own provider. Empty/whitespace throws.
+ */
+export function parseModelSpec(modelSpec: string): { provider?: string; model: string } {
+  const trimmed = modelSpec.trim()
+  if (!trimmed) {
+    throw new Error(`hive_dispatch: empty model override — pass "<provider>/<model-id>" or a bare "<model-id>"`)
+  }
+  const slash = trimmed.indexOf("/")
+  if (slash === -1) return { model: trimmed }
+  return { provider: trimmed.slice(0, slash), model: trimmed.slice(slash + 1) }
+}
+
+/**
+ * Compose the per-child persona for a workspace CAPABILITY dispatch: the
+ * identity line only — the capability's method rides the prompt and its own
+ * preset material. Plugin-owned built-ins get their full persona from
+ * BUILTIN_AGENTS instead.
+ *
+ * The capability roster is deliberately NOT included: dsh composes the
+ * process-level `hive:roster` systemPrompt section into EVERY agent in the
+ * process (including spawned children), so an in-persona roster arrived as a
+ * literal duplicate in the child's system prompt (seen in live dispatch
+ * transcripts). The persona keeps the child-identity line — the SHADOW-009
+ * "the child's own capability names itself first" property — while the full
+ * roster comes exactly once from the system-prompt assembly.
+ */
+export function composeDispatchPersona(capabilityId: string): string {
+  return `You are the \`${capabilityId}\` HIVE capability, dispatched as a resident continuable child of the coordinator.`
+}
 
 export default Evolution
 

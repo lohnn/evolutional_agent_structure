@@ -26,6 +26,7 @@
     "test": "npm run build && node --test"
   },
   "dependencies": {
+    "@hive/dsh-agents": "workspace:*",
     "@deepseek-ai/schemastery": "^3.18.2"
   },
   "peerDependencies": {

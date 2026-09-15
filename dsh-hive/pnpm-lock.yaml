@@ -55,6 +55,9 @@ importers:
       '@deepseek-ai/schemastery':
         specifier: ^3.18.2
         version: 3.18.2
+      '@hive/dsh-agents':
+        specifier: workspace:*
+        version: link:../agents
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: ^4.0.1
