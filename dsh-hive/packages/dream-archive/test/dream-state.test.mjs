@@ -114,7 +114,6 @@ describe("pre_compaction lifecycle marker (WI-080)", () => {
     // Plant a foreign field a serializer round-trip would erase (the I-049 trap),
     // plus a comment, to prove completion never rewrites what it doesn't own.
     fs.appendFileSync(filePath, "future_field: some-value\n# a hand note\n")
-    const rawBefore = fs.readFileSync(filePath, "utf8")
 
     // A real artifact file so it validates present.
     fs.writeFileSync(
@@ -135,20 +134,75 @@ describe("pre_compaction lifecycle marker (WI-080)", () => {
     assert.ok(hist.includes("pre_compaction: true"))
     assert.ok(hist.includes("future_field: some-value"))
     assert.ok(hist.includes("# a hand note"))
-    // Nothing was reserialized: apart from the two rewritten scalar lines and the
-    // four appended flow-array lines, the pre-completion bytes are intact —
-    // the planted foreign content sits between the begin-written body and the
-    // appended arrays, exactly where it was written.
-    const rewritten = rawBefore
-      .replace("exit_time: null", "exit_time: 2026-08-11T01:00:00Z")
-      .replace("status: DREAMING", "status: COMPLETE")
-    assert.equal(hist.startsWith(rewritten.replace(/\n$/, "\n")), true)
+    // Nothing was reserialized: the body bytes are intact apart from the two
+    // rewritten scalar lines; the foreign field and hand comment keep their
+    // position, and the artifacts section appears exactly once (replace, not
+    // stack — DRM-043).
+    for (const key of ["insights", "warnings", "songlines", "shadows"]) {
+      assert.equal(
+        hist.split("\n").filter((l) => l.startsWith(key + ":")).length,
+        1,
+        `exactly one ${key}: line expected`
+      )
+    }
     // appended flow arrays parse as the linked artifacts
     const state = readDreamState(historyDreamPath(dir, dreamId))
     assert.deepEqual(state.insights, ["I-001"])
     assert.equal(state.pre_compaction, true)
     assert.equal(state.exit_time, "2026-08-11T01:00:00Z")
     assert.equal(state.status, "COMPLETE")
+  })
+
+  it("completeDream REPLACES the empty artifacts template instead of stacking keys (DRM-043)", () => {
+    const { dreamId, filePath } = beginDream(dir, baseIntent())
+    for (const sub of ["warnings", "songlines", "shadows"]) {
+      fs.mkdirSync(path.join(dir, ".opencode/dreams/artifacts", sub), { recursive: true })
+    }
+    fs.writeFileSync(path.join(dir, ".opencode/dreams/artifacts/insights/I-001.yaml"), "insight_id: I-001\n", "utf8")
+    fs.writeFileSync(path.join(dir, ".opencode/dreams/artifacts/warnings/W-001.yaml"), "warning_id: W-001\n", "utf8")
+    fs.writeFileSync(path.join(dir, ".opencode/dreams/artifacts/songlines/SNG-001.yaml"), "songline_id: SNG-001\n", "utf8")
+    fs.writeFileSync(path.join(dir, ".opencode/dreams/artifacts/shadows/SHADOW-001.yaml"), "shadow_id: SHADOW-001\n", "utf8")
+
+    const result = completeDream(dir, "2026-08-12T00:00:00Z", ["I-001", "W-001", "SNG-001", "SHADOW-001"])
+    assert.deepEqual(result.linkedArtifacts, {
+      insights: ["I-001"],
+      warnings: ["W-001"],
+      songlines: ["SNG-001"],
+      shadows: ["SHADOW-001"],
+    })
+    assert.deepEqual(result.missingArtifacts, [])
+
+    const hist = fs.readFileSync(historyDreamPath(dir, dreamId), "utf8")
+    // The template block (comment + 4 empty arrays) is GONE; one baked block
+    // with every bucket populated remains. Duplicate YAML keys mediated by
+    // last-wins readers was the DRM-043 defect.
+    assert.equal(hist.includes("insights: []"), false)
+    assert.equal(hist.includes("songlines: []"), false)
+    for (const key of ["insights", "warnings", "songlines", "shadows", "# Artifacts"]) {
+      assert.equal(
+        hist.split("\n").filter((l) => l.startsWith(key)).length,
+        1,
+        `exactly one ${key} line expected`
+      )
+    }
+    const state = readDreamState(historyDreamPath(dir, dreamId))
+    assert.deepEqual(state.insights, ["I-001"])
+    assert.deepEqual(state.songlines, ["SNG-001"])
+    assert.deepEqual(state.shadows, ["SHADOW-001"])
+  })
+
+  it("completeDream with no artifacts normalizes the template to one empty block, no duplicates", () => {
+    const { dreamId } = beginDream(dir, baseIntent())
+    completeDream(dir, "2026-08-12T01:00:00Z", [])
+    const hist = fs.readFileSync(historyDreamPath(dir, dreamId), "utf8")
+    for (const key of ["insights", "warnings", "songlines", "shadows", "# Artifacts"]) {
+      assert.equal(
+        hist.split("\n").filter((l) => l.startsWith(key)).length,
+        1,
+        `exactly one ${key} line expected`
+      )
+    }
+    assert.deepEqual(readDreamState(historyDreamPath(dir, dreamId)).shadows, [])
   })
 
   it("completeDream on an unflagged dream writes pre_compaction: false through to history", () => {
