@@ -21,14 +21,15 @@ import {
   parseDispatchTarget,
   composeDispatchPersona,
   composeDispatchLabel,
+  DREAMCATCHER_DISPATCH_PERSONA,
   DREAMCATCHER_READ_ONLY_TOOL_FILTER,
   assertCapabilityNameUsable,
   RESERVED_CAPABILITY_NAMES,
   BUILTIN_AGENTS,
 } from "@hive/dsh-evolution"
-import { DREAMCATCHER_DISPATCH_PERSONA } from "@hive/dsh-agents"
 
 const AGENTS_PKG = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../agents")
+const EVOLUTION_PKG = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 
 // ── parseModelSpec ────────────────────────────────────────────────────────────
 
@@ -118,8 +119,9 @@ test("no child persona carries the capability roster (dsh injects it process-wid
 
 // ── persona ↔ preset drift guard ─────────────────────────────────────────────
 
-test("canonical persona.md, preset agent.cordis.yml text, and the dispatch export are identical", () => {
+test("canonical persona.md, preset agent.cordis.yml text, and BOTH shipped copies are identical", () => {
   const personaMd = fs.readFileSync(path.join(AGENTS_PKG, "presets/dreamcatcher/persona.md"), "utf8")
+  const shippedCopy = fs.readFileSync(path.join(EVOLUTION_PKG, "presets/dreamcatcher/persona.md"), "utf8")
   const yml = fs.readFileSync(path.join(AGENTS_PKG, "presets/dreamcatcher/agent.cordis.yml"), "utf8")
 
   // Extract the block-scalar text: lines after `    text: |-` that are blank or
@@ -139,6 +141,7 @@ test("canonical persona.md, preset agent.cordis.yml text, and the dispatch expor
 
   assert.equal(DREAMCATCHER_DISPATCH_PERSONA, personaMd.trimEnd(), "export must equal persona.md")
   assert.equal(presetText, personaMd.trimEnd(), "preset yml persona must equal persona.md (keep in sync)")
+  assert.equal(shippedCopy.trimEnd(), personaMd.trimEnd(), "evolution's shipped copy must equal persona.md")
 })
 
 // ── durable-label composition (list_agents identity carrier) ─────────────────
