@@ -172,7 +172,9 @@ own workspace install), same `cordis.*.yml` scaffold, `pnpm install`, verify.
   `"@deepseek-ai/dsh-web-app"` and repairs earlier service profiles that used
   `"@deepseek-ai/dsh-headless"`.
 - The `@deepseek-ai/*` versions the plugins were built and live-gated
-  against: `0.1.2-rc.1`, cordis `^4.0.1`.
+  against: `0.1.6-alpha.1` (earlier gates: `0.1.2-rc.1`), cordis `^4.0.1`.
+  `dsh-hive-update.sh` defaults its `DSH_VERSION` pin to `0.1.6-alpha.1` —
+  the service TOML's `env` remains the single version source when present.
 
 ## Run it as a service (the other machine)
 

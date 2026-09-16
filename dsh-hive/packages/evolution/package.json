@@ -3,7 +3,8 @@
   "version": "0.0.1",
   "private": true,
   "files": [
-    "dist"
+    "dist",
+    "presets"
   ],
   "type": "module",
   "main": "dist/index.js",
@@ -26,7 +27,6 @@
     "test": "npm run build && node --test"
   },
   "dependencies": {
-    "@hive/dsh-agents": "workspace:*",
     "@deepseek-ai/schemastery": "^3.18.2"
   },
   "peerDependencies": {

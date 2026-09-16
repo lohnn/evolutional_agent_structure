@@ -54,7 +54,18 @@ import {
   type HiveState,
   type TickResult,
 } from "./lib/energy.js"
-import { DREAMCATCHER_DISPATCH_PERSONA } from "@hive/dsh-agents"
+// The full plugin-side Recall/Audit persona. Canon lives in
+// @hive/dsh-agents (presets/dreamcatcher/persona.md — the dsh preset's
+// mounted text); THIS package ships a drift-guarded copy of the same file
+// (`presets/dreamcatcher/persona.md`) and reads it at module load, so a
+// dispatched dreamcatcher is self-contained even when the cohort is
+// installed as isolated git-path packages — a cross-package import here
+// could not survive that pathway's nested `tsc` prepare (live failure on
+// 2026-09-15: TS2307 during `dsh plugin update`). The dispatch contract
+// test asserts byte-identity between all three copies.
+export const DREAMCATCHER_DISPATCH_PERSONA = fs
+  .readFileSync(new URL("../presets/dreamcatcher/persona.md", import.meta.url), "utf8")
+  .trimEnd()
 
 declare module "@deepseek-ai/cordis" {
   interface Context {

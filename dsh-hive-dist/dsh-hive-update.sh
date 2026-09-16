@@ -9,11 +9,11 @@
 # Env:
 #   DSH_HIVE_REF   git ref to track                        (default: main)
 #   DSH_HIVE_REPO  git base for the specs                  (default: github:lohnn/evolutional_agent_structure)
-#   DSH_VERSION   pinned harness version for `dsh plugin` (default: 0.1.5-rc.2;
-#                 the usage-panel split + bundle auto-join target the rc.2-era
-#                 loader; when run under the dsh-hive-web service, the TOML
-#                 `env` sets this and remains the single version source —
-#                 bump THAT line to >= 0.1.5-rc.2 there)
+#   DSH_VERSION   pinned harness version for `dsh plugin` (default:
+#                 0.1.6-alpha.1; when run under the dsh-hive-web service, the
+#                 TOML `env` sets this and remains the single version source —
+#                 bump THAT line, and keep it >= the version the profile
+#                 actually serves)
 #
 # Behavior:
 #   - First run: creates the profile scaffold next to what a `pnpm install`
@@ -32,6 +32,7 @@
 #     service still boots (stale-but-up beats down). If nothing is installed,
 #     exit non-zero — svcwatch aborts the start and backs off.
 set -u
+set -o pipefail
 
 BERGET_ONLY=0
 PROFILE=""
@@ -45,7 +46,7 @@ done
 PROFILE="${PROFILE:-${HOME}/.dsh/profiles/hive}"
 REF="${DSH_HIVE_REF:-main}"
 REPO="${DSH_HIVE_REPO:-github:lohnn/evolutional_agent_structure}"
-DSH_VERSION="${DSH_VERSION:-0.1.5-rc.2}"
+DSH_VERSION="${DSH_VERSION:-0.1.6-alpha.1}"
 KIT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NAME="$(basename "$PROFILE")"
 STAMP="[dsh-hive-update]"
@@ -270,23 +271,33 @@ run_dsh_plugin() {
       plugin --profile "$NAME" "$@"
 }
 
+OUT="$(mktemp)"
+trap 'rm -f "$OUT"' EXIT
+# Output streams live (tee) AND is kept, so a failure can quote the actual
+# error — the 2026-09-15 war: every pre_start failure surfaced as a bare
+# "keeping it (offline?)" while the real cause (a session write policy
+# denying dlx-cache writes under /root) sat buried in pnpm stderr.
 log "dsh plugin add — profile=$NAME ref=$REF (9 packages)"
-if ! run_dsh_plugin add "${SPECS[@]}"; then
+if ! run_dsh_plugin add "${SPECS[@]}" 2>&1 | tee "$OUT"; then
+  warn "add FAILED — last output lines:"
+  tail -n 12 "$OUT" | while IFS= read -r l; do warn "  └ $l"; done
   if [ -e "$PROFILE/node_modules/@hive/dsh-dream-archive/dist/index.js" ]; then
-    warn "add FAILED but an install already exists — keeping it (offline?)"
+    warn "add FAILED but an install already exists — keeping it (was it offline? see lines above)"
     exit 0
   fi
   die "add FAILED and no existing install — service start must be aborted"
 fi
 
 log "dsh plugin update — force-re-resolving ref=$REF (9 packages)"
-if run_dsh_plugin update "${PACKAGES[@]}"; then
+if run_dsh_plugin update "${PACKAGES[@]}" 2>&1 | tee "$OUT"; then
   log "cohort up to date (ref $REF)"
   exit 0
 fi
 
+warn "update FAILED — last output lines:"
+tail -n 12 "$OUT" | while IFS= read -r l; do warn "  └ $l"; done
 if [ -e "$PROFILE/node_modules/@hive/dsh-dream-archive/dist/index.js" ]; then
-  warn "update FAILED but an install already exists — keeping it (offline?)"
+  warn "update FAILED but an install already exists — keeping it (was it offline? see lines above)"
   exit 0
 fi
 die "update FAILED and no existing install — service start must be aborted"
