@@ -3,8 +3,14 @@
  *
  * Exposes `ctx.evolution`:
  *  - Energy state (`lib/energy.ts` — a VERBATIM port of the OpenCode plugin's
- *    `src/lib/energy.ts`) and the tick, fired on dsh's `agent/session-start`
- *    event (the analogue of OpenCode's `session.created` hook).
+ *    `src/lib/energy.ts`) and the tick, fired on dsh's `agent/created` event
+ *    (payload `{ agent, source: SessionStartSource, signal }` — the serial
+ *    analogue of OpenCode's `session.created` hook; it fires once per agent
+ *    publication: startup, resume, clear, compact). Originally wired to the
+ *    invented `agent/session-start`, which no dsh runtime publishes — a live
+ *    regression (the once-per-day tick sat dead for days) that the tests
+ *    never caught because they emitted the phantom event themselves. Guarded
+ *    now by `test/event-catalog-guard.test.mjs`.
  *  - Roster state + injection via `ctx.systemPrompt.section` at order 50
  *    (spike 0.2: ordering is numeric + total, registration-order independent;
  *    dynamic `text` is evaluated per assembly, so the roster is always fresh).
@@ -14,7 +20,7 @@
  *    `capability/<name>` presets are discoverable by dsh's preset roster AND
  *    spawnable via `ctx.subagents.startContinuable`. Capabilities are
  *    resident, continuable children (spike 0.3) — not one-shot subagents.
- *  - `/spawn` `/evolve` `/dissolve` `/tick` as dsh commands.
+ *  - `/spawn` `/evolve` `/dissolve` `/tick` `/status` `/awaken` as dsh commands.
  *
  * Session identity (the least-mechanical part of the port): dsh sessions are
  * first-class and continuable children persist + cold-resume natively, so the
@@ -36,8 +42,19 @@ import z from "@deepseek-ai/schemastery"
 import fs from "fs"
 import path from "path"
 import { createMessage, type ContentBlock } from "@deepseek-ai/dsh-llm"
-import { defineTool } from "@deepseek-ai/dsh-tools"
+import { defineTool, type ParameterSchemaSpec } from "@deepseek-ai/dsh-tools"
 import type { Agent } from "@deepseek-ai/dsh-agent"
+import { COORDINATOR_DOCTRINE, DORMANT_NOTICE, AWAKEN_BRIEF, REAWAKEN_BRIEF, CAPABILITY_STANDING } from "./assets.js"
+import { recordAwakened, isAwakened, decideGate } from "./lib/sessions.js"
+import { parseCapabilityPersona, renderAgentCordisYml, type CapabilityPersona } from "./lib/persona.js"
+import { resolveCapabilityMaterial } from "./lib/material.js"
+import {
+  composeEcosystemSnapshot,
+  composePostCompactionContext,
+  POST_COMPACTION_DREAM_LIMIT,
+  type EcosystemSnapshotSource,
+  type PreCompactionDreamPointer,
+} from "./lib/snapshot.js"
 
 /** String-output tool contract (the spike 0.1 pattern used across the port). */
 const TEXT_OUT = {
@@ -83,7 +100,7 @@ declare module "@deepseek-ai/cordis" {
      */
     "hive/capability-used"(name: string, sessionId: string): void
     /**
-     * The energy tick ran (on `agent/session-start` or `/tick`).
+     * The energy tick ran (on `agent/created` or `/tick`).
      * @mode emit
      */
     "hive/tick"(results: TickResult[]): void
@@ -114,6 +131,134 @@ function readCapabilityFrontmatter(filePath: string): { energy: number | null; d
     energy: energyMatch ? parseInt(energyMatch[1]!, 10) : null,
     description: descMatch ? descMatch[1]!.trim() : null,
   }
+}
+
+/**
+ * Every HIVE-family tool the monorepo registers globally, by package:
+ * - @hive/dsh-tools: the 11 hive_dream_* tools (dream archive lifecycle + read/triage),
+ * - @hive/dsh-hivemind: hive_signal / hive_listen / hive_sent / hive_retire,
+ * - @hive/dsh-painpoints: hive_note_painpoint / hive_painpoints_list /
+ *   hive_painpoints_harvest,
+ * - this package: hive_dispatch.
+ *
+ * This is the awaken gate's deny mask (T2/D2): a dormant top-level agent has
+ * these tools REMOVED from visibility AND execution while the session is
+ * un-awakened — the tools read as absent, not denied. KEEP IN SYNC with the
+ * defineTool registrations across the monorepo: a new hive_* tool MUST be
+ * added here in the same commit it ships, or it leaks past the gate.
+ * Guarded by `test/tool-gate-sync.test.mjs`, which re-derives the set from
+ * every package's src and asserts equality — a forgotten entry fails the
+ * suite, not a user's security model.
+ *
+ * NOTE (T2 count check): the migration brief expected 18 names; the actual
+ * source census is 19 — the dream package registers 11 hive_dream_* tools,
+ * not the 9 the brief assumed. Derived-from-source wins; the guard test keeps
+ * the census honest from here on.
+ */
+export const HIVE_TOOL_NAMES = [
+  // ── @hive/dsh-tools (dream archive) ──────────────────────────────────────
+  "hive_dream_artifact_create",
+  "hive_dream_begin",
+  "hive_dream_complete",
+  "hive_dream_detect_duplicates",
+  "hive_dream_harvest",
+  "hive_dream_list",
+  "hive_dream_mark_stale",
+  "hive_dream_query",
+  "hive_dream_rank",
+  "hive_dream_residue",
+  "hive_dream_supersede",
+  // ── @hive/dsh-hivemind ───────────────────────────────────────────────────
+  "hive_signal",
+  "hive_listen",
+  "hive_sent",
+  "hive_retire",
+  // ── @hive/dsh-painpoints ─────────────────────────────────────────────────
+  "hive_note_painpoint",
+  "hive_painpoints_list",
+  "hive_painpoints_harvest",
+  // ── this package ─────────────────────────────────────────────────────────
+  "hive_dispatch",
+] as const
+
+/**
+ * Parameter schema for the turn-scoped `hive_awaken_spawn` batch tool. The
+ * optional `persona` object is verified by `parseCapabilityPersona` at execute
+ * time (whose error text is model-actionable); the schema keeps the shape
+ * visible to the model without hard-coding the enables+triggers rule twice.
+ */
+const AWAKEN_SPAWN_PARAMETERS: ParameterSchemaSpec = {
+  capabilities: {
+    type: "array",
+    required: true,
+    description: "The capability manifests to create, in spawn order.",
+    items: {
+      type: "object",
+      additionalProperties: false,
+      description: "One capability manifest.",
+      properties: {
+        name: {
+          type: "string",
+          description: "Capability name — lowercase letters, digits, dashes (e.g. 'email-brain-ml').",
+        },
+        description: {
+          type: "string",
+          description: "One-line description of what the capability owns and when it activates.",
+        },
+        persona: {
+          type: "object",
+          additionalProperties: false,
+          description:
+            "The capability's structured method body (the capability template). Recommended; " +
+            "enables and triggers are REQUIRED when a persona is given; empty sections are dropped.",
+          properties: {
+            enables: { type: "string", description: "What This Enables — the use-vs-spawn discriminator." },
+            triggers: { type: "string", description: "Activation Triggers — when to reach for this capability." },
+            protocol: { type: "string", description: "Operating Protocol — how the capability works, step by step." },
+            selfModification: { type: "string", description: "Self-Modification Protocol — how it may evolve itself." },
+            boundaries: { type: "string", description: "Boundaries — what it must NOT do." },
+            history: { type: "string", description: "Evolution History — spawn provenance and remembered dreams." },
+          },
+        },
+      },
+    },
+  },
+}
+
+/**
+ * /spawn's summoned-tool parameters (T4): the command input already carries
+ * name + description, so the model authors the METHOD as the optional
+ * persona object (same section contract as the /awaken batch tool — one
+ * shape, one validator: parseCapabilityPersona).
+ */
+const SPAWN_PARAMETERS: ParameterSchemaSpec = {
+  persona: {
+    type: "object",
+    additionalProperties: false,
+    description:
+      "The capability's structured method body (the capability template). Recommended; " +
+      "enables and triggers are REQUIRED when a persona is given; empty sections are dropped.",
+    properties: {
+      enables: { type: "string", description: "What This Enables — the use-vs-spawn discriminator." },
+      triggers: { type: "string", description: "Activation Triggers — when to reach for this capability." },
+      protocol: { type: "string", description: "Operating Protocol — how the capability works, step by step." },
+      selfModification: { type: "string", description: "Self-Modification Protocol — how it may evolve itself." },
+      boundaries: { type: "string", description: "Boundaries — what it must NOT do." },
+      history: { type: "string", description: "Evolution History — spawn provenance and remembered dreams." },
+    },
+  },
+}
+
+/**
+ * Fill the awaken/re-awaken briefs' template placeholders. Exactly two names
+ * are legal in the shipped assets (drift-guarded); anything else surfacing as
+ * a literal `{{ ... }}` in a followup means an asset/handler placeholder
+ * mismatch and the brief drift test fails first.
+ */
+export function fillBrief(template: string, vars: { dossier: string; summonName: string }): string {
+  return template
+    .replaceAll("{{ dossier }}", vars.dossier)
+    .replaceAll("{{ summon_name }}", vars.summonName)
 }
 
 export class Evolution extends Service {
@@ -191,19 +336,162 @@ export class Evolution extends Service {
     // included) with live re-evaluation per assembly. There is nothing to
     // register at service boot.
 
-    // ── Energy tick on session-start ────────────────────────────────────────
-    // `agent/session-start` is the dsh analogue of OpenCode's
-    // `session.created` hook: it fires exactly once per agent publication
-    // (startup, resume, clear, compact). The tick is idempotent within a day
+    // ── Energy tick on agent/created ────────────────────────────────────────
+    // `agent/created` is the dsh analogue of OpenCode's `session.created`
+    // hook: a serial event with payload `{ agent, source, signal }` (source
+    // is the SessionStartSource — startup, resume, clear, compact), fired
+    // exactly once per agent publication. The tick is idempotent within a day
     // (energy.ts guards on lastTick) and skips cleanly when no capability was
-    // used since the last tick, so firing it per session-start is cheap.
-    ctx.on("agent/session-start", () => {
+    // used since the last tick, so firing it per publication is cheap.
+    // Found as a LIVE REGRESSION: this was bound to `agent/session-start`,
+    // an event the dsh runtime (0.1.6-alpha.1) does not publish — the
+    // once-per-day tick sat dead (hive-state.json's lastTick frozen for 5+
+    // days) and the tests never caught it because they emitted the phantom
+    // event name themselves. Guarded by test/event-catalog-guard.test.mjs.
+    ctx.on("agent/created", () => {
       const { results, skipped } = this.tick()
       if (!skipped) {
         ctx.emit("hive/tick", results)
-        ctx.logger.debug?.("[evolution] energy tick applied on agent/session-start", {
+        ctx.logger.debug?.("[evolution] energy tick applied on agent/created", {
           results: results.length,
         })
+      }
+    })
+
+    // ── Awaken gate (T2 / D1–D2) ─────────────────────────────────────────────
+    // SECOND `agent/created` listener (the tick above is the first; serial
+    // listeners coexist in registration order, and this one never touches the
+    // tick's data). Per D1 a session is aware-but-dormant until /awaken flips
+    // it; per D2 the hive tools then read as ABSENT, not denied: a scoped
+    // `tools.restrict` makes every hive_* tool vanish from that agent's prompt
+    // AND refuse execution, while the dormant explainer keeps the model aware
+    // that HIVE exists here and that asking the user to run /awaken is the one
+    // scripted move.
+    //
+    // Child exemption (why `decideGate` skips depth > 0): a delegated child
+    // may be a HIVE dispatch worker whose coordinator persona drives dispatch
+    // and hive tools directly, or a one-shot `builtin/dreamcatcher` consult
+    // that REQUIRES the hive_dream_* tools (its whole Recall/Audit method is
+    // plugin-side). Children participate by lineage, never gated. This
+    // intentionally still denies harness-native subagents whose
+    // delegationDepth is 0 — a depth-0 agent is indistinguishable from a user
+    // session, and denial is the honest default for the dormant world.
+    //
+    // Both maps are keyed by SESSION id (not the Agent object): /awaken's
+    // command handler holds the receiving agent and needs to lift exactly the
+    // restriction + explainer held for that session, across a resume where the
+    // Agent object identity is new. The disposers are scoped registrations, so
+    // a disposed agent unwinds them anyway; agent/disposed cleanup exists so
+    // the Map itself never grows with dead sessions.
+    ctx.on("agent/created", (payload) => {
+      const agent = payload.agent
+      // Access path verified against dsh 0.1.6-alpha.1 types: the Agent
+      // runtime face exposes `session: Session` (dsh-agent runtime-types),
+      // `Session.header: SessionHeader` is always present (dsh-session), and
+      // `delegationDepth` is persisted on the header (absent/0 top-level,
+      // parent+1 for children). The `?.` chains are stub-defensive only —
+      // fakes in the service harness may omit pieces the real runtime face
+      // always carries; production never hits undefined here.
+      const sessionId = String(agent.session?.id ?? agent.id)
+      const depth = agent.session?.header?.delegationDepth
+      // The compaction seam reads `source` (the SessionStartSource —
+      // 'startup' | 'resume' | 'clear' | 'compact'): present and typed in the
+      // LIVE runtime (0.1.6-alpha.1 declares the payload
+      // `{ agent, source, signal }`), ABSENT from this package's pinned type
+      // corridor (0.1.2-rc.1 declares `{ agent }` only) — so the read stays a
+      // structural access with `?`, not a typed field. Drop the cast when the
+      // pin bumps to a corridor that declares it; until then undefined simply
+      // means "not a compaction republication" and the seam stays quiet.
+      const source = (payload as { source?: string }).source
+      switch (decideGate(depth, isAwakened(this.directory, sessionId))) {
+        case "skip":
+          // Exempt child (depth > 0) — participants by lineage. No section, no
+          // restriction, no state. (D1: dormant sessions leave no state.)
+          return
+        case "doctrine": {
+          // Awakened coordinator: scoped standing section at 55 — after the
+          // process-wide hive:roster (50), before tool guidance (100+).
+          agent.ctx?.systemPrompt?.section({
+            name: "hive:doctrine",
+            order: 55,
+            text: () => COORDINATOR_DOCTRINE,
+          })
+          // ── Compaction seam (T6) ────────────────────────────────────────────
+          // dsh publishes no standalone compaction event; a session that was
+          // just summarized RE-PUBLISHES through this same event with
+          // `source: "compact"`. When that happens to an AWAKENED top-level
+          // coordinator — gate decision "doctrine", the only session kind
+          // that owns pre-compaction HIVE state (dreams, board work items) —
+          // register a second scoped section with the re-anchor block above
+          // doctrine-adjacent guidance (56). Register-and-forget, same scoped
+          // lifecycle as the dormant section: it belongs to this agent
+          // instance and unwinds with it. One-shot by construction — the next
+          // resume publishes source "resume", never "compact", so the fresh
+          // scoped world re-anchors exactly once; no Map, no lift: /awaken
+          // has nothing to lift from an awakened session and a double
+          // registration only names-collides if the runtime ever
+          // double-publishes compact for one scope, which it does not.
+          if (source === "compact") {
+            agent.ctx?.systemPrompt?.section({
+              name: "hive:post-compaction",
+              order: 56,
+              text: () => this.postCompactionContext(),
+            })
+          }
+          return
+        }
+        case "deny": {
+          // Dormant top-level agent: hive tools vanish (restrict returns the
+          // exact disposer that lifts the restriction) + the dormant
+          // explainer at 51, just below the roster. Held for /awaken to lift.
+          // deny-mask filtering: tools.restrict() VALIDATES its names against
+          // the process's registered globals and THROWS on unknowns — and a
+          // throw inside this serial listener fails agent publication. The
+          // deny mask is therefore filtered to what THIS process registered:
+          // the full cohort (production) restricts all of it; a
+          // standalone-evolution install (some other profile shape) degrades
+          // to masking only the tools that exist. tool-gate-sync.test.mjs
+          // pins the mask to the cohort surface so this filter is a safety
+          // net, not a whitelist license.
+          const deny = HIVE_TOOL_NAMES.filter((name) => {
+            try {
+              return ctx.tools.get(name) !== undefined
+            } catch {
+              return false
+            }
+          })
+          if (deny.length > 0) {
+            const lift = agent.ctx?.tools?.restrict({ deny })
+            if (lift) this.gateRestrictions.set(sessionId, lift)
+          }
+          const dropDormant = agent.ctx?.systemPrompt?.section({
+            name: "hive:dormant",
+            order: 51,
+            text: () => DORMANT_NOTICE,
+          })
+          if (dropDormant) this.dormantSections.set(sessionId, dropDormant)
+          return
+        }
+      }
+    })
+
+    // Best-effort disposer cleanup: a disposed agent's scoped world already
+    // unwound its registrations, so the only real job is dropping the held
+    // references. Calling the lift either way is harmless (idempotent) per the
+    // disposer contract, but nested under try/catch in case a future runtime
+    // rejects a disposer on an already-unwound scope.
+    ctx.on("agent/disposed", (payload) => {
+      const sessionId = String(payload.agent?.session?.id ?? payload.agent?.id ?? "")
+      if (!sessionId) return
+      for (const map of [this.gateRestrictions, this.dormantSections]) {
+        const disposer = map.get(sessionId)
+        if (disposer === undefined) continue
+        try {
+          disposer()
+        } catch {
+          // already unwound with the agent's scoped world
+        }
+        map.delete(sessionId)
       }
     })
 
@@ -211,10 +499,10 @@ export class Evolution extends Service {
     // dsh commands are MODEL-INVISIBLE by architecture (W-048): a handler runs
     // against the receiving agent without the command ever reaching the model.
     // The HIVE lifecycle stays human-driven (the user invokes /spawn /evolve
-    // /dissolve /tick), but the AGENT carries out the lifecycle through proper
-    // tools — it must never hand-edit capability/energy files (the WI-036
-    // failure mode the user ruled out), and it must not carry redundant
-    // lifecycle tools every turn.
+    // /dissolve /tick /status; /awaken is the opt-in there of), but the AGENT
+    // carries out the lifecycle through proper tools — it must never
+    // hand-edit capability/energy files (the WI-036 failure mode the user
+    // ruled out), and it must not carry redundant lifecycle tools every turn.
     //
     // The seam: a command handler installs a SCOPED tool on the receiving
     // agent's own context (`agentCtx.tools.register` — per-agent, invisible to
@@ -242,11 +530,10 @@ export class Evolution extends Service {
         } catch (err) {
           return { kind: "error" as const, text: `/${command}: failed to summon the lifecycle tool: ${String(err)}` }
         }
-        // Track the disposer so the tool body can retract itself after firing;
-        // if the turn never calls it (model went another way), the tool stays
-        // scoped to this one agent — it never leaks into other agents — and is
-        // retracted when the agent is disposed (scoped effects unwind with it).
-        this.lifecycleSummons.set(agent, [...(this.lifecycleSummons.get(agent) ?? []), disposer])
+        // Unfired summons need no ledger: the tool was registered on the
+        // receiving agent's OWN ctx, so it never leaks to other agents and is
+        // retracted with its scope when the agent is disposed. (The audit's
+        // dead-WeakMap finding: tracking existed but nothing ever read it.)
         agent.followup(
           createMessage({
             role: "user",
@@ -269,11 +556,55 @@ export class Evolution extends Service {
         }
       }
 
+      // ── Lifecycle-command gate (D2) ─────────────────────────────────────────
+      // The four lifecycle commands are the working surface of an AWAKENED
+      // coordinator. In a dormant session they would work half-gated: state
+      // the session cannot see or route (spawned presets, roster edits) with
+      // no coordinator doctrine behind it. /awaken is deliberately exempt —
+      // it IS the gate opener. No live receiving agent falls through to
+      // summon()'s own refusal, preserving the summon-contract error shape.
+      // A dormant session gets the scripted move: the user runs /awaken.
+      // Depth guard (adjudication from the plan-vs-code audit): a
+      // delegationDepth>0 child is a LINEAGE PARTICIPANT (D2), never a
+      // coordinator — refusing it as "dormant" would be a lie and letting
+      // it through would mutate a roster it will never join (the gate skips
+      // depth>0 by design, so a child-flipped registry entry is incoherent
+      // state). /awaken carries the same guard: a child cannot self-awaken.
+      const requireAwake = (
+        inv: { agent?: { session?: { id?: unknown; header?: { delegationDepth?: unknown } } | unknown; id?: unknown } | undefined }
+      ): { kind: "error"; text: string } | undefined => {
+        const agent = inv.agent as { session?: { id?: unknown; header?: { delegationDepth?: unknown } }; id?: unknown } | undefined
+        if (agent) {
+          const depth = agent.session?.header?.delegationDepth
+          if (typeof depth === "number" && depth > 0) {
+            return {
+              kind: "error" as const,
+              text:
+                `HIVE commands belong to top-level sessions — this is a dispatched child (lineage ` +
+                `participant, D2): it works the task it was handed and routes coordination through its ` +
+                `parent. Run this in a top-level session instead.`,
+            }
+          }
+        }
+        const sessionId = agent ? String(agent.session?.id ?? agent.id ?? "") : ""
+        if (!sessionId) return undefined
+        if (isAwakened(this.directory, sessionId)) return undefined
+        return {
+          kind: "error" as const,
+          text:
+            `HIVE is dormant in this session — the coordination surface needs /awaken first ` +
+            `(the user runs it; the flip loads the coordinator doctrine and the full toolkit). ` +
+            `This command was refused rather than left half-gated (D2).`,
+        }
+      }
+
       const d1 = ctx.commands.register({
         name: "tick",
         description: "Run the HIVE energy tick now (decay unused, boost used capabilities) via a turn-scoped hive_tick tool.",
-        handler: (inv) =>
-          summon(
+        handler: (inv) => {
+          const gate = requireAwake(inv)
+          if (gate) return gate
+          return summon(
             inv.agent,
             "tick",
             (agentCtx) =>
@@ -290,7 +621,8 @@ export class Evolution extends Service {
                 return lines.join("\n")
               }),
             "Run the energy tick: decay capabilities unused since the last tick, boost the used ones, and report the result."
-          ),
+          )
+        },
       })
 
       const d2 = ctx.commands.register({
@@ -298,6 +630,8 @@ export class Evolution extends Service {
         description: "Manifest a new HIVE capability preset via a turn-scoped hive_spawn tool.",
         input: { hint: "<name> — <description>" },
         handler: (inv) => {
+          const gate = requireAwake(inv)
+          if (gate) return gate
           const raw = inv.rawInput.trim()
           const m = raw.match(/^([a-z0-9][a-z0-9-]*)\s*[—-]\s*(.+)$/i)
           if (!m) {
@@ -311,13 +645,23 @@ export class Evolution extends Service {
               this.registerLifecycleTool(
                 agentCtx,
                 "hive_spawn",
-                "Manifest the requested HIVE capability preset (preset dir + energy ledger at 50).",
-                () => {
-                  const dir = this.spawn(name, description)
+                "Manifest the requested HIVE capability preset (preset dir + energy ledger at 50). " +
+                  "Pass a structured `persona` carrying the method the capability will live by — " +
+                  "What This Enables / Activation Triggers / Operating Protocol / Self-Modification Protocol / " +
+                  "Boundaries / Evolution History (the OpenCode capability template; enables + triggers are " +
+                  "REQUIRED when a persona is given, empty sections are dropped). A quick spawn WITHOUT a " +
+                  "persona stays valid, but it leaves the coordinator nothing to read for its use-vs-spawn " +
+                  "decision — the method IS the capability.",
+                (args) => {
+                  const persona = parseCapabilityPersona(((args ?? {}) as { persona?: unknown }).persona)
+                  const dir = this.spawn(name, description, persona)
                   return `Capability \`${name}\` manifested at ${dir} (energy 50). Dispatch it with hive_dispatch (capability "${name}").`
-                }
+                },
+                SPAWN_PARAMETERS
               ),
-            `Manifest a new capability: name \`${name}\`, description "${description}".`
+            `Manifest a new capability: name \`${name}\`, description "${description}". ` +
+              `Author its persona first (the method sections above), then call the summoned tool ONCE with the persona ` +
+              `object. Omitting the persona is allowed only for a deliberate quick spawn.`
           )
         },
       })
@@ -327,6 +671,8 @@ export class Evolution extends Service {
         description: "Return a HIVE capability to the void (archive its preset) via a turn-scoped hive_dissolve tool.",
         input: { hint: "<name>" },
         handler: (inv) => {
+          const gate = requireAwake(inv)
+          if (gate) return gate
           const name = inv.rawInput.trim()
           if (!name) return { kind: "error" as const, text: "Usage: /dissolve <name>" }
           return summon(
@@ -350,8 +696,10 @@ export class Evolution extends Service {
       const d4 = ctx.commands.register({
         name: "evolve",
         description: "Show the HIVE roster + energy and let the agent run the evolution analysis via a turn-scoped hive_evolve tool.",
-        handler: (inv) =>
-          summon(
+        handler: (inv) => {
+          const gate = requireAwake(inv)
+          if (gate) return gate
+          return summon(
             inv.agent,
             "evolve",
             (agentCtx) =>
@@ -359,10 +707,192 @@ export class Evolution extends Service {
                 this.buildRoster()
               ),
             "Run the evolution analysis: call the summoned tool for the live roster, then report state, gaps, and any spawn/mutate/dissolve proposals."
-          ),
+          )
+        },
       })
 
-      return () => { d1(); d2(); d3(); d4() }
+      // ── /awaken (T2 / D1) ─────────────────────────────────────────────────
+      // The activation flip. dsh commands are user-invoked and MODEL-INVISIBLE
+      // (W-048), so /awaken is the only allowed chokepoint: the handler owns
+      // ALL post-flip plumbing (D1) — registry write, restriction + dormant-
+      // explainer lift, scoped doctrine registration, board stub, dossier,
+      // the turn-scoped batch summon, and the brief. It never touches
+      // capability/energy files itself (WI-036/037: the summoned tool is the
+      // only mutation path).
+      //
+      // Section-collision note (why a SECOND disposer Map exists): the dormant
+      // explainer was registered in the agent's SCOPED world at created time
+      // and stays until the agent disposes. Scoped sections shadow by name and
+      // ours differ, so registering doctrine WITHOUT dropping `hive:dormant`
+      // would render BOTH. The handler therefore lifts the dormant section and
+      // the tool restriction together, then registers doctrine in the same
+      // scoped world. On cold resume agent/created re-fires into a fresh
+      // scoped world and the gate re-applies the correct single section from
+      // the registry — no extra mechanism.
+      const d5 = ctx.commands.register({
+        name: "awaken",
+        description: "Awaken this session as the HIVE coordinator (registry flip, doctrine, summon the turn-scoped hive_awaken_spawn tool).",
+        input: { hint: "[context — what you are working on; a hint for the awakening dossier]" },
+        handler: (inv) => {
+          if (!inv.agent) {
+            return {
+              kind: "error" as const,
+              text: `/awaken needs a live receiving agent (invoke it from a session composer, not a bare CLI).`,
+            }
+          }
+          const agent = inv.agent
+          const raw = inv.rawInput.trim()
+          // Depth guard (see requireAwake's adjudication note): a dispatched
+          // child cannot self-awaken — the gate would skip its registry entry
+          // forever, leaving coherent-looking but dead state.
+          {
+            const depth = agent.session?.header?.delegationDepth
+            if (typeof depth === "number" && depth > 0) {
+              return {
+                kind: "error" as const,
+                text:
+                  `/awaken belongs to top-level sessions — this is a dispatched child (lineage ` +
+                  `participant, D2). It was awakened BY its dispatch, not by a command; route ` +
+                  `coordination through the parent session.`,
+              }
+            }
+          }
+          // Same stub-defensive session read as the gate (runtime face always
+          // carries `session.id`; fakes must provide it).
+          const sessionId = String(agent.session?.id ?? agent.id)
+          if (!sessionId) {
+            return { kind: "error" as const, text: "/awaken: the receiving agent has no resolvable session id." }
+          }
+
+          // ── RE-AWAKEN branch (D1: one-time flip; re-running = analysis) ──
+          if (isAwakened(this.directory, sessionId)) {
+            const dossier = `${composeEcosystemSnapshot(this.snapshotSource())}\n\n### Awaken input\n\n  ${raw || "(none)"}`
+            let disposer: () => void
+            try {
+              // The EXISTING per-turn roster tool, re-summoned for this turn.
+              disposer = this.registerLifecycleTool(
+                agent.ctx,
+                "hive_evolve",
+                "Return the current HIVE capability roster and energy state.",
+                () => this.buildRoster()
+              )
+            } catch (err) {
+              return { kind: "error" as const, text: `/awaken: failed to summon the analysis tool: ${String(err)}` }
+            }
+            const brief = fillBrief(REAWAKEN_BRIEF, { dossier, summonName: "hive_evolve" })
+            agent.followup(
+              createMessage({
+                role: "user",
+                content: [{ type: "text", text: brief }],
+                source: { kind: "user" },
+              })
+            )
+            return {
+              kind: "success" as const,
+              text: "/awaken: already awakened — no state change. The re-awakening analysis (evolution-style gap analysis) has been handed to the agent with a turn-scoped hive_evolve tool.",
+            }
+          }
+
+          // ── FULL FLIP (order fixed by the migration plan) ─────────────────
+          // (1) The registry write — the single durable fact of the flip.
+          //     Everything scoped below re-applies from this on cold resume.
+          const coordinatorName = String((agent.session as { header?: { agentPreset?: string } } | undefined)?.header?.agentPreset ?? "unknown")
+          recordAwakened(this.directory, sessionId, coordinatorName, raw)
+          // (2) Lift this session's held gate disposers: the tool restriction
+          //     AND the dormant explainer section (see the collision note).
+          for (const map of [this.gateRestrictions, this.dormantSections]) {
+            const disposer = map.get(sessionId)
+            if (disposer !== undefined) {
+              try {
+                disposer()
+              } catch {
+                // scoped world already unwound it
+              }
+              map.delete(sessionId)
+            }
+          }
+          // (3) Doctrine NOW, in this agent's scoped world — the very next
+          //     assembly carries it. Not re-registered per turn (the scoped
+          //     section persists; a duplicate registration would throw).
+          agent.ctx?.systemPrompt?.section({
+            name: "hive:doctrine",
+            order: 55,
+            text: () => COORDINATOR_DOCTRINE,
+          })
+          // (4) Board stub — the EXACT junction where the OpenCode plugin
+          //     called autoRegister() for the new coordinator. Deliberately a
+          //     grep-able log, no fake stand-ins; the board phase (NEXT WORK)
+          //     plugs in here.
+          this.ctx.logger.info?.("[awaken] board auto-register skipped — board subsystem not ported (NEXT WORK)")
+          // (5) The dossier: ecosystem snapshot + the raw /awaken input.
+          const dossier = `${composeEcosystemSnapshot(this.snapshotSource())}\n\n### Awaken input\n\n  ${raw || "(none)"}`
+          // (6) Summon the turn-scoped batch tool (self-retracts after the
+          //     first call, like every lifecycle summon).
+          let spawnDisposer: () => void
+          try {
+            spawnDisposer = this.registerLifecycleTool(
+              agent.ctx,
+              "hive_awaken_spawn",
+              "Manifest the approved HIVE capabilities from this awakening." +
+                " Pass the full approved list in ONE call: each entry becomes a capability preset" +
+                " (name, description, and — recommended — a structured persona: What This Enables /" +
+                " Activation Triggers / Operating Protocol / Self-Modification Protocol / Boundaries /" +
+                " Evolution History). `enables` and `triggers` are required when a persona is given." +
+                " The tool reports one line per manifest and retracts itself after this single call.",
+              (args) => this.spawnBatch(args),
+              AWAKEN_SPAWN_PARAMETERS
+            )
+          } catch (err) {
+            return { kind: "error" as const, text: `/awaken: failed to summon the batch spawn tool: ${String(err)}` }
+          }
+          // (7) The awaken brief — user-role followup with dossier + summon
+          //     name filled in. The dream-recall mandate lives in the asset.
+          const brief = fillBrief(AWAKEN_BRIEF, { dossier, summonName: "hive_awaken_spawn" })
+          agent.followup(
+            createMessage({
+              role: "user",
+              content: [{ type: "text", text: brief }],
+              source: { kind: "user" },
+            })
+          )
+          return {
+            kind: "success" as const,
+            text: `/awaken: HIVE awakened for session ${sessionId}. Registry recorded, hive tools lifted, coordinator doctrine registered, turn-scoped hive_awaken_spawn summoned — the awaken brief has been handed to the agent.`,
+          }
+        },
+      })
+
+      // ── /status (T6 / D8 item 2) ─────────────────────────────────────────
+      // The coordinator's VIEW command — the only textual energy view after
+      // the D5 decision retired hand-drawn state displays in favor of future
+      // panels. Read-only: it summons the same turn-scoped pattern as the
+      // mutating lifecycle commands (WI-037), but its tool performs no
+      // mutation at all — it returns composeEcosystemSnapshot output, the
+      // EXACT composer /awaken's dossier and the re-awaken analysis read (one
+      // snapshot shape, three consumers — a status view that drifted from the
+      // dossier would promise a roster the flip then contradicts).
+      const d6 = ctx.commands.register({
+        name: "status",
+        description: "View the HIVE ecosystem — roster with energies, the void (dissolved), and the last tick — via a turn-scoped read-only hive_status tool.",
+        handler: (inv) => {
+          const gate = requireAwake(inv)
+          if (gate) return gate
+          return summon(
+            inv.agent,
+            "status",
+            (agentCtx) =>
+              this.registerLifecycleTool(
+                agentCtx,
+                "hive_status",
+                "Return the HIVE ecosystem dossier — the active roster with energies, the void (dissolved capabilities), and the last tick. Read-only: it changes nothing.",
+                () => composeEcosystemSnapshot(this.snapshotSource())
+              ),
+            "Show the HIVE ecosystem state: call hive_status, then relay the roster, the void, and the last tick. Add one-line observations if any are obvious (decay watchdogs, empty roster) — no invented data."
+          )
+        },
+      })
+
+      return () => { d1(); d2(); d3(); d4(); d5(); d6() }
     })
 
     // ── Capability dispatch (the Phase-5 seam) ────────────────────────────────
@@ -373,7 +903,11 @@ export class Evolution extends Service {
     // always-starts-new rule (continuation of an existing child goes through
     // send_message to its durable id — the echo text and the tool docs teach
     // this). Dreamcatcher dispatches are read-only by construction (I-070
-    // caller-side toolFilter) and carry their full method plugin-side.
+    // caller-side toolFilter) and carry their full method plugin-side. For
+    // capability dispatches the METHOD (T5/D7 persona-carried transport) and
+    // the standing context travel in the child's persona, composed by
+    // composeDispatchPersona from resolveCapabilityMaterial — the prompt is
+    // the task brief only.
     // Optional `model` rides SubagentStartRequest.agentOptions (the spawn
     // provider advertises agentOptions: true; resolveChildAgentOptions merges
     // the override over the parent's route, dropping the parent's
@@ -387,6 +921,7 @@ export class Evolution extends Service {
             "Dispatch a HIVE worker as a child agent. Address forms: 'capability/<name>' (workspace capability from the roster), 'builtin/<id>' (plugin-owned agent — currently only builtin/dreamcatcher), or bare '<name>' (= capability/<name>).\n" +
             "ALWAYS starts a NEW instance. To CONTINUE ongoing work on an existing child, do NOT re-dispatch: send_message its durable session id (from the dispatch result, or list_agents for live instances — every child label carries its dispatch address as a prefix). New parallel work on the same capability = dispatch again.\n" +
             "Default shape 'resident': background child — you receive its session id, its report arrives as a message, `send_message` can steer it, and it survives restarts. Shape 'one-shot': synchronous consult — the call blocks until the child finishes and its final output is returned directly as this tool's result (no resident session, nothing to steer). Rule: one-shot only for short, self-contained, result-shaped consults (dreamcatcher Recall); everything else stays resident.\n" +
+            "The capability's own method (what-this-enables / triggers / protocol / boundaries) plus the HIVE standing context are composed into the child automatically — write the TASK brief only (intent over implementation); do not re-teach the capability its own job.\n" +
             "builtin/dreamcatcher is read-only by construction (mutation tools denied at spawn) and carries its full Recall/Audit method on the plugin side — the prompt need only state the job (its mode and scope), not the method.",
           parameters: {
             capability: {
@@ -446,7 +981,28 @@ export class Evolution extends Service {
                 `builtin/${target.id} does not support shape "${shape}" — allowed: ${def.shapes.join(", ")}. ${def.shapeGuidance}`
               )
             }
-            const persona = def ? def.persona : composeDispatchPersona(target.id)
+            let persona: string
+            if (def) {
+              // Built-ins: their full plugin-side method, passed through
+              // untouched (byte-identical, drift-guarded; the standing
+              // context is capability-worker doctrine, not theirs).
+              persona = def.persona
+            } else {
+              // T5/D7: resolve the capability's OWN method from the roster
+              // (preset persona text, else legacy ledger body) and compose
+              // identity + material + standing into the request persona.
+              // Resolution is non-fatal — a miss logs debug and the child
+              // dispatches with identity + standing only.
+              const material = resolveCapabilityMaterial(this.directory, this.capabilitiesPath, target.id)
+              if (!material) {
+                this.ctx.logger.debug?.("[evolution] no capability material for dispatch — composing standing-only persona", {
+                  capability: target.id,
+                  directory: this.directory,
+                  capabilitiesPath: this.capabilitiesPath,
+                })
+              }
+              persona = composeDispatchPersona(target.id, { material })
+            }
             const agentOptions = args.model ? parseModelSpec(args.model) : undefined
             // The durable label always carries the dispatch address as its
             // prefix (see composeDispatchLabel) — list_agents has no other
@@ -520,24 +1076,27 @@ export class Evolution extends Service {
    * first execution (it exists for exactly one call); it is also retracted
    * when the owning agent is disposed, so a never-called summon cannot leak
    * past the agent's lifetime.
+   *
+   * `parameters` defaults to `{}` (the no-argument lifecycle tools); the
+   * awaken batch summon passes its `capabilities` schema. `run` always
+   * receives the call's parsed args — the zero-arg tools simply ignore them.
    */
-  private lifecycleSummons = new WeakMap<Agent, (() => void)[]>()
-
   private registerLifecycleTool(
     agentCtx: import("@deepseek-ai/cordis").Context,
     name: string,
     description: string,
-    run: () => string
+    run: (args: unknown) => string,
+    parameters: ParameterSchemaSpec = {}
   ): () => void {
     let disposer: (() => void) | undefined
     disposer = agentCtx.tools.register(
       defineTool({
         name,
         description,
-        parameters: {},
-        execute: async () => {
+        parameters,
+        execute: async (args) => {
           try {
-            return run()
+            return run(args)
           } finally {
             // Turn-scoped: retract after the first call, success or failure.
             disposer?.()
@@ -548,6 +1107,54 @@ export class Evolution extends Service {
     )
     return () => disposer?.()
   }
+
+  /**
+   * The structural view of this service the dossier composer consumes
+   * (composeEcosystemSnapshot takes primitives so T6 can reuse it without a
+   * service handle).
+   */
+  snapshotSource = (): EcosystemSnapshotSource => ({
+    directory: this.directory,
+    listCapabilities: () => this.listCapabilities(),
+  })
+
+  /**
+   * The compaction seam's block composer (T6): the two re-anchor ingredients
+   * resolved and handed to the pure composer — the energy summary from
+   * getCapabilitiesSummary (verbatim energy.ts helper) and the pre-compaction
+   * dream pointers from the dream archive.
+   *
+   * dreamArchive is read via `ctx.get`, NOT static inject — the
+   * optional-service pattern, deliberately. The cohort's hive profile always
+   * mounts it, but a standalone-evolution process (including this package's
+   * own test harness) does not, and a hard inject would hold the WHOLE
+   * evolution service at boot for a dependency this seam can degrade without:
+   * an anchor without dream pointers still restores roster/energy awareness,
+   * while an unbooted evolution would take the tick, the roster, and the gate
+   * down with it. The read is also failure-isolated — a throw inside this
+   * serial listener fails agent PUBLICATION, so any archive misbehavior
+   * (absent service, scan error, shape drift) collapses to "pointers
+   * unavailable" instead.
+   */
+  postCompactionContext = (): string => {
+    let pointers: PreCompactionDreamPointer[] | undefined
+    try {
+      const archive = this.ctx.get("dreamArchive") as
+        | { recentPreCompactionDreams?: (limit?: number) => unknown }
+        | undefined
+      const recent = archive?.recentPreCompactionDreams?.(POST_COMPACTION_DREAM_LIMIT)
+      if (Array.isArray(recent)) pointers = recent as PreCompactionDreamPointer[]
+    } catch {
+      pointers = undefined
+    }
+    return composePostCompactionContext({ capabilitySummary: this.capabilitiesSummary(), dreamPointers: pointers })
+  }
+
+  // ── the awaken gate's held disposers (T2) ─────────────────────────────────
+  // Both keyed by session id; see the gate listener for why not the Agent.
+
+  private gateRestrictions = new Map<string, () => void>()
+  private dormantSections = new Map<string, () => void>()
 
   // ── energy state ──────────────────────────────────────────────────────────
 
@@ -566,8 +1173,7 @@ export class Evolution extends Service {
 
   // ── capability presets ────────────────────────────────────────────────────
 
-  /** List active capabilities (non-`_`-prefixed subdirectories with a preset). */
-  listCapabilities = (): CapabilityInfo[] => {
+  /** List active capabilities (non-`_`-prefixed subdirectories with a preset). */  listCapabilities = (): CapabilityInfo[] => {
     let entries: fs.Dirent[]
     try {
       entries = fs.readdirSync(this.capabilitiesPath, { withFileTypes: true })
@@ -624,8 +1230,15 @@ export class Evolution extends Service {
    * with `preset.yml` + `agent.cordis.yml` (a dsh preset), and seed its
    * energy at 50 via the legacy `<name>.md` ledger the tick manages. The
    * preset is discoverable immediately (dsh preset discovery is unmemoized).
+   *
+   * T2/D7: an optional validated `persona` materializes the capability's rich
+   * method body INTO the preset's persona text block (identity line + the
+   * rendered template sections) — the method travels with the preset, so
+   * dispatched children and cold resumes all read one canonical source. The
+   * NO-PERSONA path is byte-identical to the pre-T2 output (pinned by test):
+   * a minimal two-line spawn stays valid.
    */
-  spawn = (name: string, description: string): string => {
+  spawn = (name: string, description: string, persona?: CapabilityPersona): string => {
     if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) {
       throw new Error(`invalid capability name "${name}" (lowercase letters, digits, dashes only)`)
     }
@@ -645,21 +1258,7 @@ export class Evolution extends Service {
       ].join("\n"),
       "utf8"
     )
-    fs.writeFileSync(
-      path.join(dir, "agent.cordis.yml"),
-      [
-        `# The \`${name}\` capability preset — spawned by /spawn.`,
-        `# Persona + mounted tools are edited here; energy lives in the sibling`,
-        `# \`${name}.md\` ledger that the tick manages.`,
-        `- id: persona`,
-        `  name: '@deepseek-ai/dsh-persona'`,
-        `  config:`,
-        `    text: |-`,
-        `      You are the ${name} capability: ${description}`,
-        ``,
-      ].join("\n"),
-      "utf8"
-    )
+    fs.writeFileSync(path.join(dir, "agent.cordis.yml"), renderAgentCordisYml(name, description, persona), "utf8")
     // Seed the energy ledger (the file energy.ts reads/writes in place).
     fs.writeFileSync(
       path.join(this.capabilitiesPath, `${name}.md`),
@@ -678,6 +1277,44 @@ export class Evolution extends Service {
       "utf8"
     )
     return dir
+  }
+
+  /**
+   * The awaken batch summon's body (T2): manifest a list of approved
+   * capabilities in one call. Each entry is validated (name/description
+   * syntax, persona via parseCapabilityPersona) and looped through the
+   * EXISTING `spawn()` — this is the ONLY mutation path; the handler never
+   * hand-writes capability files (WI-036/037). A refused entry (duplicate,
+   * reserved name, invalid persona) reports a ✗ line and does not abort the
+   * rest of the batch.
+   */
+  spawnBatch = (rawArgs: unknown): string => {
+    const args = (rawArgs ?? {}) as { capabilities?: unknown }
+    const list = args.capabilities
+    if (!Array.isArray(list) || list.length === 0) {
+      throw new Error("hive_awaken_spawn requires a non-empty `capabilities` array ({ name, description, persona? })")
+    }
+    const lines: string[] = []
+    let manifested = 0
+    for (const entry of list) {
+      const rec = (entry ?? {}) as { name?: unknown; description?: unknown; persona?: unknown }
+      const name = typeof rec.name === "string" ? rec.name : ""
+      const description = typeof rec.description === "string" ? rec.description : ""
+      lines.push(`Spawning ${name}…`)
+      try {
+        if (!name) throw new Error("entry is missing its `name`")
+        if (!description) throw new Error("entry is missing its `description`")
+        const persona = parseCapabilityPersona(rec.persona)
+        const dir = this.spawn(String(name), String(description), persona)
+        manifested++
+        lines.push(`  ✓ manifested at ${dir} (energy 50)`)
+      } catch (err) {
+        lines.push(`  ✗ refused: ${err instanceof Error ? err.message : String(err)}`)
+      }
+    }
+    return (
+      `HIVE awakening manifests: ${manifested}/${list.length} manifested.\n\n` + lines.join("\n")
+    )
   }
 
   /**
@@ -866,21 +1503,38 @@ export function parseModelSpec(modelSpec: string): { provider?: string; model: s
 }
 
 /**
- * Compose the per-child persona for a workspace CAPABILITY dispatch: the
- * identity line only — the capability's method rides the prompt and its own
- * preset material. Plugin-owned built-ins get their full persona from
- * BUILTIN_AGENTS instead.
+ * Compose the per-child persona for a workspace CAPABILITY dispatch (T5/D7
+ * persona-carried transport): identity line + the capability's OWN material
+ * (its method, resolved by `resolveCapabilityMaterial` — preset persona text
+ * or legacy ledger body) + the plugin's capability standing context
+ * (CAPABILITY_STANDING — doctrine, capability-independent, appended even on
+ * a material miss). Material failure is non-fatal: identity + standing only.
+ *
+ * This return value is passed VERBATIM as the start request's
+ * `SubagentStartRequest.persona` — it is therefore the exact text the child's
+ * system prompt mounts and the durable descriptor snapshots (cold-resume
+ * safe). The dispatch task prompt (`args.prompt`) stays the task brief only:
+ * the method travels here, not into the brief.
+ *
+ * Built-ins are NOT routed through this composer — `BUILTIN_AGENTS[...].persona`
+ * is their full method and is passed through untouched (pinned byte-identical
+ * by test); the standing context is capability-worker doctrine, not theirs.
  *
  * The capability roster is deliberately NOT included: dsh composes the
  * process-level `hive:roster` systemPrompt section into EVERY agent in the
  * process (including spawned children), so an in-persona roster arrived as a
  * literal duplicate in the child's system prompt (seen in live dispatch
  * transcripts). The persona keeps the child-identity line — the SHADOW-009
- * "the child's own capability names itself first" property — while the full
- * roster comes exactly once from the system-prompt assembly.
+ * "the child's own capability names itself first" property — and the method
+ * material, while the roster comes exactly once from the system-prompt
+ * assembly.
  */
-export function composeDispatchPersona(capabilityId: string): string {
-  return `You are the \`${capabilityId}\` HIVE capability, dispatched as a resident continuable child of the coordinator.`
+export function composeDispatchPersona(capabilityId: string, options?: { material?: string }): string {
+  const parts = [`You are the \`${capabilityId}\` HIVE capability, dispatched as a resident continuable child of the coordinator.`]
+  const material = options?.material?.trim()
+  if (material) parts.push(material.trimEnd())
+  parts.push(CAPABILITY_STANDING)
+  return parts.join("\n\n")
 }
 
 export default Evolution
@@ -889,4 +1543,9 @@ export default Evolution
 // inject rides on the class as `static inject` above. Named re-exports below
 // are for consumers/tests, never read by the loader.
 export { readHiveState, writeHiveState, markCapabilityUsed, tickEnergy, getCapabilitiesSummary }
+export { CAPABILITY_STANDING }
+export { resolveCapabilityMaterial } from "./lib/material.js"
+// Re-exported for the tests (and consumers) so fixture presets render through
+// the SAME writer the plugin ships — no copy-pasted yml shape to drift.
+export { renderAgentCordisYml } from "./lib/persona.js"
 export type { HiveState, TickResult }
