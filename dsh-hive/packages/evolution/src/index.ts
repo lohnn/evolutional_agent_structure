@@ -3,8 +3,14 @@
  *
  * Exposes `ctx.evolution`:
  *  - Energy state (`lib/energy.ts` — a VERBATIM port of the OpenCode plugin's
- *    `src/lib/energy.ts`) and the tick, fired on dsh's `agent/session-start`
- *    event (the analogue of OpenCode's `session.created` hook).
+ *    `src/lib/energy.ts`) and the tick, fired on dsh's `agent/created` event
+ *    (payload `{ agent, source: SessionStartSource, signal }` — the serial
+ *    analogue of OpenCode's `session.created` hook; it fires once per agent
+ *    publication: startup, resume, clear, compact). Originally wired to the
+ *    invented `agent/session-start`, which no dsh runtime publishes — a live
+ *    regression (the once-per-day tick sat dead for days) that the tests
+ *    never caught because they emitted the phantom event themselves. Guarded
+ *    now by `test/event-catalog-guard.test.mjs`.
  *  - Roster state + injection via `ctx.systemPrompt.section` at order 50
  *    (spike 0.2: ordering is numeric + total, registration-order independent;
  *    dynamic `text` is evaluated per assembly, so the roster is always fresh).
@@ -83,7 +89,7 @@ declare module "@deepseek-ai/cordis" {
      */
     "hive/capability-used"(name: string, sessionId: string): void
     /**
-     * The energy tick ran (on `agent/session-start` or `/tick`).
+     * The energy tick ran (on `agent/created` or `/tick`).
      * @mode emit
      */
     "hive/tick"(results: TickResult[]): void
@@ -191,17 +197,23 @@ export class Evolution extends Service {
     // included) with live re-evaluation per assembly. There is nothing to
     // register at service boot.
 
-    // ── Energy tick on session-start ────────────────────────────────────────
-    // `agent/session-start` is the dsh analogue of OpenCode's
-    // `session.created` hook: it fires exactly once per agent publication
-    // (startup, resume, clear, compact). The tick is idempotent within a day
+    // ── Energy tick on agent/created ────────────────────────────────────────
+    // `agent/created` is the dsh analogue of OpenCode's `session.created`
+    // hook: a serial event with payload `{ agent, source, signal }` (source
+    // is the SessionStartSource — startup, resume, clear, compact), fired
+    // exactly once per agent publication. The tick is idempotent within a day
     // (energy.ts guards on lastTick) and skips cleanly when no capability was
-    // used since the last tick, so firing it per session-start is cheap.
-    ctx.on("agent/session-start", () => {
+    // used since the last tick, so firing it per publication is cheap.
+    // Found as a LIVE REGRESSION: this was bound to `agent/session-start`,
+    // an event the dsh runtime (0.1.6-alpha.1) does not publish — the
+    // once-per-day tick sat dead (hive-state.json's lastTick frozen for 5+
+    // days) and the tests never caught it because they emitted the phantom
+    // event name themselves. Guarded by test/event-catalog-guard.test.mjs.
+    ctx.on("agent/created", () => {
       const { results, skipped } = this.tick()
       if (!skipped) {
         ctx.emit("hive/tick", results)
-        ctx.logger.debug?.("[evolution] energy tick applied on agent/session-start", {
+        ctx.logger.debug?.("[evolution] energy tick applied on agent/created", {
           results: results.length,
         })
       }

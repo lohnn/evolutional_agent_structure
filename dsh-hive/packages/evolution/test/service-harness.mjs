@@ -99,11 +99,13 @@ check("tick.decay", betaTick?.newEnergy === 40, `beta decayed 50→40 (unused), 
 const t2 = ctx.evolution.tick()
 check("tick.idempotent", t2.skipped === true, "second same-day tick skipped")
 
-// The tick also fired on the service's agent/session-start listener when the
+// The tick also fired on the service's agent/created listener when the
 // event fires — emit it and confirm no throw + the skip path is taken.
+// (The event NAME is asserted real by test/event-catalog-guard.test.mjs; if
+// the harness renames it, that guard fails first and points here.)
 let listenerOk = true
-try { ctx.emit("agent/session-start", { agent: { id: "a", session: { id: "ses_x" } }, source: "startup" }) } catch { listenerOk = false }
-check("tick.event-wired", listenerOk, "agent/session-start listener fired without error")
+try { ctx.emit("agent/created", { agent: { id: "a", session: { id: "ses_x" } }, source: "startup" }) } catch { listenerOk = false }
+check("tick.event-wired", listenerOk, "agent/created listener fired without error")
 
 // ── markUsed emits the bookkeeping event ────────────────────────────────────
 let usedEvent = null
