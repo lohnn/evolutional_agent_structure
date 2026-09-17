@@ -4,6 +4,10 @@
 // the real dsh services.
 import { Context } from "@deepseek-ai/cordis"
 import Evolution from "@hive/dsh-evolution"
+// The shared composer, imported through the package's ./lib exports map — the
+// status-dossier REUSE check compares the summoned tool's output against this
+// exact function's output (a reimplementation would drift from the dossier).
+import { composeEcosystemSnapshot } from "@hive/dsh-evolution/lib/snapshot"
 import assert from "node:assert/strict"
 import fs from "fs"
 import os from "os"
@@ -115,11 +119,12 @@ dispose()
 check("markUsed.event", usedEvent?.name === "beta" && usedEvent?.sessionId === "ses_harness_2", "hive/capability-used emitted")
 
 // ── Commands registered ─────────────────────────────────────────────────────
-// /awaken joins the lifecycle four (T2/D1). All five gate on an AWAKENED
-// coordinator except /awaken itself, which opens the gate.
-const cmdNames = ["tick", "spawn", "evolve", "dissolve", "awaken"]
+// /awaken joined the lifecycle four (T2/D1); /status joins them last (T6/D8-2).
+// All of these gate on an AWAKENED coordinator except /awaken itself, which
+// opens the gate.
+const cmdNames = ["tick", "spawn", "evolve", "dissolve", "awaken", "status"]
 const registered = cmdNames.filter((n) => ctx.commands.find(undefined, n) !== undefined)
-check("commands.registered", registered.length === 5, `commands visible: ${registered.join(", ") || "(none)"}`)
+check("commands.registered", registered.length === 6, `commands visible: ${registered.join(", ") || "(none)"}`)
 
 // ── Command-summoned lifecycle tools (WI-037) ───────────────────────────────
 // Commands refuse without a live receiving agent (they never mutate directly).
@@ -323,6 +328,137 @@ check("dissolve.roster", !ctx.evolution.buildRoster().includes("beta"), "roster 
 {
   const noAgentOut = await ctx.commands.find(undefined, "awaken").handler({ rawInput: "", agent: undefined, commandId: "c_awaken3", attachments: [], signal: AbortSignal.timeout(1000) })
   check("awaken.no-agent", noAgentOut.kind === "error" && /live receiving agent/.test(noAgentOut.text ?? ""), "/awaken without an agent refuses (no registry write)")
+}
+
+// ── T6: /status — the shared-composer view command (D8 item 2) ────────────────
+// /status is the coordinator's read-only view: requireAwake gate first (D2 —
+// status is a coordinator view, a dormant session gets the awaken hint), then
+// the summon pattern (turn-scoped hive_status whose run() returns the EXACT
+// composeEcosystemSnapshot output /awaken's dossier and the re-awaken analysis
+// use — reuse, never a reimplementation).
+{
+  const statusCmd = ctx.commands.find(undefined, "status")
+  const dormantStatusAgent = { id: "ses_dormant_status", followup: () => {} }
+  const dormantStatusScope = createScope(ctx, dormantStatusAgent, {})
+  dormantStatusAgent.ctx = dormantStatusScope.ctx
+  const dormantOut = await statusCmd.handler({ rawInput: "", agent: dormantStatusAgent, commandId: "c_t6_status", attachments: [], signal: AbortSignal.timeout(1000) })
+  check("status.dormant-refused", dormantOut.kind === "error" && /\/awaken/.test(dormantOut.text ?? ""), "/status in a dormant session refuses with the awaken hint (D2)")
+  check("status.dormant-no-summon", ctx.tools.get("hive_status", dormantStatusAgent) === undefined, "refused /status summons nothing (gate first)")
+
+  const beforeStatus = followups.length
+  const out = await statusCmd.handler({ rawInput: "", agent: fakeAgent, commandId: "c_t6_status2", attachments: [], signal: AbortSignal.timeout(1000) })
+  check("status.summons", out.kind === "success" && followups.length === beforeStatus + 1, "/status summons hive_status and wakes the model")
+  check("status.wake-brief", followups.at(-1).content[0].text.includes("hive_status") && followups.at(-1).content[0].text.includes("relay the roster, the void, and the last tick"), "wake brief names the summoned tool + the relay instruction (no invented data)")
+  const statusTool = ctx.tools.get("hive_status", fakeAgent)
+  check("status.scoped", statusTool !== undefined, "hive_status scoped on the agent, invisible to the global layer")
+  check("status.not-global", ctx.tools.get("hive_status") === undefined, "hive_status never touches the global tool layer")
+  if (statusTool) {
+    const dossier = String(await statusTool.execute({}, { agent: fakeAgent, signal: AbortSignal.timeout(1000) }))
+    check(
+      "status.dossier",
+      dossier.includes("HIVE Ecosystem Dossier") &&
+        dossier.includes("### Roster (active capabilities)") &&
+        /gamma — energy: \d+/.test(dossier) &&
+        dossier.includes("The Void (dissolved capabilities)"),
+      "hive_status returns the dossier: header + roster line + the void (dissolved beta lists there)"
+    )
+    // The reuse contract, byte-exact: the summoned tool's output IS the shared
+    // composer's output (a status view drifting from /awaken's dossier would
+    // be the bug this check exists to catch).
+    check("status.dossier-reuse", dossier === composeEcosystemSnapshot(ctx.evolution.snapshotSource()), "tool output === composeEcosystemSnapshot(snapshotSource()) byte-for-byte")
+    check("status.retracts", ctx.tools.get("hive_status", fakeAgent) === undefined, "hive_status retracts after firing (turn-scoped, like every summon)")
+  }
+}
+
+// ── T6: the compaction seam — agent/created with source:"compact" ─────────────
+// dsh has no standalone compaction event: a summarized session RE-PUBLISHES
+// with source "compact" (SessionStartSource, live 0.1.6-alpha.1). On an
+// awakened top-level coordinator (gate decision "doctrine") that registers a
+// one-shot scoped hive:post-compaction re-anchor; on deny (dormant) or any
+// non-compact source it registers NOTHING extra. The dreamArchive service is
+// OPTIONAL (ctx.get, never static inject), so both availability paths are
+// asserted here via a mounted fake — the with-pointers path, then the
+// dropped-archive fallback a standalone-evolution install would take.
+{
+  // Six dreams, most recent first — the service caps at 5 (POST_COMPACTION_DREAM_LIMIT).
+  const fakeDreams = [
+    { dreamId: "DRM-019", intention: "consolidate the /awaken port — gate, doctrine, briefs", artifacts: ["I-048", "W-019"] },
+    { dreamId: "DRM-018", intention: "energy tick repair lessons", artifacts: ["I-050"] },
+    { dreamId: "DRM-017", intention: "dispatch material transport", artifacts: ["SNG-018"] },
+    { dreamId: "DRM-016", intention: "board stitching notes", artifacts: [] },
+    { dreamId: "DRM-015", intention: "dual-run findings", artifacts: ["I-041"] },
+    { dreamId: "DRM-014", intention: "oldest — beyond the cap, must be dropped", artifacts: ["I-040"] },
+  ]
+  const dropArchive = ctx.provide("dreamArchive", {
+    directory: synth,
+    recentPreCompactionDreams: (limit = 5) => fakeDreams.slice(0, limit),
+  })
+  const ledgerPath = path.join(synth, ".opencode/agents/hive-sessions.json")
+  const mergeLedger = (sessionId) => {
+    const ledger = JSON.parse(fs.readFileSync(ledgerPath, "utf8"))
+    ledger.coordinators[sessionId] = { agent: "status", awakenedAt: new Date().toISOString(), lastAwakenInput: "" }
+    fs.writeFileSync(ledgerPath, JSON.stringify(ledger, null, 2))
+  }
+  const makeAwakenedAgent = (sessionId) => {
+    const a = { id: sessionId, session: { id: sessionId, header: {} }, followup: () => {} }
+    const scope = createScope(ctx, a, {})
+    a.ctx = scope.ctx
+    mergeLedger(sessionId)
+    return a
+  }
+
+  // 1) awakened + compact → doctrine AND the re-anchor, ordered 55 < 56.
+  const compactAgent = makeAwakenedAgent("ses_compact_1")
+  ctx.emit("agent/created", { agent: compactAgent, source: "compact" })
+  const asmC = await ctx.systemPrompt.assemble({ scope: compactAgent })
+  const namesC = asmC.sections.map((s) => s.name)
+  const doctrineIdx = namesC.indexOf("hive:doctrine")
+  const compactIdx = namesC.indexOf("hive:post-compaction")
+  check("compact.section-registered", compactIdx >= 0, `source:"compact" + doctrine decision registers the scoped re-anchor (sections: ${namesC.join(",")})`)
+  check("compact.section-after-doctrine", doctrineIdx >= 0 && doctrineIdx < compactIdx, "re-anchor renders after doctrine (55 < 56)")
+  const sectionC = asmC.sections.find((s) => s.name === "hive:post-compaction")
+  const textC = String(sectionC?.text ?? "")
+  check("compact.section-header", textC.includes("== [HIVE] context restored after compaction"), "block opens with the re-anchor header")
+  check("compact.section-summary", textC.includes("Active capabilities:") && textC.includes("- alpha (energy:"), "block carries the getCapabilitiesSummary energy summary")
+  check(
+    "compact.section-pointers",
+    textC.includes("DRM-019 (pre-compaction, artifacts: I-048, W-019) — consolidate the /awaken port") &&
+      textC.includes("(pre-compaction, artifacts: none)"),
+    "pointer lines keep the dreamPointerLine shape (artifact list and the 'none' form)"
+  )
+  check("compact.section-cap", (textC.match(/\(pre-compaction, artifacts:/g) ?? []).length === 5 && textC.includes("DRM-015") && !textC.includes("DRM-014"), `capped at 5 most recent dreams (6 offered)`)
+  check("compact.section-reminder", textC.includes('hive_dream_query(ids:"<artifact ids>")') && textC.includes("hive_dream_rank"), "block carries the post-compaction retrieval reminder")
+  dropArchive()
+
+  // 2) awakened + compact + archive DROPPED → the honest fallback line, no
+  //    pointers (the optional-service degradation the service ships with).
+  const compactAgent2 = makeAwakenedAgent("ses_compact_2")
+  ctx.emit("agent/created", { agent: compactAgent2, source: "compact" })
+  const s2Text = String((await ctx.systemPrompt.assemble({ scope: compactAgent2 })).sections.find((s) => s.name === "hive:post-compaction")?.text ?? "")
+  check(
+    "compact.fallback-no-archive",
+    s2Text.includes("== [HIVE] context restored after compaction") &&
+      s2Text.includes("dream archive is not mounted") &&
+      !s2Text.includes("(pre-compaction, artifacts:"),
+    "absent dreamArchive degrades the section to the fallback line, zero pointers"
+  )
+
+  // 3) dormant + compact → deny branch → re-anchor (and doctrine) absent; the
+  //    dormant explainer is still what renders.
+  const dormantCompact = { id: "ses_compact_dormant", session: { id: "ses_compact_dormant", header: {} }, followup: () => {} }
+  const dormantCompactScope = createScope(ctx, dormantCompact, {})
+  dormantCompact.ctx = dormantCompactScope.ctx
+  ctx.emit("agent/created", { agent: dormantCompact, source: "compact" })
+  const namesDC = (await ctx.systemPrompt.assemble({ scope: dormantCompact })).sections.map((s) => s.name)
+  check("compact.deny-branch-quiet", !namesDC.includes("hive:post-compaction") && !namesDC.includes("hive:doctrine") && namesDC.includes("hive:dormant"), `dormant + compact: no re-anchor, dormant explainer instead (${namesDC.join(",")})`)
+
+  // 4) awakened + resume → the re-anchor is one-shot: it rides ONLY the
+  //    compact republication (the next resume publishes "resume"), while
+  //    doctrine re-applies from the persisted registry.
+  const resumeAgent = makeAwakenedAgent("ses_resume_1")
+  ctx.emit("agent/created", { agent: resumeAgent, source: "resume" })
+  const namesR = (await ctx.systemPrompt.assemble({ scope: resumeAgent })).sections.map((s) => s.name)
+  check("compact.resume-one-shot", namesR.includes("hive:doctrine") && !namesR.includes("hive:post-compaction"), `resume re-applies doctrine but never the compaction re-anchor (${namesR.join(",")})`)
 }
 
 fs.rmSync(synth, { recursive: true, force: true })

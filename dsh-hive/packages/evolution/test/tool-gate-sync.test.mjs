@@ -86,6 +86,7 @@ test("lifecycle summons stay turn-scoped (never globally registered, gated by re
     "hive_dissolve",
     "hive_evolve",
     "hive_spawn",
+    "hive_status",
     "hive_tick",
   ])
 })

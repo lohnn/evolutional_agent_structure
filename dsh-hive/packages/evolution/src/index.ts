@@ -20,7 +20,7 @@
  *    `capability/<name>` presets are discoverable by dsh's preset roster AND
  *    spawnable via `ctx.subagents.startContinuable`. Capabilities are
  *    resident, continuable children (spike 0.3) — not one-shot subagents.
- *  - `/spawn` `/evolve` `/dissolve` `/tick` as dsh commands.
+ *  - `/spawn` `/evolve` `/dissolve` `/tick` `/status` `/awaken` as dsh commands.
  *
  * Session identity (the least-mechanical part of the port): dsh sessions are
  * first-class and continuable children persist + cold-resume natively, so the
@@ -48,7 +48,13 @@ import { COORDINATOR_DOCTRINE, DORMANT_NOTICE, AWAKEN_BRIEF, REAWAKEN_BRIEF, CAP
 import { recordAwakened, isAwakened, decideGate } from "./lib/sessions.js"
 import { parseCapabilityPersona, renderAgentCordisYml, type CapabilityPersona } from "./lib/persona.js"
 import { resolveCapabilityMaterial } from "./lib/material.js"
-import { composeEcosystemSnapshot, type EcosystemSnapshotSource } from "./lib/snapshot.js"
+import {
+  composeEcosystemSnapshot,
+  composePostCompactionContext,
+  POST_COMPACTION_DREAM_LIMIT,
+  type EcosystemSnapshotSource,
+  type PreCompactionDreamPointer,
+} from "./lib/snapshot.js"
 
 /** String-output tool contract (the spike 0.1 pattern used across the port). */
 const TEXT_OUT = {
@@ -388,12 +394,21 @@ export class Evolution extends Service {
       // always carries; production never hits undefined here.
       const sessionId = String(agent.session?.id ?? agent.id)
       const depth = agent.session?.header?.delegationDepth
+      // The compaction seam reads `source` (the SessionStartSource —
+      // 'startup' | 'resume' | 'clear' | 'compact'): present and typed in the
+      // LIVE runtime (0.1.6-alpha.1 declares the payload
+      // `{ agent, source, signal }`), ABSENT from this package's pinned type
+      // corridor (0.1.2-rc.1 declares `{ agent }` only) — so the read stays a
+      // structural access with `?`, not a typed field. Drop the cast when the
+      // pin bumps to a corridor that declares it; until then undefined simply
+      // means "not a compaction republication" and the seam stays quiet.
+      const source = (payload as { source?: string }).source
       switch (decideGate(depth, isAwakened(this.directory, sessionId))) {
         case "skip":
           // Exempt child (depth > 0) — participants by lineage. No section, no
           // restriction, no state. (D1: dormant sessions leave no state.)
           return
-        case "doctrine":
+        case "doctrine": {
           // Awakened coordinator: scoped standing section at 55 — after the
           // process-wide hive:roster (50), before tool guidance (100+).
           agent.ctx?.systemPrompt?.section({
@@ -401,7 +416,30 @@ export class Evolution extends Service {
             order: 55,
             text: () => COORDINATOR_DOCTRINE,
           })
+          // ── Compaction seam (T6) ────────────────────────────────────────────
+          // dsh publishes no standalone compaction event; a session that was
+          // just summarized RE-PUBLISHES through this same event with
+          // `source: "compact"`. When that happens to an AWAKENED top-level
+          // coordinator — gate decision "doctrine", the only session kind
+          // that owns pre-compaction HIVE state (dreams, board work items) —
+          // register a second scoped section with the re-anchor block above
+          // doctrine-adjacent guidance (56). Register-and-forget, same scoped
+          // lifecycle as the dormant section: it belongs to this agent
+          // instance and unwinds with it. One-shot by construction — the next
+          // resume publishes source "resume", never "compact", so the fresh
+          // scoped world re-anchors exactly once; no Map, no lift: /awaken
+          // has nothing to lift from an awakened session and a double
+          // registration only names-collides if the runtime ever
+          // double-publishes compact for one scope, which it does not.
+          if (source === "compact") {
+            agent.ctx?.systemPrompt?.section({
+              name: "hive:post-compaction",
+              order: 56,
+              text: () => this.postCompactionContext(),
+            })
+          }
           return
+        }
         case "deny": {
           // Dormant top-level agent: hive tools vanish (restrict returns the
           // exact disposer that lifts the restriction) + the dormant
@@ -461,10 +499,10 @@ export class Evolution extends Service {
     // dsh commands are MODEL-INVISIBLE by architecture (W-048): a handler runs
     // against the receiving agent without the command ever reaching the model.
     // The HIVE lifecycle stays human-driven (the user invokes /spawn /evolve
-    // /dissolve /tick), but the AGENT carries out the lifecycle through proper
-    // tools — it must never hand-edit capability/energy files (the WI-036
-    // failure mode the user ruled out), and it must not carry redundant
-    // lifecycle tools every turn.
+    // /dissolve /tick /status; /awaken is the opt-in there of), but the AGENT
+    // carries out the lifecycle through proper tools — it must never
+    // hand-edit capability/energy files (the WI-036 failure mode the user
+    // ruled out), and it must not carry redundant lifecycle tools every turn.
     //
     // The seam: a command handler installs a SCOPED tool on the receiving
     // agent's own context (`agentCtx.tools.register` — per-agent, invisible to
@@ -794,7 +832,37 @@ export class Evolution extends Service {
         },
       })
 
-      return () => { d1(); d2(); d3(); d4(); d5() }
+      // ── /status (T6 / D8 item 2) ─────────────────────────────────────────
+      // The coordinator's VIEW command — the only textual energy view after
+      // the D5 decision retired hand-drawn state displays in favor of future
+      // panels. Read-only: it summons the same turn-scoped pattern as the
+      // mutating lifecycle commands (WI-037), but its tool performs no
+      // mutation at all — it returns composeEcosystemSnapshot output, the
+      // EXACT composer /awaken's dossier and the re-awaken analysis read (one
+      // snapshot shape, three consumers — a status view that drifted from the
+      // dossier would promise a roster the flip then contradicts).
+      const d6 = ctx.commands.register({
+        name: "status",
+        description: "View the HIVE ecosystem — roster with energies, the void (dissolved), and the last tick — via a turn-scoped read-only hive_status tool.",
+        handler: (inv) => {
+          const gate = requireAwake(inv)
+          if (gate) return gate
+          return summon(
+            inv.agent,
+            "status",
+            (agentCtx) =>
+              this.registerLifecycleTool(
+                agentCtx,
+                "hive_status",
+                "Return the HIVE ecosystem dossier — the active roster with energies, the void (dissolved capabilities), and the last tick. Read-only: it changes nothing.",
+                () => composeEcosystemSnapshot(this.snapshotSource())
+              ),
+            "Show the HIVE ecosystem state: call hive_status, then relay the roster, the void, and the last tick. Add one-line observations if any are obvious (decay watchdogs, empty roster) — no invented data."
+          )
+        },
+      })
+
+      return () => { d1(); d2(); d3(); d4(); d5(); d6() }
     })
 
     // ── Capability dispatch (the Phase-5 seam) ────────────────────────────────
@@ -1030,6 +1098,38 @@ export class Evolution extends Service {
     directory: this.directory,
     listCapabilities: () => this.listCapabilities(),
   })
+
+  /**
+   * The compaction seam's block composer (T6): the two re-anchor ingredients
+   * resolved and handed to the pure composer — the energy summary from
+   * getCapabilitiesSummary (verbatim energy.ts helper) and the pre-compaction
+   * dream pointers from the dream archive.
+   *
+   * dreamArchive is read via `ctx.get`, NOT static inject — the
+   * optional-service pattern, deliberately. The cohort's hive profile always
+   * mounts it, but a standalone-evolution process (including this package's
+   * own test harness) does not, and a hard inject would hold the WHOLE
+   * evolution service at boot for a dependency this seam can degrade without:
+   * an anchor without dream pointers still restores roster/energy awareness,
+   * while an unbooted evolution would take the tick, the roster, and the gate
+   * down with it. The read is also failure-isolated — a throw inside this
+   * serial listener fails agent PUBLICATION, so any archive misbehavior
+   * (absent service, scan error, shape drift) collapses to "pointers
+   * unavailable" instead.
+   */
+  postCompactionContext = (): string => {
+    let pointers: PreCompactionDreamPointer[] | undefined
+    try {
+      const archive = this.ctx.get("dreamArchive") as
+        | { recentPreCompactionDreams?: (limit?: number) => unknown }
+        | undefined
+      const recent = archive?.recentPreCompactionDreams?.(POST_COMPACTION_DREAM_LIMIT)
+      if (Array.isArray(recent)) pointers = recent as PreCompactionDreamPointer[]
+    } catch {
+      pointers = undefined
+    }
+    return composePostCompactionContext({ capabilitySummary: this.capabilitiesSummary(), dreamPointers: pointers })
+  }
 
   // ── the awaken gate's held disposers (T2) ─────────────────────────────────
   // Both keyed by session id; see the gate listener for why not the Agent.
