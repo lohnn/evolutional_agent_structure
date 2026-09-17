@@ -44,9 +44,10 @@ import path from "path"
 import { createMessage, type ContentBlock } from "@deepseek-ai/dsh-llm"
 import { defineTool, type ParameterSchemaSpec } from "@deepseek-ai/dsh-tools"
 import type { Agent } from "@deepseek-ai/dsh-agent"
-import { COORDINATOR_DOCTRINE, DORMANT_NOTICE, AWAKEN_BRIEF, REAWAKEN_BRIEF } from "./assets.js"
+import { COORDINATOR_DOCTRINE, DORMANT_NOTICE, AWAKEN_BRIEF, REAWAKEN_BRIEF, CAPABILITY_STANDING } from "./assets.js"
 import { recordAwakened, isAwakened, decideGate } from "./lib/sessions.js"
 import { parseCapabilityPersona, renderAgentCordisYml, type CapabilityPersona } from "./lib/persona.js"
+import { resolveCapabilityMaterial } from "./lib/material.js"
 import { composeEcosystemSnapshot, type EcosystemSnapshotSource } from "./lib/snapshot.js"
 
 /** String-output tool contract (the spike 0.1 pattern used across the port). */
@@ -804,7 +805,11 @@ export class Evolution extends Service {
     // always-starts-new rule (continuation of an existing child goes through
     // send_message to its durable id — the echo text and the tool docs teach
     // this). Dreamcatcher dispatches are read-only by construction (I-070
-    // caller-side toolFilter) and carry their full method plugin-side.
+    // caller-side toolFilter) and carry their full method plugin-side. For
+    // capability dispatches the METHOD (T5/D7 persona-carried transport) and
+    // the standing context travel in the child's persona, composed by
+    // composeDispatchPersona from resolveCapabilityMaterial — the prompt is
+    // the task brief only.
     // Optional `model` rides SubagentStartRequest.agentOptions (the spawn
     // provider advertises agentOptions: true; resolveChildAgentOptions merges
     // the override over the parent's route, dropping the parent's
@@ -818,6 +823,7 @@ export class Evolution extends Service {
             "Dispatch a HIVE worker as a child agent. Address forms: 'capability/<name>' (workspace capability from the roster), 'builtin/<id>' (plugin-owned agent — currently only builtin/dreamcatcher), or bare '<name>' (= capability/<name>).\n" +
             "ALWAYS starts a NEW instance. To CONTINUE ongoing work on an existing child, do NOT re-dispatch: send_message its durable session id (from the dispatch result, or list_agents for live instances — every child label carries its dispatch address as a prefix). New parallel work on the same capability = dispatch again.\n" +
             "Default shape 'resident': background child — you receive its session id, its report arrives as a message, `send_message` can steer it, and it survives restarts. Shape 'one-shot': synchronous consult — the call blocks until the child finishes and its final output is returned directly as this tool's result (no resident session, nothing to steer). Rule: one-shot only for short, self-contained, result-shaped consults (dreamcatcher Recall); everything else stays resident.\n" +
+            "The capability's own method (what-this-enables / triggers / protocol / boundaries) plus the HIVE standing context are composed into the child automatically — write the TASK brief only (intent over implementation); do not re-teach the capability its own job.\n" +
             "builtin/dreamcatcher is read-only by construction (mutation tools denied at spawn) and carries its full Recall/Audit method on the plugin side — the prompt need only state the job (its mode and scope), not the method.",
           parameters: {
             capability: {
@@ -877,7 +883,28 @@ export class Evolution extends Service {
                 `builtin/${target.id} does not support shape "${shape}" — allowed: ${def.shapes.join(", ")}. ${def.shapeGuidance}`
               )
             }
-            const persona = def ? def.persona : composeDispatchPersona(target.id)
+            let persona: string
+            if (def) {
+              // Built-ins: their full plugin-side method, passed through
+              // untouched (byte-identical, drift-guarded; the standing
+              // context is capability-worker doctrine, not theirs).
+              persona = def.persona
+            } else {
+              // T5/D7: resolve the capability's OWN method from the roster
+              // (preset persona text, else legacy ledger body) and compose
+              // identity + material + standing into the request persona.
+              // Resolution is non-fatal — a miss logs debug and the child
+              // dispatches with identity + standing only.
+              const material = resolveCapabilityMaterial(this.directory, this.capabilitiesPath, target.id)
+              if (!material) {
+                this.ctx.logger.debug?.("[evolution] no capability material for dispatch — composing standing-only persona", {
+                  capability: target.id,
+                  directory: this.directory,
+                  capabilitiesPath: this.capabilitiesPath,
+                })
+              }
+              persona = composeDispatchPersona(target.id, { material })
+            }
             const agentOptions = args.model ? parseModelSpec(args.model) : undefined
             // The durable label always carries the dispatch address as its
             // prefix (see composeDispatchLabel) — list_agents has no other
@@ -1357,21 +1384,38 @@ export function parseModelSpec(modelSpec: string): { provider?: string; model: s
 }
 
 /**
- * Compose the per-child persona for a workspace CAPABILITY dispatch: the
- * identity line only — the capability's method rides the prompt and its own
- * preset material. Plugin-owned built-ins get their full persona from
- * BUILTIN_AGENTS instead.
+ * Compose the per-child persona for a workspace CAPABILITY dispatch (T5/D7
+ * persona-carried transport): identity line + the capability's OWN material
+ * (its method, resolved by `resolveCapabilityMaterial` — preset persona text
+ * or legacy ledger body) + the plugin's capability standing context
+ * (CAPABILITY_STANDING — doctrine, capability-independent, appended even on
+ * a material miss). Material failure is non-fatal: identity + standing only.
+ *
+ * This return value is passed VERBATIM as the start request's
+ * `SubagentStartRequest.persona` — it is therefore the exact text the child's
+ * system prompt mounts and the durable descriptor snapshots (cold-resume
+ * safe). The dispatch task prompt (`args.prompt`) stays the task brief only:
+ * the method travels here, not into the brief.
+ *
+ * Built-ins are NOT routed through this composer — `BUILTIN_AGENTS[...].persona`
+ * is their full method and is passed through untouched (pinned byte-identical
+ * by test); the standing context is capability-worker doctrine, not theirs.
  *
  * The capability roster is deliberately NOT included: dsh composes the
  * process-level `hive:roster` systemPrompt section into EVERY agent in the
  * process (including spawned children), so an in-persona roster arrived as a
  * literal duplicate in the child's system prompt (seen in live dispatch
  * transcripts). The persona keeps the child-identity line — the SHADOW-009
- * "the child's own capability names itself first" property — while the full
- * roster comes exactly once from the system-prompt assembly.
+ * "the child's own capability names itself first" property — and the method
+ * material, while the roster comes exactly once from the system-prompt
+ * assembly.
  */
-export function composeDispatchPersona(capabilityId: string): string {
-  return `You are the \`${capabilityId}\` HIVE capability, dispatched as a resident continuable child of the coordinator.`
+export function composeDispatchPersona(capabilityId: string, options?: { material?: string }): string {
+  const parts = [`You are the \`${capabilityId}\` HIVE capability, dispatched as a resident continuable child of the coordinator.`]
+  const material = options?.material?.trim()
+  if (material) parts.push(material.trimEnd())
+  parts.push(CAPABILITY_STANDING)
+  return parts.join("\n\n")
 }
 
 export default Evolution
@@ -1380,4 +1424,9 @@ export default Evolution
 // inject rides on the class as `static inject` above. Named re-exports below
 // are for consumers/tests, never read by the loader.
 export { readHiveState, writeHiveState, markCapabilityUsed, tickEnergy, getCapabilitiesSummary }
+export { CAPABILITY_STANDING }
+export { resolveCapabilityMaterial } from "./lib/material.js"
+// Re-exported for the tests (and consumers) so fixture presets render through
+// the SAME writer the plugin ships — no copy-pasted yml shape to drift.
+export { renderAgentCordisYml } from "./lib/persona.js"
 export type { HiveState, TickResult }

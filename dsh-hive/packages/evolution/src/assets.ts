@@ -48,3 +48,16 @@ export const AWAKEN_BRIEF = fs
 export const REAWAKEN_BRIEF = fs
   .readFileSync(new URL("../assets/reawaken-brief.md", import.meta.url), "utf8")
   .trimEnd()
+
+/**
+ * The capability standing context (T5/D7) — the hivemind-capabilities survivor
+ * (scope discipline, lead-with-the-outcome reporting, honor/publish contracts,
+ * independent-first) with the D3-dead messaging half cut and the synapse
+ * doctrine stated in its place. Capability-INDEPENDENT plugin doctrine: it is
+ * composed into every `capability/<name>` dispatch persona (never into the
+ * built-ins, whose persona is theirs alone), so it must not re-teach any one
+ * capability its job — the method block above it does that.
+ */
+export const CAPABILITY_STANDING = fs
+  .readFileSync(new URL("../assets/capability-standing.md", import.meta.url), "utf8")
+  .trimEnd()
