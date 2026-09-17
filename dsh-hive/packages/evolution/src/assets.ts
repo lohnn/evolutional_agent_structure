@@ -19,10 +19,10 @@ export const COORDINATOR_DOCTRINE = fs
   .trimEnd()
 
 /**
- * The dormant-session explainer (T3/D6) — the Kanban-metaphor notice that a
- * session has not yet run /awaken. Registered as a scoped
- * `systemPrompt.section` alongside the tool-restriction gate on dormant
- * sessions.
+ * The dormant-session explainer (T3/D6) — the generic work-wall notice that a
+ * session has not yet run /awaken (de-Kanban'd per user request, bc86de9).
+ * Registered as a scoped `systemPrompt.section` alongside the tool-restriction
+ * gate on dormant sessions.
  */
 export const DORMANT_NOTICE = fs
   .readFileSync(new URL("../assets/dormant-explainer.md", import.meta.url), "utf8")

@@ -1,7 +1,7 @@
-// Phase-3 service-harness gate: boot the Evolution service against a
-// synthetic workspace and drive the roster injection, the energy tick (via a
-// simulated agent/session-start), the commands, and spawn/dissolve through
-// the real dsh services.
+// Service-harness gate: boot the Evolution service against a synthetic
+// workspace and drive the roster injection, the energy tick (via
+// agent/created emissions), the awaken gate, the commands, and
+// spawn/dissolve through the real dsh services.
 import { Context } from "@deepseek-ai/cordis"
 import Evolution from "@hive/dsh-evolution"
 // The shared composer, imported through the package's ./lib exports map — the
@@ -99,7 +99,7 @@ check("tick.boost", alphaTick?.newEnergy === 60, `alpha boosted 50→60 (used), 
 check("tick.decay", betaTick?.newEnergy === 40, `beta decayed 50→40 (unused), got ${betaTick?.newEnergy}`)
 
 // A second same-day tick (a second "session start") must skip — the tick is
-// idempotent within a day, which is what makes per-session-start firing safe.
+// idempotent within a day, which is what makes per-publication firing safe.
 const t2 = ctx.evolution.tick()
 check("tick.idempotent", t2.skipped === true, "second same-day tick skipped")
 
@@ -207,6 +207,23 @@ check("dissolve.roster", !ctx.evolution.buildRoster().includes("beta"), "roster 
   check("gate.command-no-mutation", !fs.existsSync(path.join(synth, ".opencode/agents/capabilities/nope")), "refused command materialized nothing")
   const tickOut = await ctx.commands.find(undefined, "tick").handler({ rawInput: "", agent: dormantAgent, commandId: "c_gate2", attachments: [], signal: AbortSignal.timeout(1000) })
   check("gate.tick-refused", tickOut.kind === "error" && /\/awaken/.test(tickOut.text ?? ""), "/tick refuses the same way")
+
+}
+
+// Adjudication from the Kimi-K3 plan-vs-code audit: a delegationDepth>0 child
+// is refused as a LINEAGE participant (never as "dormant" — that would be a
+// lie about its state), and /awaken refuses it too: a child cannot write the
+// registry entry the gate would skip forever.
+{
+  const linChild = { id: "ses_lin_child", session: { id: "ses_lin_child", header: { delegationDepth: 1 } }, followup: () => {} }
+  const linScope = createScope(ctx, linChild, {})
+  linChild.ctx = linScope.ctx
+  const linCmd = await ctx.commands.find(undefined, "spawn").handler({ rawInput: "lin — the lin capability", agent: linChild, commandId: "c_lin", attachments: [], signal: AbortSignal.timeout(1000) })
+  check("gate.child-command-refused", linCmd.kind === "error" && /top-level sessions/.test(linCmd.text ?? "") && !/dormant/.test(linCmd.text ?? ""), "child /spawn refuses as lineage participant, not dormant")
+  const linAwaken = await ctx.commands.find(undefined, "awaken").handler({ rawInput: "", agent: linChild, commandId: "c_lin2", attachments: [], signal: AbortSignal.timeout(1000) })
+  check("awaken.child-refused", linAwaken.kind === "error" && /lineage|top-level/.test(linAwaken.text ?? ""), "child /awaken refused — no self-awaken")
+  const linLedger = JSON.parse(fs.readFileSync(path.join(synth, ".opencode/agents/hive-sessions.json"), "utf8"))
+  check("awaken.child-no-registry", linLedger.coordinators.ses_lin_child === undefined, "child refusal wrote no registry entry")
 }
 
 // ── T2: awaken gate on agent/created — deny / skip / lift ────────────────────

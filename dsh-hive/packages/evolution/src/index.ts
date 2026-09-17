@@ -530,11 +530,10 @@ export class Evolution extends Service {
         } catch (err) {
           return { kind: "error" as const, text: `/${command}: failed to summon the lifecycle tool: ${String(err)}` }
         }
-        // Track the disposer so the tool body can retract itself after firing;
-        // if the turn never calls it (model went another way), the tool stays
-        // scoped to this one agent — it never leaks into other agents — and is
-        // retracted when the agent is disposed (scoped effects unwind with it).
-        this.trackSummon(agent, disposer)
+        // Unfired summons need no ledger: the tool was registered on the
+        // receiving agent's OWN ctx, so it never leaks to other agents and is
+        // retracted with its scope when the agent is disposed. (The audit's
+        // dead-WeakMap finding: tracking existed but nothing ever read it.)
         agent.followup(
           createMessage({
             role: "user",
@@ -565,10 +564,28 @@ export class Evolution extends Service {
       // it IS the gate opener. No live receiving agent falls through to
       // summon()'s own refusal, preserving the summon-contract error shape.
       // A dormant session gets the scripted move: the user runs /awaken.
+      // Depth guard (adjudication from the plan-vs-code audit): a
+      // delegationDepth>0 child is a LINEAGE PARTICIPANT (D2), never a
+      // coordinator — refusing it as "dormant" would be a lie and letting
+      // it through would mutate a roster it will never join (the gate skips
+      // depth>0 by design, so a child-flipped registry entry is incoherent
+      // state). /awaken carries the same guard: a child cannot self-awaken.
       const requireAwake = (
-        inv: { agent?: { session?: { id?: unknown } | unknown; id?: unknown } | undefined }
+        inv: { agent?: { session?: { id?: unknown; header?: { delegationDepth?: unknown } } | unknown; id?: unknown } | undefined }
       ): { kind: "error"; text: string } | undefined => {
-        const agent = inv.agent as { session?: { id?: unknown }; id?: unknown } | undefined
+        const agent = inv.agent as { session?: { id?: unknown; header?: { delegationDepth?: unknown } }; id?: unknown } | undefined
+        if (agent) {
+          const depth = agent.session?.header?.delegationDepth
+          if (typeof depth === "number" && depth > 0) {
+            return {
+              kind: "error" as const,
+              text:
+                `HIVE commands belong to top-level sessions — this is a dispatched child (lineage ` +
+                `participant, D2): it works the task it was handed and routes coordination through its ` +
+                `parent. Run this in a top-level session instead.`,
+            }
+          }
+        }
         const sessionId = agent ? String(agent.session?.id ?? agent.id ?? "") : ""
         if (!sessionId) return undefined
         if (isAwakened(this.directory, sessionId)) return undefined
@@ -725,6 +742,21 @@ export class Evolution extends Service {
           }
           const agent = inv.agent
           const raw = inv.rawInput.trim()
+          // Depth guard (see requireAwake's adjudication note): a dispatched
+          // child cannot self-awaken — the gate would skip its registry entry
+          // forever, leaving coherent-looking but dead state.
+          {
+            const depth = agent.session?.header?.delegationDepth
+            if (typeof depth === "number" && depth > 0) {
+              return {
+                kind: "error" as const,
+                text:
+                  `/awaken belongs to top-level sessions — this is a dispatched child (lineage ` +
+                  `participant, D2). It was awakened BY its dispatch, not by a command; route ` +
+                  `coordination through the parent session.`,
+              }
+            }
+          }
           // Same stub-defensive session read as the gate (runtime face always
           // carries `session.id`; fakes must provide it).
           const sessionId = String(agent.session?.id ?? agent.id)
@@ -744,7 +776,6 @@ export class Evolution extends Service {
                 "Return the current HIVE capability roster and energy state.",
                 () => this.buildRoster()
               )
-              this.trackSummon(agent, disposer)
             } catch (err) {
               return { kind: "error" as const, text: `/awaken: failed to summon the analysis tool: ${String(err)}` }
             }
@@ -811,7 +842,6 @@ export class Evolution extends Service {
               (args) => this.spawnBatch(args),
               AWAKEN_SPAWN_PARAMETERS
             )
-            this.trackSummon(agent, spawnDisposer)
           } catch (err) {
             return { kind: "error" as const, text: `/awaken: failed to summon the batch spawn tool: ${String(err)}` }
           }
@@ -1051,8 +1081,6 @@ export class Evolution extends Service {
    * awaken batch summon passes its `capabilities` schema. `run` always
    * receives the call's parsed args — the zero-arg tools simply ignore them.
    */
-  private lifecycleSummons = new WeakMap<Agent, (() => void)[]>()
-
   private registerLifecycleTool(
     agentCtx: import("@deepseek-ai/cordis").Context,
     name: string,
@@ -1078,15 +1106,6 @@ export class Evolution extends Service {
       })
     )
     return () => disposer?.()
-  }
-
-  /**
-   * Track a summon's disposer against the receiving agent (the seam the tool
-   * bodies and /awaken use; the command `summon()` helper funnels through
-   * here too, so there is exactly one tracking path).
-   */
-  private trackSummon(agent: Agent, disposer: () => void): void {
-    this.lifecycleSummons.set(agent, [...(this.lifecycleSummons.get(agent) ?? []), disposer])
   }
 
   /**
