@@ -36,7 +36,7 @@ const SRC_DIR = fileURLToPath(new URL("../src", import.meta.url))
 //     Event.listEvents inspect catalog, or the Events interfaces in the
 //     @deepseek-ai/dsh-* shipped .d.ts) — never trust this list across a
 //     version boundary.
-const LISTENED_EVENTS_ALLOWLIST = ["agent/created"]
+const LISTENED_EVENTS_ALLOWLIST = ["agent/created", "agent/disposed"]
 
 // The lookbehind excludes longer identifiers ending in `ctx` (e.g.
 // `agentCtx.on(...)`); the group accepts both `ctx.on(...)` and the service

@@ -27,3 +27,24 @@ export const COORDINATOR_DOCTRINE = fs
 export const DORMANT_NOTICE = fs
   .readFileSync(new URL("../assets/dormant-explainer.md", import.meta.url), "utf8")
   .trimEnd()
+
+/**
+ * The /awaken flip brief (T2) — handed to the freshly awakened coordinator as
+ * a user-role followup message. Template placeholders (`{{ dossier }}`,
+ * `{{ summon_name }}`) are filled by the command handler (dossier text from
+ * `composeEcosystemSnapshot` + raw input / the summoned batch tool's name).
+ * Drift-guarded like the two sections above: the shipped file may carry the
+ * two placeholders and no others.
+ */
+export const AWAKEN_BRIEF = fs
+  .readFileSync(new URL("../assets/awaken-brief.md", import.meta.url), "utf8")
+  .trimEnd()
+
+/**
+ * The re-awaken analysis brief — /awaken on an already-awakened session.
+ * Same placeholder contract (`{{ dossier }}`, `{{ summon_name }}` = the
+ * summoned per-turn hive_evolve tool); no registry write, no state change.
+ */
+export const REAWAKEN_BRIEF = fs
+  .readFileSync(new URL("../assets/reawaken-brief.md", import.meta.url), "utf8")
+  .trimEnd()

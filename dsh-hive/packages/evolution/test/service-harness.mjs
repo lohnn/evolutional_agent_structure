@@ -115,9 +115,11 @@ dispose()
 check("markUsed.event", usedEvent?.name === "beta" && usedEvent?.sessionId === "ses_harness_2", "hive/capability-used emitted")
 
 // ── Commands registered ─────────────────────────────────────────────────────
-const cmdNames = ["tick", "spawn", "evolve", "dissolve"]
+// /awaken joins the lifecycle four (T2/D1). All five gate on an AWAKENED
+// coordinator except /awaken itself, which opens the gate.
+const cmdNames = ["tick", "spawn", "evolve", "dissolve", "awaken"]
 const registered = cmdNames.filter((n) => ctx.commands.find(undefined, n) !== undefined)
-check("commands.registered", registered.length === 4, `commands visible: ${registered.join(", ") || "(none)"}`)
+check("commands.registered", registered.length === 5, `commands visible: ${registered.join(", ") || "(none)"}`)
 
 // ── Command-summoned lifecycle tools (WI-037) ───────────────────────────────
 // Commands refuse without a live receiving agent (they never mutate directly).
@@ -137,6 +139,14 @@ const fakeAgent = { id: "agent_fake", followup: (msg) => { followups.push(msg) }
 const fakeScope = createScope(ctx, fakeAgent, {})
 const fakeCtx = fakeScope.ctx
 fakeAgent.ctx = fakeCtx
+// The fake coordinator is AWAKENED for the summon tests: T2's D2 gate refuses
+// lifecycle commands for dormant sessions, so the harness records it in the
+// awaken ledger first (the /awaken flow itself gets its own test below).
+fs.mkdirSync(path.join(synth, ".opencode/agents"), { recursive: true })
+fs.writeFileSync(
+  path.join(synth, ".opencode/agents/hive-sessions.json"),
+  JSON.stringify({ v: 1, coordinators: { agent_fake: { agent: "gate", awakenedAt: new Date().toISOString(), lastAwakenInput: "" } } }, null, 2)
+)
 const spawnCmd = ctx.commands.find(undefined, "spawn")
 if (spawnCmd) {
   const out = await spawnCmd.handler({
@@ -180,6 +190,119 @@ ctx.evolution.dissolve("beta")
 check("dissolve.moved", fs.existsSync(path.join(synth, ".opencode/agents/dissolved/beta.md")) && !fs.existsSync(path.join(synth, ".opencode/agents/capabilities/beta.md")), "dissolve archives the ledger")
 check("dissolve.dir-moved", fs.existsSync(path.join(synth, ".opencode/agents/dissolved/beta/preset.yml")) && !fs.existsSync(path.join(synth, ".opencode/agents/capabilities/beta")), "dissolve archives the preset dir")
 check("dissolve.roster", !ctx.evolution.buildRoster().includes("beta"), "roster no longer lists the dissolved capability")
+
+// ── T2: dormant lifecycle commands refuse with the awaken hint (D2) ──────────
+{
+  const dormantAgent = { id: "ses_dormant_cmds", followup: () => {} }
+  const dormantScope = createScope(ctx, dormantAgent, {})
+  dormantAgent.ctx = dormantScope.ctx
+  const spawnCmdDormant = ctx.commands.find(undefined, "spawn")
+  const out = await spawnCmdDormant.handler({ rawInput: "nope — refused capability", agent: dormantAgent, commandId: "c_gate", attachments: [], signal: AbortSignal.timeout(1000) })
+  check("gate.command-refused", out.kind === "error" && /\/awaken/.test(out.text ?? ""), "/spawn in a dormant session refuses with the awaken hint")
+  check("gate.command-no-mutation", !fs.existsSync(path.join(synth, ".opencode/agents/capabilities/nope")), "refused command materialized nothing")
+  const tickOut = await ctx.commands.find(undefined, "tick").handler({ rawInput: "", agent: dormantAgent, commandId: "c_gate2", attachments: [], signal: AbortSignal.timeout(1000) })
+  check("gate.tick-refused", tickOut.kind === "error" && /\/awaken/.test(tickOut.text ?? ""), "/tick refuses the same way")
+}
+
+// ── T2: awaken gate on agent/created — deny / skip / lift ────────────────────
+// Fakes mirror the real runtime face the gate reads: `session.id` resolves the
+// session, `session.header.delegationDepth` discriminates lineage (verified
+// against dsh-agent 0.1.6-alpha.1: Agent exposes session; Session.header is
+// always present; depth is persisted = parent+1 for children).
+{
+  const gateAgent = { id: "ses_gate_a", session: { id: "ses_gate_a", header: {} }, followup: () => {} }
+  const gateScope = createScope(ctx, gateAgent, {})
+  gateAgent.ctx = gateScope.ctx
+  ctx.emit("agent/created", { agent: gateAgent, source: "startup" })
+  check("gate.deny-hive-absent", ctx.tools.get("hive_dispatch", gateAgent) === undefined && ctx.tools.get("hive_signal", gateAgent) === undefined, "dormant top-level agent: hive tools read as ABSENT (scoped restrict)")
+  check("gate.deny-global-intact", ctx.tools.get("hive_dispatch") !== undefined, "the restriction is scoped — global layer untouched")
+
+  const childAgent = { id: "ses_gate_child", session: { id: "ses_gate_child", header: { delegationDepth: 1 } }, followup: () => {} }
+  const childScope = createScope(ctx, childAgent, {})
+  childAgent.ctx = childScope.ctx
+  ctx.emit("agent/created", { agent: childAgent, source: "startup" })
+  check("gate.skip-child", ctx.tools.get("hive_dispatch", childAgent) !== undefined, "depth>0 child (dispatch worker / one-shot dreamcatcher): exempt, hive tools present")
+
+  // /awaken lifts the deny on the SAME session id (the handler holds the
+  // receiving agent; the disposers were keyed by session for exactly this).
+  const awakenCmd = ctx.commands.find(undefined, "awaken")
+  check("awaken.registered", awakenCmd !== undefined, "/awaken command registered")
+  const awakenFollowups = []
+  const awakenAgent = { id: "ses_awaken_1", session: { id: "ses_awaken_1", header: {} }, followup: (m) => { awakenFollowups.push(m) } }
+  const awakenScope = createScope(ctx, awakenAgent, {})
+  awakenAgent.ctx = awakenScope.ctx
+  ctx.emit("agent/created", { agent: awakenAgent, source: "startup" })
+  check("gate.awaken-starts-denied", ctx.tools.get("hive_dispatch", awakenAgent) === undefined, "/awaken flow precondition: session starts dormant")
+
+  const out = await awakenCmd.handler({ rawInput: "port the awaken flow to dsh", agent: awakenAgent, commandId: "c_awaken", attachments: [], signal: AbortSignal.timeout(1000) })
+  check("awaken.success", out.kind === "success", `/awaken handler succeeded (${out.text?.slice(0, 60)})`)
+  const ledger = JSON.parse(fs.readFileSync(path.join(synth, ".opencode/agents/hive-sessions.json"), "utf8"))
+  check("awaken.registry", ledger.coordinators.ses_awaken_1?.agent === "awaken" || (ledger.coordinators.ses_awaken_1 && ledger.coordinators.ses_awaken_1.lastAwakenInput === "port the awaken flow to dsh"), "registry records the flip with the raw input")
+  check("awaken.lifted", ctx.tools.get("hive_dispatch", awakenAgent) !== undefined, "the held restriction was lifted — hive tools present after the flip")
+  check("awaken.brief", awakenFollowups.length === 1 && awakenFollowups[0].content[0].text.includes("hive_awaken_spawn") && awakenFollowups[0].content[0].text.includes("dreamcatcher") && awakenFollowups[0].content[0].text.includes("HIVE Ecosystem Dossier") && awakenFollowups[0].content[0].text.includes("port the awaken flow to dsh"), "brief carries summon name + mandatory dreamcatcher recall + dossier + raw input")
+
+  // The summoned batch tool: structured persona manifests, invalid entries
+  // refused line-by-line, tool retracts after firing.
+  const batch = ctx.tools.get("hive_awaken_spawn", awakenAgent)
+  check("awaken.batch-scoped", batch !== undefined, "hive_awaken_spawn scoped to the awakening agent")
+  if (batch) {
+    const result = await batch.execute(
+      {
+        capabilities: [
+          {
+            name: "delta",
+            description: "the delta capability",
+            persona: { enables: "enables delta work", triggers: "when delta work appears", boundaries: "never touches alpha" },
+          },
+          { name: "Bad Name!", description: "invalid" },
+          { name: "zeta", description: "the zeta capability", persona: { enables: "" } },
+        ],
+      },
+      { agent: awakenAgent, signal: AbortSignal.timeout(1000) }
+    )
+    const text = String(result)
+    check("awaken.batch-manifest", text.includes("Spawning delta") && text.includes("✓ manifested"), "batch tool manifests the valid entry")
+    check("awaken.batch-refuses", text.includes("✗ refused"), "batch tool reports invalid entries line-by-line")
+    check("awaken.batch-retracted", ctx.tools.get("hive_awaken_spawn", awakenAgent) === undefined, "batch tool retracts after the single call")
+    const yml = fs.readFileSync(path.join(synth, ".opencode/agents/capabilities/delta/agent.cordis.yml"), "utf8")
+    check("awaken.persona-sections", yml.includes("## What This Enables") && yml.includes("## Activation Triggers") && yml.includes("## Boundaries"), "persona renders as structured template sections")
+    check("awaken.ledger-seeded", fs.readFileSync(path.join(synth, ".opencode/agents/capabilities/delta.md"), "utf8").includes("energy: 50"), "persona spawn still seeds the energy ledger at 50")
+  }
+
+  // Re-awaken variant: same session again → no registry flip, evolution brief.
+  const awakenBefore = JSON.parse(fs.readFileSync(path.join(synth, ".opencode/agents/hive-sessions.json"), "utf8")).coordinators.ses_awaken_1.awakenedAt
+  const followupsBefore = awakenFollowups.length
+  const out2 = await awakenCmd.handler({ rawInput: "analyze gaps again", agent: awakenAgent, commandId: "c_awaken2", attachments: [], signal: AbortSignal.timeout(1000) })
+  const ledgerAfter = JSON.parse(fs.readFileSync(path.join(synth, ".opencode/agents/hive-sessions.json"), "utf8"))
+  check("awaken.reawaken-no-flip", out2.kind === "success" && ledgerAfter.coordinators.ses_awaken_1.awakenedAt === awakenBefore, "re-awaken leaves the registry untouched")
+  check("awaken.reawaken-evolve", awakenFollowups.length === followupsBefore + 1 && awakenFollowups.at(-1).content[0].text.includes("hive_evolve"), "re-awaken summons the evolution analysis instead")
+}
+
+// ── T2: spawn without persona — pinned byte-identical output ──────────────────
+// The no-persona path must keep typing the pre-T2 yml byte for byte (the
+// minimal two-line spawn stays valid, D7); persona sections ride ABOVE it.
+{
+  const epsDir = ctx.evolution.spawn("epsilon", "epsilon capability")
+  const yml = fs.readFileSync(path.join(epsDir, "agent.cordis.yml"), "utf8")
+  const expected = [
+    "# The `epsilon` capability preset — spawned by /spawn.",
+    "# Persona + mounted tools are edited here; energy lives in the sibling",
+    "# `epsilon.md` ledger that the tick manages.",
+    "- id: persona",
+    "  name: '@deepseek-ai/dsh-persona'",
+    "  config:",
+    "    text: |-",
+    "      You are the epsilon capability: epsilon capability",
+    "",
+  ].join("\n")
+  check("spawn.nopersona-byte-identity", yml === expected, "no-persona agent.cordis.yml is byte-identical to the pre-T2 output")
+}
+
+// /awaken with no receiving agent: same refusal contract as the other commands.
+{
+  const noAgentOut = await ctx.commands.find(undefined, "awaken").handler({ rawInput: "", agent: undefined, commandId: "c_awaken3", attachments: [], signal: AbortSignal.timeout(1000) })
+  check("awaken.no-agent", noAgentOut.kind === "error" && /live receiving agent/.test(noAgentOut.text ?? ""), "/awaken without an agent refuses (no registry write)")
+}
 
 fs.rmSync(synth, { recursive: true, force: true })
 const failed = results.filter((r) => !r.ok)
