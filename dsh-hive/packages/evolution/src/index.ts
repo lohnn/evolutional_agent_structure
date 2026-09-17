@@ -219,6 +219,30 @@ const AWAKEN_SPAWN_PARAMETERS: ParameterSchemaSpec = {
 }
 
 /**
+ * /spawn's summoned-tool parameters (T4): the command input already carries
+ * name + description, so the model authors the METHOD as the optional
+ * persona object (same section contract as the /awaken batch tool — one
+ * shape, one validator: parseCapabilityPersona).
+ */
+const SPAWN_PARAMETERS: ParameterSchemaSpec = {
+  persona: {
+    type: "object",
+    additionalProperties: false,
+    description:
+      "The capability's structured method body (the capability template). Recommended; " +
+      "enables and triggers are REQUIRED when a persona is given; empty sections are dropped.",
+    properties: {
+      enables: { type: "string", description: "What This Enables — the use-vs-spawn discriminator." },
+      triggers: { type: "string", description: "Activation Triggers — when to reach for this capability." },
+      protocol: { type: "string", description: "Operating Protocol — how the capability works, step by step." },
+      selfModification: { type: "string", description: "Self-Modification Protocol — how it may evolve itself." },
+      boundaries: { type: "string", description: "Boundaries — what it must NOT do." },
+      history: { type: "string", description: "Evolution History — spawn provenance and remembered dreams." },
+    },
+  },
+}
+
+/**
  * Fill the awaken/re-awaken briefs' template placeholders. Exactly two names
  * are legal in the shipped assets (drift-guarded); anything else surfacing as
  * a literal `{{ ... }}` in a followup means an asset/handler placeholder
@@ -565,13 +589,23 @@ export class Evolution extends Service {
               this.registerLifecycleTool(
                 agentCtx,
                 "hive_spawn",
-                "Manifest the requested HIVE capability preset (preset dir + energy ledger at 50).",
-                () => {
-                  const dir = this.spawn(name, description)
+                "Manifest the requested HIVE capability preset (preset dir + energy ledger at 50). " +
+                  "Pass a structured `persona` carrying the method the capability will live by — " +
+                  "What This Enables / Activation Triggers / Operating Protocol / Self-Modification Protocol / " +
+                  "Boundaries / Evolution History (the OpenCode capability template; enables + triggers are " +
+                  "REQUIRED when a persona is given, empty sections are dropped). A quick spawn WITHOUT a " +
+                  "persona stays valid, but it leaves the coordinator nothing to read for its use-vs-spawn " +
+                  "decision — the method IS the capability.",
+                (args) => {
+                  const persona = parseCapabilityPersona(((args ?? {}) as { persona?: unknown }).persona)
+                  const dir = this.spawn(name, description, persona)
                   return `Capability \`${name}\` manifested at ${dir} (energy 50). Dispatch it with hive_dispatch (capability "${name}").`
-                }
+                },
+                SPAWN_PARAMETERS
               ),
-            `Manifest a new capability: name \`${name}\`, description "${description}".`
+            `Manifest a new capability: name \`${name}\`, description "${description}". ` +
+              `Author its persona first (the method sections above), then call the summoned tool ONCE with the persona ` +
+              `object. Omitting the persona is allowed only for a deliberate quick spawn.`
           )
         },
       })

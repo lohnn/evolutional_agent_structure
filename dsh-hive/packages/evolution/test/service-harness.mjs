@@ -298,6 +298,27 @@ check("dissolve.roster", !ctx.evolution.buildRoster().includes("beta"), "roster 
   check("spawn.nopersona-byte-identity", yml === expected, "no-persona agent.cordis.yml is byte-identical to the pre-T2 output")
 }
 
+// T4: /spawn's summoned tool takes the persona — the model authors the method.
+{
+  const spawnCmdT4 = ctx.commands.find(undefined, "spawn")
+  const followupsBeforeT4 = followups.length
+  const outT4 = await spawnCmdT4.handler({ rawInput: "theta — the theta capability", agent: fakeAgent, commandId: "c_t4", attachments: [], signal: AbortSignal.timeout(1000) })
+  check("t4.summon-ok", outT4.kind === "success" && followups.length === followupsBeforeT4 + 1, "/spawn with persona authoring summons hive_spawn")
+  check("t4.wake-teaches-persona", followups.at(-1).content[0].text.includes("Author its persona"), "wake brief tells the model to author the method sections")
+  const toolT4 = ctx.tools.get("hive_spawn", fakeAgent)
+  if (toolT4) {
+    await toolT4.execute(
+      { persona: { enables: "enables theta work", triggers: "when theta work appears", protocol: "do theta things carefully" } },
+      { agent: fakeAgent, signal: AbortSignal.timeout(1000) }
+    )
+    const ymlT4 = fs.readFileSync(path.join(synth, ".opencode/agents/capabilities/theta/agent.cordis.yml"), "utf8")
+    check("t4.persona-rendered", ymlT4.includes("## What This Enables") && ymlT4.includes("## Operating Protocol"), "/spawn persona renders as template sections in the preset")
+    check("t4.identityline-first", ymlT4.includes("You are the theta capability: the theta capability"), "identity line still leads the persona block")
+  } else {
+    check("t4.persona-rendered", false, "hive_spawn not resolvable — cannot execute")
+  }
+}
+
 // /awaken with no receiving agent: same refusal contract as the other commands.
 {
   const noAgentOut = await ctx.commands.find(undefined, "awaken").handler({ rawInput: "", agent: undefined, commandId: "c_awaken3", attachments: [], signal: AbortSignal.timeout(1000) })
