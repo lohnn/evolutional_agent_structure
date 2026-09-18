@@ -1,2 +1,6 @@
-# Reproducible build artifacts (pnpm pack) — do not commit
-*.tgz
+# Cohort tarballs ARE committed release artifacts since the dsh
+# 0.1.6-alpha.2 adoption: the kit's tarball install mode ships prebuilt
+# dists (no bun/git-prepare wall), so `pnpm pack` outputs must be
+# regenerated and committed on every cohort release (W-085/W-088).
+# Stale-name leftovers from intermediate repacks stay ignored:
+dsh-berget-usage-0.1.0.tgz
