@@ -4,6 +4,7 @@
 // handrolled-YAML bytes on disk.
 import { Context } from "@deepseek-ai/cordis"
 import DreamArchive from "@hive/dsh-dream-archive"
+import Board from "@hive/dsh-board" // B6: the dream-complete seam reads the Board service's pinned directory
 import HiveDreamTools from "@hive/dsh-tools"
 import fs from "fs"
 import os from "os"
@@ -33,6 +34,7 @@ const SP = SPMod.default ?? SPMod.SystemPrompt
 new SP(ctx, { includeHarnessIdentity: true, includeRuntimeContext: false, persona: "gate" })
 new Tools(ctx, {})
 ctx.plugin(DreamArchive, { directory: synth })
+ctx.plugin(Board, { directory: synth }) // before the tools — the seam's boardDirectory comes from this service
 ctx.plugin(HiveDreamTools)
 await new Promise((r) => setTimeout(r, 80))
 

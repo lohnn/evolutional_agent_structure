@@ -163,6 +163,9 @@ importers:
 
   packages/tools:
     dependencies:
+      '@hive/dsh-board':
+        specifier: workspace:*
+        version: link:../board
       '@hive/dsh-dream-archive':
         specifier: workspace:*
         version: link:../dream-archive

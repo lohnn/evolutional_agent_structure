@@ -6,8 +6,11 @@
  * the business logic is the SAME code that ran under OpenCode, minus the
  * NervousSystem/board hooks that are Phase-3/4 concerns:
  *   - hive_dream_residue: caller identity resolves from exec.agent (no roster).
- *   - hive_dream_complete: the board promotion hook is omitted (the board is a
- *     deferred subsystem); everything else is identical.
+ *   - hive_dream_complete (B6): the OpenCode board-promotion hook is restored —
+ *     an owned in-progress item is promoted to done when the closing dream is
+ *     COMPLETE (pre-compaction dreams leave it in_progress; the gate lives in
+ *     markItemDoneFromDream). Best-effort: a board failure never fails the
+ *     dream. Everything else is identical to the OpenCode tool.
  * Tool execute bodies return the model-facing STRING; output.schema is
  * `string` and output.render wraps it in a text ContentBlock (the spike's
  * 0.1 pattern). defineTool() validates args against parameters before execute.
@@ -29,6 +32,7 @@ import {
   type CoherenceLevel,
   type ResidueKind,
 } from "@hive/dsh-dream-archive"
+import { markItemDoneFromDream } from "@hive/dsh-board/lib/board-transitions"
 
 declare module "@deepseek-ai/cordis" {
   interface Context {
@@ -478,7 +482,7 @@ export function apply(ctx: DreamToolsCtx) {
         artifact_ids: str("Space or newline-separated list of artifact IDs produced during this dream (e.g. 'I-048 W-019 SNG-018'). May be empty if no artifacts were created."),
       },
       output: TEXT_OUT,
-      async execute(args) {
+      async execute(args, exec) {
         // Single-active invariant checks
         const active = arc().listActiveDreams()
         if (active.length === 0) {
@@ -519,9 +523,42 @@ export function apply(ctx: DreamToolsCtx) {
         if (missingArtifacts.length > 0) {
           lines.push(`  ⚠ Missing artifact files (linked in DRM but not found on disk): ${missingArtifacts.join(", ")}`)
         }
-        // NOTE: the OpenCode board-promotion hook (markItemDoneFromDream) is
-        // deliberately absent — the board subsystem is a deferred migration
-        // phase. This is the ONLY behavioural delta from the OpenCode tool.
+        // ── Board: promote this session's owned work item (B6 seam) ──────────
+        // The OpenCode board-promotion hook (markItemDoneFromDream), restored:
+        // if THIS session owns an in-progress item, a COMPLETE closing dream
+        // promotes it to done — UNLESS the dream began with pre_compaction
+        // (work continues; the gate lives inside markItemDoneFromDream, not
+        // here). Only the tool runtime's resolved identity is trustworthy
+        // (never agent self-report). Artifacts mirror the AUTHORITATIVE DRM
+        // file on disk, not this handler's args. Best-effort: a board failure
+        // must NEVER fail the dream completion — the dream has already
+        // completed and archived above.
+        {
+          const { caller, sessionID } = resolveCaller(exec)
+          // Prefer the Board service's own pinned profile directory (the same
+          // constant every HIVE service uses, I-069); the archive's directory
+          // is the standalone fallback and equals it by profile construction.
+          const boardDirectory =
+            (ctx as unknown as { board?: { directory?: string } }).board?.directory ?? arc().directory
+          try {
+            const promo = await markItemDoneFromDream(boardDirectory, sessionID, dreamId)
+            if (promo.ok && (promo.action === "done" || promo.action === "redefined") && promo.item) {
+              lines.push(
+                `  Board: ${promo.item.id} → done (${promo.action === "redefined" ? "re-stamped from " : ""}${dreamId}, ${promo.item.artifacts.length} artifact(s) mirrored).`
+              )
+              log("info", `[dream_complete] board ${promo.action}`, { itemID: promo.item.id, dreamId, caller })
+            } else if (promo.ok && promo.action === "skipped-pre-compaction") {
+              lines.push(
+                `  Board: ${promo.item.id} stays in_progress (pre-compaction dream ${dreamId} — work continues; a final unflagged dream closes it).`
+              )
+              log("info", "[dream_complete] board close skipped (pre-compaction dream)", { itemID: promo.item.id, dreamId, caller })
+            } else if (!promo.ok) {
+              log("warn", "[dream_complete] board promote refused", { reason: promo.reason, detail: promo.detail, dreamId, caller })
+            }
+          } catch (err: unknown) {
+            log("error", "[dream_complete] board promote failed", { err: err instanceof Error ? err.message : String(err), dreamId, caller })
+          }
+        }
         return lines.join("\n")
       },
     }),
@@ -706,5 +743,5 @@ export function apply(ctx: DreamToolsCtx) {
 // The dsh loader applies the DEFAULT export only and ignores named siblings,
 // so inject rides on the function itself (cordis reads `plugin.inject`).
 // NB: a function's own `name` property is read-only — do NOT Object.assign name onto it.
-(apply as unknown as Record<string, unknown>).inject = ["tools", "dreamArchive"]
+(apply as unknown as Record<string, unknown>).inject = ["tools", "dreamArchive", "board"] // board OPTIONAL in standalone mounts (guarded read at execute time)
 export default apply

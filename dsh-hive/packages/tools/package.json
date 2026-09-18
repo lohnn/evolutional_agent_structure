@@ -18,11 +18,13 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "prepare": "tsc -p ../dream-archive/tsconfig.json && tsc -p ../painpoints/tsconfig.json && tsc -p tsconfig.json",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "npm run build && node --test test/board-seam.test.mjs test/service-harness.mjs"
   },
   "dependencies": {
     "@hive/dsh-dream-archive": "workspace:*",
-    "@hive/dsh-painpoints": "workspace:*"
+    "@hive/dsh-painpoints": "workspace:*",
+    "@hive/dsh-board": "workspace:*"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
