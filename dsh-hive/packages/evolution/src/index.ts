@@ -46,6 +46,7 @@ import { defineTool, type ParameterSchemaSpec } from "@deepseek-ai/dsh-tools"
 import type { Agent } from "@deepseek-ai/dsh-agent"
 import { COORDINATOR_DOCTRINE, DORMANT_NOTICE, AWAKEN_BRIEF, REAWAKEN_BRIEF, CAPABILITY_STANDING } from "./assets.js"
 import { recordAwakened, isAwakened, decideGate } from "./lib/sessions.js"
+import { autoRegister } from "@hive/dsh-board/lib/board-transitions"
 import { parseCapabilityPersona, renderAgentCordisYml, type CapabilityPersona } from "./lib/persona.js"
 import { resolveCapabilityMaterial } from "./lib/material.js"
 import {
@@ -747,7 +748,9 @@ export class Evolution extends Service {
         name: "awaken",
         description: "Awaken this session as the HIVE coordinator (registry flip, doctrine, summon the turn-scoped hive_awaken_spawn tool).",
         input: { hint: "[context — what you are working on; a hint for the awakening dossier]" },
-        handler: (inv) => {
+        // async: the B5 board seam awaits autoRegister; the command runtime
+        // awaits the handler either way (B5 harness drives it with await).
+        handler: async (inv) => {
           if (!inv.agent) {
             return {
               kind: "error" as const,
@@ -833,13 +836,47 @@ export class Evolution extends Service {
             order: 55,
             text: () => COORDINATOR_DOCTRINE,
           })
-          // (4) Board stub — the EXACT junction where the OpenCode plugin
-          //     called autoRegister() for the new coordinator. Deliberately a
-          //     grep-able log, no fake stand-ins; the board phase (NEXT WORK)
-          //     plugs in here.
-          this.ctx.logger.info?.("[awaken] board auto-register skipped — board subsystem not ported (NEXT WORK)")
-          // (5) The dossier: ecosystem snapshot + the raw /awaken input.
-          const dossier = `${composeEcosystemSnapshot(this.snapshotSource())}\n\n### Awaken input\n\n  ${raw || "(none)"}`
+          // (4) Board auto-register — the EXACT junction where the OpenCode
+          //     plugin called autoRegister() for the new coordinator
+          //     (src/tools.ts hive_awaken handler, step 4 of the flip).
+          //     D4: group_id := self (the session's id). Title = the raw
+          //     /awaken input trimmed, else `Session <id>` — the original's
+          //     "un-needed → Session <id>" fallback, unchanged. Belt-and-
+          //     braces top-level guard mirrors the handler's own child refusal
+          //     (the original gated on !parentID && !isCapabilitySession).
+          //     The flip NEVER fails on board trouble: any throw is warn-
+          //     logged and becomes a non-fatal note in BOTH outcome surfaces
+          //     (the brief — the only model-visible channel, W-048 — and this
+          //     command's returned text, the user GUI feedback that replaced
+          //     the original tool-return boardNote).
+          let boardNote = ""
+          {
+            const depthHere = (agent.session as { header?: { delegationDepth?: unknown } } | undefined)?.header?.delegationDepth
+            if (typeof depthHere === "number" && depthHere > 0) {
+              boardNote = "Board: skipped — delegated sessions cannot own work items (D5); ownership belongs to the top-level coordinator."
+            } else {
+              try {
+                const title = raw.trim() ? raw.trim() : `Session ${sessionId}`
+                const reg = await autoRegister(this.directory, sessionId, sessionId, title)
+                if (reg.action === "registered") {
+                  boardNote = `Board: registered work item ${reg.item.id} — "${reg.item.title}" (session-first; this session owns it; hive_board_list shows it).`
+                } else {
+                  // W-049: name the outcome so the model can act on it.
+                  boardNote = `Board: no new work item — outcome ${reg.action}${reg.item?.id ? ` (existing item ${reg.item.id})` : ""}.`
+                }
+              } catch (err) {
+                this.ctx.logger.warn?.("[board] awaken auto-register failed", { error: String(err), sessionId })
+                boardNote =
+                  "Board: auto-register could not run for this awaken (board subsystem reported an error; the flip itself is unaffected — " +
+                  "check the board root, or file later with hive_board_create)."
+              }
+            }
+          }
+          // (5) The dossier: ecosystem snapshot + the raw /awaken input + the
+          //     board outcome — the board note rides the dossier block so it
+          //     reaches the model through the ONLY model-visible channel
+          //     (W-048); fillBrief's own placeholders are untouched.
+          const dossier = `${composeEcosystemSnapshot(this.snapshotSource())}\n\n### Awaken input\n\n  ${raw || "(none)"}\n\n### Board\n\n  ${boardNote || "(no board outcome)"}`
           // (6) Summon the turn-scoped batch tool (self-retracts after the
           //     first call, like every lifecycle summon).
           let spawnDisposer: () => void
@@ -871,7 +908,7 @@ export class Evolution extends Service {
           )
           return {
             kind: "success" as const,
-            text: `/awaken: HIVE awakened for session ${sessionId}. Registry recorded, hive tools lifted, coordinator doctrine registered, turn-scoped hive_awaken_spawn summoned — the awaken brief has been handed to the agent.`,
+            text: `/awaken: HIVE awakened for session ${sessionId}. Registry recorded, hive tools lifted, coordinator doctrine registered, turn-scoped hive_awaken_spawn summoned — the awaken brief has been handed to the agent. ${boardNote}`,
           }
         },
       })

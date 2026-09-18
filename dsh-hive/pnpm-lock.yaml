@@ -80,6 +80,9 @@ importers:
       '@deepseek-ai/schemastery':
         specifier: ^3.18.2
         version: 3.18.2
+      '@hive/dsh-board':
+        specifier: workspace:*
+        version: link:../board
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: ^4.0.1

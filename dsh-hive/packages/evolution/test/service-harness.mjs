@@ -12,6 +12,9 @@ import assert from "node:assert/strict"
 import fs from "fs"
 import os from "os"
 import path from "path"
+import url from "node:url"
+
+const HERE = path.dirname(url.fileURLToPath(import.meta.url))
 
 const results = []
 const check = (id, ok, detail) => {
@@ -476,6 +479,83 @@ check("dissolve.roster", !ctx.evolution.buildRoster().includes("beta"), "roster 
   ctx.emit("agent/created", { agent: resumeAgent, source: "resume" })
   const namesR = (await ctx.systemPrompt.assemble({ scope: resumeAgent })).sections.map((s) => s.name)
   check("compact.resume-one-shot", namesR.includes("hive:doctrine") && !namesR.includes("hive:post-compaction"), `resume re-applies doctrine but never the compaction re-anchor (${namesR.join(",")})`)
+}
+
+
+// ── B5: the board seam at the awaken full-flip (plan §B5) ────────────────────
+// The flip is handler-driven exactly as T2 drives /awaken (W-048). NOTE: with
+// B5 live, the EARLIER T2 awaken (ses_awaken_1) already registered a board
+// item — the B5 asserts are relative to the pre-block board state.
+{
+  const { listItems, readItem } = await import("@hive/dsh-board/lib/board-store")
+  const { specHash } = await import("@hive/dsh-board/lib/board-store")
+  const { autoRegister: boardAutoRegister, demoteItem } = await import("@hive/dsh-board/lib/board-transitions")
+
+  const warnCaptures = []
+  const origWarn = ctx.logger.warn?.bind(ctx.logger)
+  ctx.logger.warn = (msg, extra) => { warnCaptures.push([String(msg), extra]); return origWarn?.(msg, extra) }
+
+  const cmdB5 = ctx.commands.find(undefined, "awaken")
+  const boardBefore = listItems(synth).map((i) => i.id)
+
+  // 1) FULL FLIP registers a session-first item, group_id = session id (D4).
+  const mkAgent = (sid) => {
+    const a = { id: sid, session: { id: sid, header: {} }, followup: (m) => { (a.__followups ??= []).push(m) } }
+    const scope = createScope(ctx, a, {})
+    a.ctx = scope.ctx
+    ctx.emit("agent/created", { agent: a, source: "startup" })
+    return a
+  }
+  const b5a = mkAgent("ses_b5_a")
+  const outB5a = await cmdB5.handler({ rawInput: "B5 board seam probe awaken input", agent: b5a, commandId: "c_b5a", attachments: [], signal: AbortSignal.timeout(2000) })
+  check("b5.flip-success", outB5a.kind === "success", `/awaken flip succeeded (${String(outB5a.text).slice(0, 60)}…)`)
+  const b5aItem = listItems(synth).find((i) => !boardBefore.includes(i.id))
+  check("b5.item-registered", b5aItem !== undefined, `exactly one NEW session-first item appeared (${b5aItem?.id})`)
+  const it = b5aItem ? readItem(synth, b5aItem.id) : null
+  check("b5.item-fields", !!it && it.owner_session === "ses_b5_a" && it.group_id === "ses_b5_a" && it.status === "in_progress" && it.spec_hash === specHash("") && it.origin === "session-first" && it.title === "B5 board seam probe awaken input", "owner + group_id = session id (D4), in_progress, spec_hash = hash(\"\"), title = raw input")
+  const briefA = b5a.__followups?.[0]?.content?.[0]?.text ?? ""
+  check("b5.brief-names-wi", !!it && briefA.includes("Board: registered work item WI-") && briefA.includes(it.id), "brief's dossier block names the WI (W-049, model-visible channel W-048)")
+  check("b5.brief-no-dangling", !briefA.includes("{{"), "no dangling {{...}} placeholders in the rendered brief")
+  check("b5.return-names-wi", !!it && String(outB5a.text).includes("Board: registered work item") && String(outB5a.text).includes(it.id), "the command's returned text carries the same note (the replaced boardNote)")
+
+  // 2) SECOND /awaken → re-awaken branch: no duplicate item. The module-level
+  //    noop outcome (the seam's exact call shape) is noop-owned on the SAME item.
+  const b5b = mkAgent("ses_b5_a")
+  const outB5b = await cmdB5.handler({ rawInput: "", agent: b5b, commandId: "c_b5b", attachments: [], signal: AbortSignal.timeout(2000) })
+  check("b5.re-awaken-branch", outB5b.kind === "success" && /already awakened/.test(String(outB5b.text)), "second /awaken takes the re-awaken (analysis) branch")
+  const afterSecond = listItems(synth).filter((i) => it && i.id !== it.id)
+  const newOnes = afterSecond.filter((i) => !boardBefore.includes(i.id) && i.id !== it.id)
+  check("b5.no-duplicate", newOnes.length === 0, `no new item from the re-awaken (${newOnes.map((i) => i.id).join(",") || "none"})`)
+  const noop = await boardAutoRegister(synth, "ses_b5_a", "ses_b5_a", "whatever")
+  check("b5.noop-owned", noop.action === "noop-owned" && it && noop.item.id === it.id, `autoRegister idempotency: ${noop.action} → ${noop.item.id}`)
+
+  // 3) TOMBSTONED session → skipped-released, no adoption.
+  await demoteItem(synth, it.id) // true-demote tombstones ses_b5_a on its item
+  const skip = await boardAutoRegister(synth, "ses_b5_a", "ses_b5_a", "whatever")
+  check("b5.skipped-released", skip.action === "skipped-released", `tombstoned session: ${skip.action}`)
+  check("b5.no-adoption", listItems(synth).every((i) => !(i.status === "in_progress" && i.owner_session === "ses_b5_a")), "no in_progress adoption of the released session")
+
+  // 4) BOARD-FAILURE INJECTION: replace the board DIR with a FILE — the next
+  //    flip must still succeed, warn, and carry the non-fatal note (W-049).
+  const boardDirPath = path.join(synth, ".opencode", "board")
+  fs.renameSync(boardDirPath, path.join(synth, ".opencode", "board.bak"))
+  fs.writeFileSync(boardDirPath, "not a directory — injected failure", "utf8")
+  const b5c = mkAgent("ses_b5_err")
+  const outB5c = await cmdB5.handler({ rawInput: "B5 failure injection", agent: b5c, commandId: "c_b5c", attachments: [], signal: AbortSignal.timeout(2000) })
+  check("b5.fail-flip-still-succeeds", outB5c.kind === "success", "board failure does NOT fail the flip")
+  const b5cItem = listItems(synth).find((i) => !boardBefore.includes(i.id) && i.id !== it.id)
+  check("b5.fail-no-item", b5cItem === undefined, "the failed seam wrote nothing (fail-quiet on board trouble)")
+  check("b5.fail-warn-logged", warnCaptures.some(([m]) => m.includes("[board] awaken auto-register failed")), "warn '[board] awaken auto-register failed' logged")
+  const briefC = b5c.__followups?.[0]?.content?.[0]?.text ?? ""
+  check("b5.fail-brief-note", briefC.includes("Board: auto-register could not run") && briefC.includes("hive_board_create"), "brief carries the non-fatal note with a next step (W-049)")
+  check("b5.fail-no-dangling", !briefC.includes("{{"), "failure path still leaves no dangling placeholders")
+  fs.rmSync(boardDirPath, { force: true })
+  fs.renameSync(path.join(synth, ".opencode", "board.bak"), boardDirPath)
+
+  // 5) STUB-GREP NEGATIVE: the old placeholder log must not survive anywhere.
+  const srcPath = path.join(HERE, "..", "src", "index.ts") // HERE = this test's dir; the package root is one up
+  const srcText = fs.readFileSync(srcPath, "utf8")
+  check("b5.stub-gone", !srcText.includes("board auto-register skipped") && srcText.includes("autoRegister"), "the B1 stub line is deleted; the real seam call took slot (4)")
 }
 
 fs.rmSync(synth, { recursive: true, force: true })
