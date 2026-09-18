@@ -20,6 +20,7 @@
 
 const PKG_PATHS = {
   "@hive/dsh-agents": "dsh-hive/packages/agents",
+  "@hive/dsh-board": "dsh-hive/packages/board",
   "@hive/dsh-dream-archive": "dsh-hive/packages/dream-archive",
   "@hive/dsh-evolution": "dsh-hive/packages/evolution",
   "@hive/dsh-hivemind": "dsh-hive/packages/hivemind",
@@ -30,6 +31,7 @@ const PKG_PATHS = {
 
 const TARBALLS = {
   "@hive/dsh-agents": "file:./hive-dsh-agents-0.0.1.tgz",
+  "@hive/dsh-board": "file:./hive-dsh-board-0.0.1.tgz",
   "@hive/dsh-dream-archive": "file:./hive-dsh-dream-archive-0.0.1.tgz",
   "@hive/dsh-evolution": "file:./hive-dsh-evolution-0.0.1.tgz",
   "@hive/dsh-hivemind": "file:./hive-dsh-hivemind-0.0.1.tgz",

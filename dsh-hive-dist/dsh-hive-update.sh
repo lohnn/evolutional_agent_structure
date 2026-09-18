@@ -10,7 +10,7 @@
 #   DSH_HIVE_REF   git ref to track                        (default: main)
 #   DSH_HIVE_REPO  git base for the specs                  (default: github:lohnn/evolutional_agent_structure)
 #   DSH_VERSION   pinned harness version for `dsh plugin` (default:
-#                 0.1.6-alpha.1; when run under the dsh-hive-web service, the
+#                 0.1.6-alpha.2; when run under the dsh-hive-web service, the
 #                 TOML `env` sets this and remains the single version source —
 #                 bump THAT line, and keep it >= the version the profile
 #                 actually serves)
@@ -46,7 +46,7 @@ done
 PROFILE="${PROFILE:-${HOME}/.dsh/profiles/hive}"
 REF="${DSH_HIVE_REF:-main}"
 REPO="${DSH_HIVE_REPO:-github:lohnn/evolutional_agent_structure}"
-DSH_VERSION="${DSH_VERSION:-0.1.6-alpha.1}"
+DSH_VERSION="${DSH_VERSION:-0.1.6-alpha.2}"
 KIT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NAME="$(basename "$PROFILE")"
 STAMP="[dsh-hive-update]"
@@ -240,7 +240,7 @@ NODE
 
 # ── install / update: bootstrap, then force-re-resolve the floating git ref ──
 SPECS=()
-for p in agents dream-archive evolution hivemind painpoints tools; do
+for p in agents board dream-archive evolution hivemind painpoints tools; do
   SPECS+=("$REPO#$REF&path:dsh-hive/packages/$p")
 done
 SPECS+=("$REPO#$REF&path:dsh-hive/packages/berget-refresh")
@@ -249,6 +249,7 @@ SPECS+=("$REPO#$REF&path:dsh-hive/packages/provider-usage")
 
 PACKAGES=(
   @hive/dsh-agents
+  @hive/dsh-board
   @hive/dsh-dream-archive
   @hive/dsh-evolution
   @hive/dsh-hivemind
@@ -262,11 +263,11 @@ PACKAGES=(
 run_dsh_plugin() {
   DSH_HIVE_REF="$REF" DSH_HIVE_REPO="$REPO" \
     pnpm dlx \
-      --allow-build @deepseek-ai/dsh-subprocess-local \
-      --allow-build @google/genai \
-      --allow-build koffi \
-      --allow-build node-pty \
-      --allow-build protobufjs \
+      --allow-build=@deepseek-ai/dsh-subprocess-local \
+      --allow-build=@google/genai \
+      --allow-build=koffi \
+      --allow-build=node-pty \
+      --allow-build=protobufjs \
       "@deepseek-ai/dsh@$DSH_VERSION" \
       plugin --profile "$NAME" "$@"
 }
@@ -277,7 +278,7 @@ trap 'rm -f "$OUT"' EXIT
 # error — the 2026-09-15 war: every pre_start failure surfaced as a bare
 # "keeping it (offline?)" while the real cause (a session write policy
 # denying dlx-cache writes under /root) sat buried in pnpm stderr.
-log "dsh plugin add — profile=$NAME ref=$REF (9 packages)"
+log "dsh plugin add — profile=$NAME ref=$REF (10 packages)"
 if ! run_dsh_plugin add "${SPECS[@]}" 2>&1 | tee "$OUT"; then
   warn "add FAILED — last output lines:"
   tail -n 12 "$OUT" | while IFS= read -r l; do warn "  └ $l"; done
@@ -288,7 +289,7 @@ if ! run_dsh_plugin add "${SPECS[@]}" 2>&1 | tee "$OUT"; then
   die "add FAILED and no existing install — service start must be aborted"
 fi
 
-log "dsh plugin update — force-re-resolving ref=$REF (9 packages)"
+log "dsh plugin update — force-re-resolving ref=$REF (10 packages)"
 if run_dsh_plugin update "${PACKAGES[@]}" 2>&1 | tee "$OUT"; then
   log "cohort up to date (ref $REF)"
   exit 0
