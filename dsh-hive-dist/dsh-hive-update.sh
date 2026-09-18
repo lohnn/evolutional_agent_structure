@@ -252,8 +252,22 @@ if (!/\n- insert:\n/.test(text)) {
   fs.writeFileSync(path, `${text.replace(/\s*$/, "\n")}\n- insert:\n${row}`)
   console.log("[dsh-hive-update] patch: appended board insert block (tools' board service row)")
 } else {
-  fs.writeFileSync(path, text.replace(/\s*$/, "\n") + row)
-  console.log("[dsh-hive-update] patch: appended the board load row (tools' board service row)")
+  // Insert at the END OF THE INSERT REGION, never at EOF: profiles may carry
+  // hand-tuned local rows AFTER the block (column-0 items such as local
+  // `disabled:` overrides) — appending a four-space row there corrupts the
+  // YAML nesting (observed on a hand-tuned web profile, 2026-09-18).
+  const lines = text.replace(/\s*$/, "").split("\n")
+  const ins = lines.indexOf("- insert:")
+  let end = ins + 1
+  let sawRow = false
+  for (let i = ins + 1; i < lines.length; i++) {
+    if (/^ {4}- id:/.test(lines[i])) { sawRow = true; continue }
+    if (sawRow && (lines[i].startsWith("- ") || lines[i].startsWith("#"))) { end = i; break }
+  }
+  if (!sawRow) end = lines.length
+  lines.splice(end, 0, "    - id: board", "      name: '@hive/dsh-board'")
+  fs.writeFileSync(path, lines.join("\n") + "\n")
+  console.log("[dsh-hive-update] patch: inserted the board load row (tools' board service row)")
 }
 NODE
 
