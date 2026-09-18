@@ -232,7 +232,7 @@ check("dissolve.roster", !ctx.evolution.buildRoster().includes("beta"), "roster 
 // ── T2: awaken gate on agent/created — deny / skip / lift ────────────────────
 // Fakes mirror the real runtime face the gate reads: `session.id` resolves the
 // session, `session.header.delegationDepth` discriminates lineage (verified
-// against dsh-agent 0.1.6-alpha.1: Agent exposes session; Session.header is
+// against dsh-agent 0.1.6-alpha.2: Agent exposes session; Session.header is
 // always present; depth is persisted = parent+1 for children).
 {
   const gateAgent = { id: "ses_gate_a", session: { id: "ses_gate_a", header: {} }, followup: () => {} }
@@ -392,7 +392,7 @@ check("dissolve.roster", !ctx.evolution.buildRoster().includes("beta"), "roster 
 
 // ── T6: the compaction seam — agent/created with source:"compact" ─────────────
 // dsh has no standalone compaction event: a summarized session RE-PUBLISHES
-// with source "compact" (SessionStartSource, live 0.1.6-alpha.1). On an
+// with source "compact" (SessionStartSource, live 0.1.6-alpha.2). On an
 // awakened top-level coordinator (gate decision "doctrine") that registers a
 // one-shot scoped hive:post-compaction re-anchor; on deny (dormant) or any
 // non-compact source it registers NOTHING extra. The dreamArchive service is
