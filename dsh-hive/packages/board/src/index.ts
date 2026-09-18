@@ -53,6 +53,25 @@ import {
 import { computeProblems } from "./lib/board-invariants.js"
 import { recencyKey } from "./lib/board-recency.js"
 import {
+  listBoard,
+  searchBoard,
+  readItems,
+  nearestItems,
+  formatNearest,
+  scoreItem,
+  excerptFor,
+  normaliseItemId,
+  DEFAULT_K,
+  MAX_K,
+  MAX_LIMIT,
+  DEFAULT_MAX_BYTES,
+  MIN_MAX_BYTES,
+  MAX_MAX_BYTES,
+  STATUS_FILTERS,
+  OWNER_FILTERS,
+  PRIORITY_FILTERS,
+} from "./lib/board-read.js"
+import {
   createIdea,
   bindSession,
   autoRegister,
@@ -134,6 +153,24 @@ export {
   expectSubtaskArray,
   sdkSessionClient,
   httpSessionClient,
+  // read surface (B3)
+  listBoard,
+  searchBoard,
+  readItems,
+  nearestItems,
+  formatNearest,
+  scoreItem,
+  excerptFor,
+  normaliseItemId,
+  STATUS_FILTERS,
+  OWNER_FILTERS,
+  PRIORITY_FILTERS,
+  DEFAULT_K,
+  MAX_K,
+  MAX_LIMIT,
+  DEFAULT_MAX_BYTES,
+  MIN_MAX_BYTES,
+  MAX_MAX_BYTES,
 }
 export type {
   WorkItem,
