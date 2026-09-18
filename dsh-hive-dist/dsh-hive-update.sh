@@ -284,17 +284,25 @@ if [ -f "$KIT_TARBALL" ] && [ "${DSH_HIVE_GIT_MODE:-0}" != "1" ]; then
   # ── TARBALL mode ──────────────────────────────────────────────────────────
   cp "$KIT"/*.tgz "$PROFILE/"
   log "tarball mode: copied $(ls "$KIT"/*.tgz | wc -l | tr -d ' ') kit tarballs beside the profile hook"
+  # Relative specs ONLY, and the add must run with the profile as the pnpm
+  # cwd. Absolute file: args get re-anchored through the dsh plugin-manager
+  # chain with the profile name injected as a phantom segment (observed:
+  # "…/profiles/web/web/hive-dsh-agents-0.0.1.tgz", and "hive/hive/…"
+  # before it) — relative "./x.tgz" args resolve against the manifest's own
+  # dir and never travel through that code. The updater therefore `cd`s
+  # into the profile (restoring cwd after) and the plugin-manager's own
+  # rel-spec anchoring against the caller cwd is bypassed by the cd.
   SPECS=(
-    "file:$PROFILE/hive-dsh-agents-0.0.1.tgz"
-    "file:$PROFILE/hive-dsh-board-0.0.1.tgz"
-    "file:$PROFILE/hive-dsh-dream-archive-0.0.1.tgz"
-    "file:$PROFILE/hive-dsh-evolution-0.0.1.tgz"
-    "file:$PROFILE/hive-dsh-hivemind-0.0.1.tgz"
-    "file:$PROFILE/hive-dsh-painpoints-0.0.1.tgz"
-    "file:$PROFILE/hive-dsh-tools-0.0.1.tgz"
-    "file:$PROFILE/dsh-berget-refresh-0.1.0.tgz"
-    "file:$PROFILE/dsh-berget-usage-0.2.0.tgz"
-    "file:$PROFILE/dsh-provider-usage-0.1.0.tgz"
+    file:./hive-dsh-agents-0.0.1.tgz
+    file:./hive-dsh-board-0.0.1.tgz
+    file:./hive-dsh-dream-archive-0.0.1.tgz
+    file:./hive-dsh-evolution-0.0.1.tgz
+    file:./hive-dsh-hivemind-0.0.1.tgz
+    file:./hive-dsh-painpoints-0.0.1.tgz
+    file:./hive-dsh-tools-0.0.1.tgz
+    file:./dsh-berget-refresh-0.1.0.tgz
+    file:./dsh-berget-usage-0.2.0.tgz
+    file:./dsh-provider-usage-0.1.0.tgz
   )
   PACKAGES_NAMES=(
     @hive/dsh-agents @hive/dsh-board @hive/dsh-dream-archive @hive/dsh-evolution
@@ -360,7 +368,9 @@ trap 'rm -f "$OUT"' EXIT
 # "keeping it (offline?)" while the real cause (a session write policy
 # denying dlx-cache writes under /root) sat buried in pnpm stderr.
 log "dsh plugin add — profile=$NAME (10 packages)"
-if ! run_dsh_plugin add "${SPECS[@]}" 2>&1 | tee "$OUT"; then
+# cd into the profile so relative file: specs (tarball mode) and pnpm's own
+# file: resolution anchor at the manifest dir, never the caller's cwd.
+if ! ( cd "$PROFILE" && run_dsh_plugin add "${SPECS[@]}" 2>&1 ) | tee "$OUT"; then
   warn "add FAILED — last output lines:"
   tail -n 12 "$OUT" | while IFS= read -r l; do warn "  └ $l"; done
   if [ -e "$PROFILE/node_modules/@hive/dsh-dream-archive/dist/index.js" ]; then
