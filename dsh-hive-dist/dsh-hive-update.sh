@@ -238,27 +238,89 @@ if (removed > 0) {
 }
 NODE
 
-# ── install / update: bootstrap, then force-re-resolve the floating git ref ──
-SPECS=()
-for p in agents board dream-archive evolution hivemind painpoints tools; do
-  SPECS+=("$REPO#$REF&path:dsh-hive/packages/$p")
-done
-SPECS+=("$REPO#$REF&path:dsh-hive/packages/berget-refresh")
-SPECS+=("$REPO#$REF&path:dsh-hive/packages/berget-usage")
-SPECS+=("$REPO#$REF&path:dsh-hive/packages/provider-usage")
-
-PACKAGES=(
-  @hive/dsh-agents
-  @hive/dsh-board
-  @hive/dsh-dream-archive
-  @hive/dsh-evolution
-  @hive/dsh-hivemind
-  @hive/dsh-painpoints
-  @hive/dsh-tools
-  dsh-berget-refresh
-  dsh-berget-usage
-  dsh-provider-usage
-)
+# ── install / update: tarball-first, git fallback ───────────────────────────
+# TARBALL mode (default): the kit ships PREBUILT cohort tarballs (packed at
+# release time — dist/ included). The updater copies them beside the
+# profile's .pnpmfile.cjs, and `dsh plugin add` uses file: specs, so pnpm
+# never runs a prepare: no bun, no allowBuilds, no git-clone, and each
+# release's tarballs are the pinned version the profile gets.
+#
+# GIT fallback (kit tarballs absent): `dsh plugin add` with github:…
+# #path:… specs. pnpm >= 11 blocks the git-hosted `prepare` builds behind
+# an allowBuilds allowlist keyed by the RESOLVED spec (codeload URL with
+# the commit sha embedded) — `dangerouslyAllowAllBuilds: true` is pnpm-10
+# vocabulary, ignored by 11/12. For the fallback the script manages a
+# marker-wrapped allowBuilds block keyed to the freshly resolved sha.
+# CAVEAT (verified 2026-09-18): even with the allowlist satisfied, pnpm 12
+# hands git-hosted prepares to a bun runner that walks UP to the cloned
+# repo's workspace root and recursively prepares ALL monorepo packages —
+# whose cross-package imports need sibling dist/ that does not exist in a
+# fresh clone. Git-mode installs of the post-board cohort are therefore
+# unreliable by construction; ship kit tarballs instead (they are the
+# release artifacts). Also: pnpm 11's allowBuilds matcher rejects even the
+# exact keys it prints (upstream, 11.24 verified) — the fallback targets
+# pnpm 10.x or >=12.0 only.
+KIT_TARBALL="$KIT/hive-dsh-dream-archive-0.0.1.tgz"
+if [ -f "$KIT_TARBALL" ] && [ "${DSH_HIVE_GIT_MODE:-0}" != "1" ]; then
+  # ── TARBALL mode ──────────────────────────────────────────────────────────
+  cp "$KIT"/*.tgz "$PROFILE/"
+  log "tarball mode: copied $(ls "$KIT"/*.tgz | wc -l | tr -d ' ') kit tarballs beside the profile hook"
+  SPECS=(
+    "file:$PROFILE/hive-dsh-agents-0.0.1.tgz"
+    "file:$PROFILE/hive-dsh-board-0.0.1.tgz"
+    "file:$PROFILE/hive-dsh-dream-archive-0.0.1.tgz"
+    "file:$PROFILE/hive-dsh-evolution-0.0.1.tgz"
+    "file:$PROFILE/hive-dsh-hivemind-0.0.1.tgz"
+    "file:$PROFILE/hive-dsh-painpoints-0.0.1.tgz"
+    "file:$PROFILE/hive-dsh-tools-0.0.1.tgz"
+    "file:$PROFILE/dsh-berget-refresh-0.1.0.tgz"
+    "file:$PROFILE/dsh-berget-usage-0.2.0.tgz"
+    "file:$PROFILE/dsh-provider-usage-0.1.0.tgz"
+  )
+  PACKAGES_NAMES=(
+    @hive/dsh-agents @hive/dsh-board @hive/dsh-dream-archive @hive/dsh-evolution
+    @hive/dsh-hivemind @hive/dsh-painpoints @hive/dsh-tools
+    dsh-berget-refresh dsh-berget-usage dsh-provider-usage
+  )
+else
+  # ── GIT fallback mode ─────────────────────────────────────────────────────
+  REF_SHA="$(git ls-remote "${REPO/github:/https://github.com/}" "refs/heads/$REF" 2>/dev/null | cut -f1)"
+  if [ -z "$REF_SHA" ]; then REF_SHA="$(git ls-remote "${REPO/github:/https://github.com/}" "refs/tags/$REF" 2>/dev/null | cut -f1)"; fi
+  if [ -z "$REF_SHA" ]; then REF_SHA="$REF"; fi
+  CODELOAD_BASE="$(echo "${REPO/github:/}" | sed 's#^#https://codeload.github.com/#')/tar.gz/$REF_SHA"
+  PNPMWS="$PROFILE/pnpm-workspace.yaml"
+  node - "$PNPMWS" "$CODELOAD_BASE" agents board dream-archive evolution hivemind painpoints tools berget-refresh berget-usage provider-usage <<'NODE'
+const fs = require("node:fs")
+const [path, base, ...dirs] = process.argv.slice(2)
+const BEGIN = "# dsh-hive-update:allowBuilds(begin)"
+const END = "# dsh-hive-update:allowBuilds(end)"
+let text = fs.existsSync(path) ? fs.readFileSync(path, "utf8") : ""
+const re = new RegExp(`\\n?${BEGIN}[\\s\\S]*?${END}\\n?`, "g")
+text = text.replace(re, "")
+const lines = ["", BEGIN, "allowBuilds:"]
+for (const d of dirs) {
+  const name = d.startsWith("berget-") ? d : `@hive/dsh-${d}`
+  lines.push(`  '${name}@${base}#path:dsh-hive/packages/${d}': true`)
+}
+lines.push(END, "")
+text += lines.join("\n")
+fs.writeFileSync(path, text)
+console.log("[dsh-hive-update] allowBuilds: wrote managed block (git fallback, sha-pinned)")
+NODE
+  PNPM_MAJOR="$(pnpm --version 2>/dev/null | cut -d. -f1)"
+  if [ "$PNPM_MAJOR" = "11" ]; then
+    warn "pnpm 11.x detected: its allowBuilds matcher rejects even the exact keys it prints (upstream, 11.24 verified) — ship kit tarballs or move to pnpm 10.x/>=12.0"
+  fi
+  SPECS=()
+  for p in agents board dream-archive evolution hivemind painpoints tools berget-refresh berget-usage provider-usage; do
+    SPECS+=("$REPO#$REF&path:dsh-hive/packages/$p")
+  done
+  PACKAGES_NAMES=(
+    @hive/dsh-agents @hive/dsh-board @hive/dsh-dream-archive @hive/dsh-evolution
+    @hive/dsh-hivemind @hive/dsh-painpoints @hive/dsh-tools
+    dsh-berget-refresh dsh-berget-usage dsh-provider-usage
+  )
+fi
 
 run_dsh_plugin() {
   DSH_HIVE_REF="$REF" DSH_HIVE_REPO="$REPO" \
@@ -278,7 +340,7 @@ trap 'rm -f "$OUT"' EXIT
 # error — the 2026-09-15 war: every pre_start failure surfaced as a bare
 # "keeping it (offline?)" while the real cause (a session write policy
 # denying dlx-cache writes under /root) sat buried in pnpm stderr.
-log "dsh plugin add — profile=$NAME ref=$REF (10 packages)"
+log "dsh plugin add — profile=$NAME (10 packages)"
 if ! run_dsh_plugin add "${SPECS[@]}" 2>&1 | tee "$OUT"; then
   warn "add FAILED — last output lines:"
   tail -n 12 "$OUT" | while IFS= read -r l; do warn "  └ $l"; done
@@ -289,8 +351,13 @@ if ! run_dsh_plugin add "${SPECS[@]}" 2>&1 | tee "$OUT"; then
   die "add FAILED and no existing install — service start must be aborted"
 fi
 
+if [ -f "$KIT_TARBALL" ] && [ "${DSH_HIVE_GIT_MODE:-0}" != "1" ]; then
+  log "tarball mode: versions pinned by the shipped kit tarballs — nothing to re-resolve"
+  exit 0
+fi
+
 log "dsh plugin update — force-re-resolving ref=$REF (10 packages)"
-if run_dsh_plugin update "${PACKAGES[@]}" 2>&1 | tee "$OUT"; then
+if run_dsh_plugin update "${PACKAGES_NAMES[@]}" 2>&1 | tee "$OUT"; then
   log "cohort up to date (ref $REF)"
   exit 0
 fi

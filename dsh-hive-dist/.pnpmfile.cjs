@@ -29,15 +29,26 @@ const PKG_PATHS = {
   "dsh-berget-refresh": "dsh-hive/packages/berget-refresh",
 }
 
+// TARBALLS rewrites use ABSOLUTE file paths anchored at this hook's own
+// directory: relative file: specs inside an unpacked tarball's manifest are
+// anchored by pnpm to the depending package's location in the virtual
+// store, where the sibling tarballs do not exist ("Could not install from
+// … as it does not exist"). The hook always lives either in the profile or
+// the kit dir — both hold the tarballs — so __dirname is the one stable
+// anchor (verified 2026-09-18, dsh 0.1.6-alpha.2 adoption gate).
+const TARBALL_FILE = (name) => `file:${require("node:path").join(__dirname, name)}`
+
 const TARBALLS = {
-  "@hive/dsh-agents": "file:./hive-dsh-agents-0.0.1.tgz",
-  "@hive/dsh-board": "file:./hive-dsh-board-0.0.1.tgz",
-  "@hive/dsh-dream-archive": "file:./hive-dsh-dream-archive-0.0.1.tgz",
-  "@hive/dsh-evolution": "file:./hive-dsh-evolution-0.0.1.tgz",
-  "@hive/dsh-hivemind": "file:./hive-dsh-hivemind-0.0.1.tgz",
-  "@hive/dsh-painpoints": "file:./hive-dsh-painpoints-0.0.1.tgz",
-  "@hive/dsh-tools": "file:./hive-dsh-tools-0.0.1.tgz",
-  "dsh-berget-refresh": "file:./dsh-berget-refresh-0.1.0.tgz",
+  "@hive/dsh-agents": TARBALL_FILE("hive-dsh-agents-0.0.1.tgz"),
+  "@hive/dsh-board": TARBALL_FILE("hive-dsh-board-0.0.1.tgz"),
+  "@hive/dsh-dream-archive": TARBALL_FILE("hive-dsh-dream-archive-0.0.1.tgz"),
+  "@hive/dsh-evolution": TARBALL_FILE("hive-dsh-evolution-0.0.1.tgz"),
+  "@hive/dsh-hivemind": TARBALL_FILE("hive-dsh-hivemind-0.0.1.tgz"),
+  "@hive/dsh-painpoints": TARBALL_FILE("hive-dsh-painpoints-0.0.1.tgz"),
+  "@hive/dsh-tools": TARBALL_FILE("hive-dsh-tools-0.0.1.tgz"),
+  "dsh-berget-refresh": TARBALL_FILE("dsh-berget-refresh-0.1.0.tgz"),
+  "dsh-berget-usage": TARBALL_FILE("dsh-berget-usage-0.2.0.tgz"),
+  "dsh-provider-usage": TARBALL_FILE("dsh-provider-usage-0.1.0.tgz"),
 }
 
 // git+https://…/repo.git#ref&path:…  or  github:owner/repo#ref&path:…
