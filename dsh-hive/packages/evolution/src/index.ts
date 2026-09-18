@@ -359,7 +359,7 @@ export class Evolution extends Service {
     // (energy.ts guards on lastTick) and skips cleanly when no capability was
     // used since the last tick, so firing it per publication is cheap.
     // Found as a LIVE REGRESSION: this was bound to `agent/session-start`,
-    // an event the dsh runtime (0.1.6-alpha.2) does not publish — the
+    // an event the dsh runtime (0.1.6-alpha.1) does not publish — the
     // once-per-day tick sat dead (hive-state.json's lastTick frozen for 5+
     // days) and the tests never caught it because they emitted the phantom
     // event name themselves. Guarded by test/event-catalog-guard.test.mjs.
@@ -400,8 +400,7 @@ export class Evolution extends Service {
     // the Map itself never grows with dead sessions.
     ctx.on("agent/created", (payload) => {
       const agent = payload.agent
-      // Access path verified against dsh 0.1.6-alpha.2 types (and the live
-      // alpha.2 profile boot): the Agent
+      // Access path verified against dsh 0.1.6-alpha.1 types: the Agent
       // runtime face exposes `session: Session` (dsh-agent runtime-types),
       // `Session.header: SessionHeader` is always present (dsh-session), and
       // `delegationDepth` is persisted on the header (absent/0 top-level,
@@ -412,7 +411,7 @@ export class Evolution extends Service {
       const depth = agent.session?.header?.delegationDepth
       // The compaction seam reads `source` (the SessionStartSource —
       // 'startup' | 'resume' | 'clear' | 'compact'): present and typed in the
-      // LIVE runtime (0.1.6-alpha.2 declares the payload
+      // LIVE runtime (0.1.6-alpha.1 declares the payload
       // `{ agent, source, signal }`), ABSENT from this package's pinned type
       // corridor (0.1.2-rc.1 declares `{ agent }` only) — so the read stays a
       // structural access with `?`, not a typed field. Drop the cast when the
