@@ -21,7 +21,7 @@ const SRC_DIR = fileURLToPath(new URL("../src", import.meta.url))
 // Events the plugin may LISTEN on. Allowlist discipline:
 //
 // (a) every name here must exist as a PUBLISHED event in the dsh runtime
-//     catalog for the pinned harness version (0.1.6-alpha.1; see the
+//     catalog for the pinned harness version (0.1.6-alpha.2; see the
 //     peerDependencies pin in package.json for the corridor). `agent/created`
 //     (serial: payload `{ agent, source, signal }`, fires once per agent
 //     publication — startup, resume, clear, compact) is real there;
