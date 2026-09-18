@@ -39,6 +39,9 @@ importers:
       '@deepseek-ai/schemastery':
         specifier: ^3.18.2
         version: 3.18.2
+      '@hive/dsh-dream-archive':
+        specifier: workspace:*
+        version: link:../dream-archive
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: ^4.0.1

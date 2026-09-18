@@ -52,9 +52,43 @@ import {
 } from "./lib/board-store.js"
 import { computeProblems } from "./lib/board-invariants.js"
 import { recencyKey } from "./lib/board-recency.js"
+import {
+  createIdea,
+  bindSession,
+  autoRegister,
+  pauseItem,
+  unpauseItem,
+  demoteItem,
+  markDoneWithoutDream,
+  dreamCompleteBy,
+  markItemDoneFromDream,
+  respecItem,
+  retitleItem,
+  editItemTags,
+  startItem,
+  promoteItem,
+  reattachInfo,
+  makeDrmPreCompactionCheck,
+  TAG_PATTERN,
+  expectStringArray,
+  expectSubtaskArray,
+  sdkSessionClient,
+  httpSessionClient,
+  type CreateIdeaInit,
+  type MarkDoneFromDreamOptions,
+  type RespecOptions,
+  type BoardSessionClient,
+  type SdkLikeClient,
+  type StartOptions,
+  type ReattachDecision,
+  type TransitionOk,
+  type TransitionErr,
+  type TransitionResult,
+} from "./lib/board-transitions.js"
+export { makeDrmCompleteCheck, makeDrmArtifacts } from "./lib/drm-read.js"
 
-// Re-export the lib surface — B2's transitions port and B4's tool
-// registrations import through the package root, exactly the way
+// Re-export the lib surface — B4's tool registrations and the two seams (B5
+// evolution, B6 tools) import through the package root, exactly the way
 // @hive/dsh-tools consumes @hive/dsh-dream-archive's exports.
 export {
   boardDir,
@@ -76,6 +110,30 @@ export {
   nowIso,
   computeProblems,
   recencyKey,
+  // transitions (B2)
+  createIdea,
+  bindSession,
+  autoRegister,
+  pauseItem,
+  unpauseItem,
+  demoteItem,
+  markDoneWithoutDream,
+  dreamCompleteBy,
+  markItemDoneFromDream,
+  respecItem,
+  retitleItem,
+  editItemTags,
+  // COMPILED-BUT-UNCALLED on dsh (decisions D9/H1) — module completeness only
+  startItem,
+  promoteItem,
+  reattachInfo,
+  // DRM cross-checks (B2; one parser — @hive/dsh-dream-archive)
+  makeDrmPreCompactionCheck,
+  TAG_PATTERN,
+  expectStringArray,
+  expectSubtaskArray,
+  sdkSessionClient,
+  httpSessionClient,
 }
 export type {
   WorkItem,
@@ -84,7 +142,20 @@ export type {
   WorkItemPriority,
   Subtask,
   SubtaskStatus,
+  ItemEdit,
 } from "./lib/board-store.js"
+export type {
+  CreateIdeaInit,
+  MarkDoneFromDreamOptions,
+  RespecOptions,
+  BoardSessionClient,
+  SdkLikeClient,
+  StartOptions,
+  ReattachDecision,
+  TransitionOk,
+  TransitionErr,
+  TransitionResult,
+} from "./lib/board-transitions.js"
 
 /**
  * The hive-board Service. `directory` is the PROFILE-LEVEL fixed workspace
