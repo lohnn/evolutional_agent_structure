@@ -1,4 +1,7 @@
-# hive profile: all 6 @hive plugins.
+# hive profile: all 7 @hive packages (board joined as a LOAD row with the
+# board merge: @hive/dsh-tools' inject waits for the `board` service, which
+# only @hive/dsh-board provides — without this row tools pends forever and
+# every hive tool vanishes from the census).
 #
 # The Berget pairing is NOT hand-rows here anymore: dsh-berget-refresh,
 # dsh-berget-usage and dsh-provider-usage each declare their own
@@ -31,3 +34,5 @@
       name: '@hive/dsh-evolution'
     - id: hivemind
       name: '@hive/dsh-hivemind'
+    - id: board
+      name: '@hive/dsh-board'
