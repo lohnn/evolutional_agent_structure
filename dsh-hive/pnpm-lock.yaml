@@ -46,6 +46,12 @@ importers:
       '@deepseek-ai/cordis':
         specifier: ^4.0.1
         version: 4.0.1(@deepseek-ai/cordis-plugin-include@1.0.7)(@deepseek-ai/cordis-plugin-loader@1.0.3)
+      '@deepseek-ai/dsh-llm':
+        specifier: 0.1.2-rc.1
+        version: 0.1.2-rc.1(@deepseek-ai/cordis@4.0.1)
+      '@deepseek-ai/dsh-tools':
+        specifier: 0.1.2-rc.1
+        version: 0.1.2-rc.1(4754948c6372f756a092ea6158bcc18d)
       '@types/node':
         specifier: ^22.0.0
         version: 22.20.1

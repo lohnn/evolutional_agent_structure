@@ -27,7 +27,26 @@ fs.cpSync("/workspace/.opencode/board", path.join(realCopy, ".opencode/board"), 
 const synth = fs.mkdtempSync(path.join(os.tmpdir(), "p-b1-synth-"))
 
 // ── boot via class-plugin apply (loader shape) ───────────────────────────────
-const ctx = new Context()
+// B4: Board declares static inject = ["tools"] (it registers the 8
+// hive_board_* tools), so every Context in this harness mounts the real
+// dsh Tools runtime first — resolved from the pinned web profile exactly
+// like packages/evolution/test/service-harness.mjs does.
+const { createRequire } = await import("node:module")
+const require = createRequire("/root/.dsh/profiles/web/package.json")
+const SPMod = require("@deepseek-ai/dsh-system-prompt")
+const SP = SPMod.default ?? SPMod.SystemPrompt
+const ToolsMod = require("@deepseek-ai/dsh-tools")
+const Tools = ToolsMod.default ?? ToolsMod.Tools
+
+const mkCtx = () => {
+  const c = new Context()
+  new SP(c, { includeHarnessIdentity: true, includeRuntimeContext: false, persona: "gate" })
+  new Tools(c, {})
+  return c
+}
+
+const ctx = mkCtx()
+await new Promise((r) => setTimeout(r, 50))
 ctx.plugin(Board, { directory: realCopy })
 await new Promise((r) => setTimeout(r, 50)) // fiber settle
 
@@ -39,7 +58,7 @@ check("boot.directory-config", ctx.board.directory === realCopy, `directory wire
 // real Context, splices a capture stub over the Context logger's info method,
 // and lets the plugin ctor run exactly as the loader would.
 {
-  const captureCtx = new Context()
+  const captureCtx = mkCtx()
   const captured = []
   if (typeof captureCtx.logger === "function" || typeof captureCtx.logger === "object") {
     const originalInfo = captureCtx.logger.info?.bind(captureCtx.logger)
@@ -79,7 +98,7 @@ check("read.recency-total", items.every((it) => ctx.board.recency(it).length > 0
 
 // ── synthetic workspace (empty board) ────────────────────────────────────────
 {
-  const synthCtx = new Context()
+  const synthCtx = mkCtx()
   synthCtx.plugin(Board, { directory: synth })
   await new Promise((r) => setTimeout(r, 50))
   const synthBoard = synthCtx.board

@@ -139,6 +139,10 @@ function readCapabilityFrontmatter(filePath: string): { energy: number | null; d
  * - @hive/dsh-hivemind: hive_signal / hive_listen / hive_sent / hive_retire,
  * - @hive/dsh-painpoints: hive_note_painpoint / hive_painpoints_list /
  *   hive_painpoints_harvest,
+ * - @hive/dsh-board: hive_board_list / hive_board_search / hive_board_read /
+ *   hive_board_bind / hive_board_create / hive_board_respec /
+ *   hive_board_retitle / hive_board_tag (B4; D9/H1: hive_board_start does
+ *   NOT exist on dsh and is deliberately absent from this census),
  * - this package: hive_dispatch.
  *
  * This is the awaken gate's deny mask (T2/D2): a dormant top-level agent has
@@ -150,10 +154,11 @@ function readCapabilityFrontmatter(filePath: string): { energy: number | null; d
  * every package's src and asserts equality — a forgotten entry fails the
  * suite, not a user's security model.
  *
- * NOTE (T2 count check): the migration brief expected 18 names; the actual
- * source census is 19 — the dream package registers 11 hive_dream_* tools,
- * not the 9 the brief assumed. Derived-from-source wins; the guard test keeps
- * the census honest from here on.
+ * NOTE (T2 count check, updated B4): the migration brief expected 18 names;
+ * the source census was 19 after the dream package registered 11 hive_dream_*
+ * tools (not the 9 the brief assumed), and is 27 now that @hive/dsh-board's
+ * 8 tools joined. Derived-from-source wins; the guard test keeps the census
+ * honest from here on.
  */
 export const HIVE_TOOL_NAMES = [
   // ── @hive/dsh-tools (dream archive) ──────────────────────────────────────
@@ -177,6 +182,15 @@ export const HIVE_TOOL_NAMES = [
   "hive_note_painpoint",
   "hive_painpoints_list",
   "hive_painpoints_harvest",
+  // ── @hive/dsh-board (B4) ─────────────────────────────────────────────────
+  "hive_board_list",
+  "hive_board_search",
+  "hive_board_read",
+  "hive_board_bind",
+  "hive_board_create",
+  "hive_board_respec",
+  "hive_board_retitle",
+  "hive_board_tag",
   // ── this package ─────────────────────────────────────────────────────────
   "hive_dispatch",
 ] as const

@@ -18,9 +18,10 @@
  *                                viewer-bundle-specific and does not exist
  *                                in the dsh port)
  *
- * B1 registers NO tools (the dream-archive precedent: Phase-1 service only).
- * The 8 `hive_board_*` model-facing tools land in B4, the awaken seam in B5,
- * the dream-complete seam in B6 (see scratch/dsh-migration/
+ * B4 registers the 8 `hive_board_*` model-facing tools (list/search/read/
+ * bind/create/respec/retitle/tag — audit §4 names, near-verbatim
+ * contract-teaching descriptions). The awaken seam lands in B5, the
+ * dream-complete seam in B6 (see scratch/dsh-migration/
  * dsh-migration-board-plan.md). Per the B-slice ruling (decisions D9/H1):
  * `hive_board_start` never ships; startItem/promoteItem stay module-resident,
  * compiled, tested, uncalled — they arrive with B2's verbatim
@@ -29,6 +30,8 @@
 
 import { Service } from "@deepseek-ai/cordis"
 import z from "@deepseek-ai/schemastery"
+import { defineTool } from "@deepseek-ai/dsh-tools"
+import type { ContentBlock } from "@deepseek-ai/dsh-llm"
 
 import {
   boardDir,
@@ -70,6 +73,7 @@ import {
   STATUS_FILTERS,
   OWNER_FILTERS,
   PRIORITY_FILTERS,
+  type ListOptions,
 } from "./lib/board-read.js"
 import {
   createIdea,
@@ -104,6 +108,7 @@ import {
   type TransitionErr,
   type TransitionResult,
 } from "./lib/board-transitions.js"
+import { isSessionAwakened } from "./lib/sessions-read.js"
 export { makeDrmCompleteCheck, makeDrmArtifacts } from "./lib/drm-read.js"
 
 // Re-export the lib surface — B4's tool registrations and the two seams (B5
@@ -202,7 +207,71 @@ export type {
  * (`.opencode/agents/hive-sessions.json`) and the dream archive
  * (`.opencode/dreams/`) by construction.
  */
+
+// ── B4: the 8 hive_board_* model-facing tools ─────────────────────────────────
+// Verbatim CLOSE ports of the OpenCode plugin's src/tools.ts definitions
+// (audit §4 table); per D9/H1 there is deliberately NO hive_board_start.
+// Three differences from the originals, all load-bearing and restated at
+// their sites: (1) session/depth identity comes from the dsh exec ctx
+// (`exec.agent.session.id` + the NAME/DEPTH of the caller) instead of
+// OpenCode's nervous system; (2) the bind gate is the D5 ruling — refuse
+// depth>0 (the worker analogue of the original capability refusal, cited in
+// the text) + refuse not-awakened (board READS the ledger,
+// lib/sessions-read.ts; evolution OWNS the writes); (3) the schema layer
+// validates its declared shape, so the runtimes that made WI-065 possible
+// are doubled here — but every WI-065 hardening stays EXACTLY where it was:
+// dsh's parameter schema compiles to an OPEN object root, so UNDECLARED keys
+// still sail through (the FORBIDDEN_CREATE_KEYS refusal by name remains
+// load-bearing), and the module-level guards remain the real check.
+
+const TEXT_OUT = {
+  schema: { type: "string" },
+  render: (_args: unknown, value: string): ContentBlock[] => [{ type: "text", text: value }],
+} as const
+
+/** Resolve caller identity (agent id, session id, delegation depth) from the dsh exec ctx. */
+function resolveCaller(exec: { agent?: unknown }): {
+  caller: string | null
+  sessionID: string
+  depth: number | undefined
+} {
+  const agent = exec.agent as
+    | { session?: { id?: string; header?: { delegationDepth?: unknown } }; id?: string }
+    | undefined
+  const sessionID = agent?.session?.id ?? agent?.id ?? "unknown-session"
+  const caller = agent?.id ?? null
+  const raw = agent?.session?.header?.delegationDepth
+  const depth = typeof raw === "number" && Number.isFinite(raw) ? raw : undefined
+  return { caller, sessionID, depth }
+}
+
+// ⚠️ LOAD-BEARING (WI-065, ported verbatim from OpenCode src/tools.ts). dsh's
+// parameter schema compiles to an implicit OPEN object root: declared keys are
+// validated, but anything NOT declared arrives in execute() untouched — a live
+// probe on OpenCode showed undeclared keys reaching the body and a
+// status:"in_progress" reaching disk. Everything create's description
+// advertises as managed must be refused HERE, imperatively, BY NAME.
+const FORBIDDEN_CREATE_KEYS = [
+  "id",
+  "owner_session",
+  "group_id",
+  "spec_hash",
+  "transitions",
+  "dream_id",
+  "artifacts",
+  "todo_mirror",
+  "released_sessions",
+  "origin",
+  "paused",
+  "done_without_dream",
+]
+
+const str = (description: string) => ({ type: "string", description } as const)
+const reqStr = (description: string) => ({ type: "string", required: true, description } as const)
+const num = (description: string) => ({ type: "number", description } as const)
+
 export class Board extends Service {
+  static inject = ["tools"]
   static Config = z.object({
     // Workspace root (the dir containing `.opencode/`). Default: process cwd.
     directory: z.string().default(process.cwd()),
@@ -213,13 +282,422 @@ export class Board extends Service {
   constructor(ctx: import("@deepseek-ai/cordis").Context, config: { directory: string }) {
     super(ctx, "board")
     this.directory = config.directory
-    this.ctx.logger?.info?.("[board] storage module active (0 tools registered)", {
+    this.ctx.logger?.info?.("[board] storage module active (8 hive_board_* tools registered)", {
       directory: this.directory,
+      tools: 8,
+    })
+
+    const directory = this.directory
+    const log = (level: "info" | "warn", msg: string, extra?: Record<string, unknown>) =>
+      this.ctx.logger?.[level]?.(msg, extra)
+
+    // ── hive_board_list ──────────────────────────────────────────────────────
+    const listTool = () =>
+      defineTool({
+        name: "hive_board_list",
+        description:
+          "Enumerate the hive-board: the INDEX of work items — id, status, priority, owner, recency, spec SIZE, tags and title, one line each. " +
+          "NEVER returns spec bodies, and that is the point: the entire board indexes to a few thousand tokens, so this call is always affordable and its cost is predictable before you make it. The `body` column is the spec's size, so you can see what reading one would cost before you ask for it. " +
+          'Defaults to status="live" — backlog + todo + in_progress. DONE items are EXCLUDED by default (most of a mature board is finished work); pass status="all" to include them. ' +
+          "This is the tool for 'what is on the board right now'. Reach for hive_board_search instead when you have WORDS rather than a filter (it also spans done items), and hive_board_read when you already know the ids and need the actual spec text. " +
+          'It is ALSO how you find corruption. Every call checks the SCHEMA §3 invariants on every matched item, counts violations in the header and marks each violating row "⚠" with the invariant it breaks — no filter or flag needed, and the count spans everything matched, not just the rows `limit` rendered. Illegal states genuinely reach disk (WI-065 proved it), so this answers "which items are in an illegal state" board-wide. Detection only: nothing is repaired, and a clean board shows no marker at all. Note the check is a floor, not an audit — three of the schema\'s six invariants, two of them in weakened form, so no ⚠ means "breaks none of the three cheap per-item rules", not "schema-clean". ' +
+          "Reads take no lock and no snapshot: writes are atomic per file, so nothing you see is ever half-written, but a long listing may observe one item before and another after a concurrent write.",
+        parameters: {
+          status: {
+            type: "string",
+            enum: [...STATUS_FILTERS],
+            description:
+              "live (DEFAULT) = everything except done. all = including done. Or one exact status. `all` exists as a real value rather than 'omit the filter' so the narrow default cannot silently hide finished work from you.",
+          },
+          owner: {
+            type: "string",
+            enum: [...OWNER_FILTERS],
+            description:
+              "any (default). owned = a session is on it. none = un-owned, i.e. free to pick up. Note that owned ⟺ in_progress by schema, so combining owner with a queued status is refused rather than answered with a misleading empty list.",
+          },
+          priority: {
+            type: "string",
+            enum: [...PRIORITY_FILTERS],
+            description: "any (default), or one exact priority.",
+          },
+          limit: num("Cap the number of rows. Rarely needed — the whole index is cheap by construction. When it cuts, the count omitted is reported, never silently."),
+        },
+        output: TEXT_OUT,
+        async execute(args) {
+          const r = listBoard(listItems(directory), args as ListOptions)
+          return r.ok ? r.text : r.error
+        },
+      })
+
+    // ── hive_board_search ────────────────────────────────────────────────────
+    const searchTool = () =>
+      defineTool({
+        name: "hive_board_search",
+        description:
+          "Find work items by free text: a RANKED shortlist with scores and a matching excerpt from each spec. Spans EVERY status including done — solved work is often the most valuable thing to find, and it is invisible to hive_board_list's default. " +
+          "USE THIS BEFORE FILING ANYTHING NEW. The board has no delete path, so a duplicate item is expensive to unpick afterwards; two minutes here is the cheapest moment to discover the work already exists. " +
+          "It ranks, it does not judge: scores are lexical token overlap (query coverage plus a title boost), so a high score means 'shares vocabulary', not 'is the same work', and a low score does not prove unrelated. There is deliberately no duplicate verdict and no threshold — a cutoff was measured on a real board and fired on 0 of 2346 pairs while missing genuine re-files, so the ordering is handed to you and the judgement stays yours. " +
+          "Bounded by k (default " +
+          DEFAULT_K +
+          ", ceiling " +
+          MAX_K +
+          "), excerpt only. Follow up with hive_board_read for the full spec of anything that looks close.",
+        parameters: {
+          query: reqStr(
+            "Free text describing the work you are looking for — the words you would use to explain it, not a filter expression. Tokens are lowercased, punctuation-stripped, and 1–2 character words are dropped (so db/id/ui/os do not survive; give the ranker a longer word too)."
+          ),
+          k: num(
+            "Shortlist size, default " +
+              DEFAULT_K +
+              ", ceiling " +
+              MAX_K +
+              ". Only items scoring above zero are returned, so a small k is usually enough."
+          ),
+        },
+        output: TEXT_OUT,
+        async execute(args) {
+          const r = searchBoard(listItems(directory), args.query, { k: (args as Record<string, unknown>).k as number | undefined })
+          return r.ok ? r.text : r.error
+        },
+      })
+
+    // ── hive_board_read ──────────────────────────────────────────────────────
+    const readTool = () =>
+      defineTool({
+        name: "hive_board_read",
+        description:
+          "Read the FULL spec of named work items: the complete body, plus tags/dates/ownership, the append-only history, and `subtasks` and `todo_mirror` shown SEPARATELY — they have the same shape but different write classes (an author-written plan whose loss is unrecoverable, versus a rebuildable mirror of the owning session's live todos). " +
+          "This is the expensive one, and explicitly so. Spec bodies run from empty to ~12 KB, so it takes named ids rather than a filter and is bounded by a byte budget (default " +
+          DEFAULT_MAX_BYTES +
+          " bytes, ceiling " +
+          MAX_MAX_BYTES +
+          "). Discover ids with hive_board_list or hive_board_search first. " +
+          "Nothing disappears quietly: an id with no item on the board is reported by name, and an item the budget could not fit is reported by name as deferred — never dropped. " +
+          "Use this instead of opening .opencode/board/WI-*.md by hand: this is the same parser the writers use, so what you read is what the board stores. " +
+          'If the item violates a SCHEMA §3 invariant, that is stated as a "⚠ ILLEGAL" line directly under its status — the record is real and in a forbidden state, not a parse error. Reported, never repaired. ' +
+          "One honest limitation: reading several items is NOT a cross-item snapshot. No lock is taken (a read must never be able to make a concurrent write fail), and while each file is written atomically so no single item is ever torn, a multi-item read may observe one item before and another after a concurrent write.",
+        parameters: {
+          ids: reqStr(
+            'Work item ids, comma or space separated, e.g. "WI-012,WI-031". Zero-padding and case are forgiven (wi-3 → WI-003); anything that is not id-shaped is refused rather than guessed at.'
+          ),
+          max_bytes: num(
+            "Payload ceiling in characters (default " +
+              DEFAULT_MAX_BYTES +
+              ", range 500–" +
+              MAX_MAX_BYTES +
+              "). Items past it are named as deferred so you can fetch them in a second call."
+          ),
+        },
+        output: TEXT_OUT,
+        async execute(args) {
+          const r = readItems(listItems(directory), args.ids, {
+            max_bytes: (args as Record<string, unknown>).max_bytes as number | undefined,
+          })
+          return r.ok ? r.text : r.error
+        },
+      })
+
+    // ── hive_board_bind ──────────────────────────────────────────────────────
+    const bindTool = () =>
+      defineTool({
+        name: "hive_board_bind",
+        description:
+          "Bind the CURRENT session to a hive-board work item (.opencode/board/WI-*.md): stamps this session as owner_session (+ group_id), moves the item to in_progress, appends the transition. " +
+          "Session identity is resolved from the runtime — you do NOT pass a session id. " +
+          "Enforced: the item must be un-owned, this session must not own another item (session⟷item is strictly 1:1), this session must be a HIVE-awakened top-level coordinator (an in_progress item with a non-coordinator owner is an illegal state), and this session must not be tombstoned in the item's released_sessions[].",
+        parameters: {
+          id: reqStr("Work item id, e.g. WI-007"),
+        },
+        output: TEXT_OUT,
+        async execute(args, exec) {
+          const { sessionID, depth } = resolveCaller(exec)
+          // ── the D5 gate: only an awakened top-level coordinator may own ─────
+          // (a) delegated children (delegationDepth > 0) may not own items —
+          // the dsh analogue of the original capability refusal; the citation
+          // travels in the text so a worker reading the refusal understands
+          // it is a ROLE boundary, not a broken tool.
+          if (depth !== undefined && depth > 0) {
+            return (
+              `Refused: delegated sessions (depth ${depth}) cannot own work items — only top-level HIVE coordinator sessions do. ` +
+              `(The original plugin refused capability sessions for the same reason: capability sessions cannot own work items.) ` +
+              `File or update items with hive_board_create / hive_board_respec / hive_board_tag instead — ownership belongs to the coordinator.`
+            )
+          }
+          // (b) the session must be HIVE-awakened — In Progress requires an
+          // awakened coordinator owner (SCHEMA §3, invariant 1). The board
+          // READS the awaken ledger; @hive/dsh-evolution OWNS its writes.
+          if (!isSessionAwakened(directory, sessionID)) {
+            return "Refused: this session is not HIVE-awakened. Run /awaken first — In Progress requires an awakened coordinator owner (SCHEMA §3, invariant 1)."
+          }
+          const groupID = sessionID
+          const result = await bindSession(directory, args.id.trim(), sessionID, groupID)
+          if (!result.ok) {
+            const hint =
+              result.reason === "SESSION_OWNS_OTHER"
+                ? " To re-point this session, true-demote the currently owned item first (board demote — it tombstones this session there), then bind again."
+                : ""
+            return `Refused (${result.reason}): ${result.detail}${hint}`
+          }
+          if (result.action === "already-bound") {
+            return `${result.item.id} is already bound to this session — no-op.`
+          }
+          const absorbedNote =
+            result.action === "bound-absorbed" && result.absorbed
+              ? ` Pristine auto-registered placeholder ${result.absorbed} was absorbed (dissolved; lineage recorded on the bind transition).`
+              : ""
+          log("info", `[board] bind ${args.id.trim()} ← ${sessionID}`, { absorbed: result.absorbed ?? null })
+          return `Bound ${result.item.id} ("${result.item.title}") to this session (${sessionID}). Status: in_progress; owner_session + group_id stamped together; spec_hash stamped; transition appended.${absorbedNote}`
+        },
+      })
+
+    // ── hive_board_create ────────────────────────────────────────────────────
+    const createTool = () =>
+      defineTool({
+        name: "hive_board_create",
+        description:
+          "File a work item on the hive-board. " +
+          "Returns a full receipt of what was stored — the new id plus title, status, priority, tags, body size, subtask count and next steps — so you never need to open the file to confirm the write. " +
+          "Use this instead of writing a WI-*.md file by hand: it allocates the next id atomically under the board lock, timestamps it, and opens the item's append-only history with an entry recording its creation — nothing to look up, no existing item to copy. " +
+          "New items are UN-OWNED: captured, with no session working them yet. Ownership comes later — your coordinator takes it with hive_board_bind. " +
+          // ⚠️ LOAD-BEARING POINTER (WI-068). This tool's premise is "you never
+          // need to open an existing item" — and opening existing items WAS the
+          // duplicate check. The mechanism-side replacement (the nearest-items
+          // advisory on the receipt below) fires only AFTER the item is on a
+          // board with no delete path. Without this sentence the caller has no
+          // reason to look before writing, and the safeguard is inert.
+          "BEFORE you file: run hive_board_search with the words you would use to describe this work. There is no delete path on this board, so an accidental duplicate is expensive to unpick, and search spans done items — which the board index hides by default. " +
+          // ⚠️ The sentence below is LOAD-BEARING — see the comment on
+          // FORBIDDEN_CREATE_KEYS before shortening it in a way that weakens
+          // the claim. It looks redundant with the declared schema; it is not:
+          // the parameter schema validates its DECLARED keys but compiles to an
+          // OPEN object root, so undeclared keys reach execute() untouched.
+          "These fields are managed for you and are refused if passed: id, ownership, spec_hash, transitions, dream/artifact links, todo mirror, released sessions, origin, paused and done badges — and any status beyond backlog/todo. " +
+          "They belong to the transition module, and the refusal is by name — nothing is silently dropped.",
+        parameters: {
+          title: reqStr("Short imperative title, e.g. 'Add push opt-out toggle'."),
+          body: str(
+            "The spec, markdown. Write it for someone picking this up cold: what the problem is, what is in and out of scope, and what 'done' looks like. No house template is enforced. Revise later with hive_board_respec, which preserves the text it replaces."
+          ),
+          status: {
+            type: "string",
+            enum: ["backlog", "todo"],
+            description:
+              "backlog (default) = captured, not yet queued. todo = triaged and next up. Nothing behaves differently between them — both are un-owned and both can be started at any time; the column is a human queueing signal, not a state machine. When in doubt, backlog.",
+          },
+          priority: {
+            type: "string",
+            enum: ["low", "medium", "high"],
+            description:
+              "Really does sort: this is the PRIMARY sort key in the Backlog and Todo columns, ahead of recency, so high visibly moves the card to the top. Default medium.",
+          },
+          tags: {
+            type: "array",
+            items: { type: "string" },
+            description:
+              "Optional. Free-form labels — there is no controlled vocabulary and no namespacing convention. The common pattern is the project or component name (jellyfetch, hive-board, tooling). Bare tokens: letters, digits, dot, dash, underscore. Editable later with hive_board_tag.",
+          },
+          subtasks: {
+            type: "array",
+            items: { type: "string" },
+            description:
+              "An author-written plan: the steps you would take, in order. CREATION-TIME ONLY — not because the plan is meant to be frozen as a record of original intent, but because no safe concurrent-edit primitive for it exists yet: an ordered list of rich records cannot be merged the way a set of tags can, so a whole-replace edit would silently lose a concurrent editor's change. Optional, and omitting it is the normal case — pass a decomposition only if it is already settled; to revise a plan later, put the revision in the body. Distinct from todo_mirror, which is the owning session's live TodoWrite and is machine-written.",
+          },
+        },
+        output: TEXT_OUT,
+        async execute(args, exec) {
+          // ── RUNTIME arg validation ────────────────────────────────────────
+          // The declared schema validates DECLARED keys, but the object root is
+          // OPEN: anything the model emits beyond the declaration arrives here
+          // as-is. Verified the hard way on the original: a live call with
+          // status:"in_progress" wrote WI-065 to disk. Everything the
+          // description advertises as refused is refused HERE, imperatively
+          // (or in the module, for shared paths).
+          const forbidden = FORBIDDEN_CREATE_KEYS.filter((k) => k in (args as Record<string, unknown>))
+          if (forbidden.length > 0) {
+            return (
+              `Refused (TRANSITION_MODULE_FIELD): ${forbidden.join(", ")} ${forbidden.length === 1 ? "is" : "are"} owned by the transition module, not the author. ` +
+              `Ownership (owner_session/group_id) is stamped by hive_board_bind; spec_hash by bind and true-demote; ` +
+              `transitions are appended by the operation that caused them; the id is allocated here. Drop ${forbidden.length === 1 ? "it" : "them"} and retry.`
+            )
+          }
+          const title = args.title.trim()
+          if (title === "") return "Refused (EMPTY_TITLE): title is required and cannot be empty."
+          // `subtasks` MUST be shape-checked here, not only in the module: the
+          // `.map` below converts string[] into records and runs BEFORE
+          // createIdea, so a module-only guard leaves this arg still throwing a
+          // raw TypeError. `tags` is deliberately NOT duplicated here — it is
+          // passed through untouched and the module refuses it with the same
+          // message, and a second copy of a guard is a second thing to drift.
+          const badSubtasks = expectStringArray("subtasks", (args as Record<string, unknown>).subtasks)
+          if (badSubtasks) return `Refused (${badSubtasks.reason}): ${badSubtasks.detail}`
+          const { caller } = resolveCaller(exec)
+          const result = await createIdea(directory, {
+            title,
+            ...(args.body !== undefined ? { body: args.body } : {}),
+            ...(args.status !== undefined ? { status: args.status } : {}),
+            ...(args.priority !== undefined ? { priority: args.priority } : {}),
+            ...(args.tags !== undefined ? { tags: args.tags } : {}),
+            ...(args.subtasks !== undefined
+              ? { subtasks: args.subtasks.map((content: string) => ({ content, status: "pending" as const })) }
+              : {}),
+            by: `hive_board_create:${caller ?? "session"}`,
+          })
+          // NEVER assume the module cannot refuse. The original's previous
+          // version asserted createIdea "returns TransitionOk unconditionally",
+          // and that belief put an in_progress un-owned item on disk (WI-065).
+          // The module is the guard, and it can say no.
+          if (!result.ok) return `Refused (${result.reason}): ${result.detail}`
+          const it = result.item
+          // Advisory, unconditional, and NOT a verdict — see the tombstone above
+          // for why the threshold check it replaced was removed.
+          const nearNote = formatNearest(
+            nearestItems(
+              listItems(directory).filter((x) => x.id !== it.id),
+              it.title,
+              3
+            )
+          )
+          // A COMPLETE RECEIPT. This tool's whole premise is "you don't need to
+          // read the file", so the caller has no other way to confirm what was
+          // stored — every field they supplied must be echoed back, or they are
+          // left unable to verify their own write.
+          return (
+            `Created ${it.id} — stored and verified:\n` +
+            `  title      ${it.title}\n` +
+            `  status     ${it.status} (un-owned — no session is working it yet)\n` +
+            `  priority   ${it.priority}\n` +
+            `  tags       ${it.tags.length > 0 ? it.tags.join(", ") : "(none)"}\n` +
+            `  body       ${it.body.length > 0 ? `${it.body.length} bytes stored` : "(empty — add one with hive_board_respec)"}\n` +
+            `  subtasks   ${it.subtasks.length > 0 ? `${it.subtasks.length} recorded (not editable afterwards)` : "(none)"}\n` +
+            `  history    1 entry — the item's creation, logged to its append-only history\n` +
+            `Next: your coordinator can bind ${it.id} (hive_board_bind) to work it in its own session.` +
+            nearNote
+          )
+        },
+      })
+
+    // ── hive_board_respec ────────────────────────────────────────────────────
+    const respecTool = () =>
+      defineTool({
+        name: "hive_board_respec",
+        description:
+          "Rewrite a work item's spec body. The text you replace is never lost — it is archived automatically and the change is recorded in the item's history, so a reader can see that the spec changed, when, and by whom. " +
+          "Use this rather than editing the file: a hand edit bypasses the board lock (the board viewer writes to the same items) and destroys the previous text permanently, since the board has no version control underneath. " +
+          "Touches the body only — status, ownership, subtasks and the live todo mirror are untouched. " +
+          "Refused if a different session owns the item: once work starts, the spec belongs to the session accumulating decisions in it (the coordinator can demote the item first to make it editable again).",
+        parameters: {
+          id: reqStr("Work item id, e.g. WI-064."),
+          body: reqStr(
+            "The COMPLETE new spec body — this replaces the whole body, it is not a patch, so include everything you want to keep. Markdown. An empty body is refused (that discards a spec rather than revising it); a body identical to the current one is a no-op and records nothing."
+          ),
+        },
+        output: TEXT_OUT,
+        async execute(args, exec) {
+          const { sessionID, caller } = resolveCaller(exec)
+          const id = args.id.trim()
+          const result = await respecItem(directory, id, args.body, {
+            session: sessionID,
+            by: `hive_board_respec:${caller ?? "session"}`,
+          })
+          if (!result.ok) return `Refused (${result.reason}): ${result.detail}`
+          if (result.action === "respec-noop") return `${id}: body is byte-identical to the current spec — no revision recorded.`
+          const revs = listRevisions(directory, id)
+          return (
+            `Revised ${id}'s spec. Previous body archived at .opencode/board/${id}/ ` +
+            `(${revs.length} revision${revs.length === 1 ? "" : "s"} retained; recover with the superseded hash on the transition entry). ` +
+            `spec_hash deliberately NOT re-stamped.`
+          )
+        },
+      })
+
+    // ── hive_board_retitle ───────────────────────────────────────────────────
+    const retitleTool = () =>
+      defineTool({
+        name: "hive_board_retitle",
+        description:
+          "Change a work item's title. Titles are short and imperative — for the spec itself use hive_board_respec. " +
+          "Refused if a different session owns the item (an owned item's title is mirrored from that session).",
+        parameters: {
+          id: reqStr("Work item id, e.g. WI-064."),
+          title: reqStr("The new title, short and imperative. Empty is refused."),
+        },
+        output: TEXT_OUT,
+        async execute(args, exec) {
+          const { sessionID } = resolveCaller(exec)
+          const result = await retitleItem(directory, args.id.trim(), args.title, {
+            session: sessionID,
+            by: "hive_board_retitle",
+          })
+          if (!result.ok) return `Refused (${result.reason}): ${result.detail}`
+          if (result.action === "retitle-noop") return `${args.id.trim()}: title unchanged — no write.`
+          return `Retitled ${result.item.id} to "${result.item.title}".`
+        },
+      })
+
+    // ── hive_board_tag ───────────────────────────────────────────────────────
+    const tagTool = () =>
+      defineTool({
+        name: "hive_board_tag",
+        description:
+          "Add or remove tags on a work item. Pass only what CHANGES — this is a delta, so a concurrent editor's tags are merged rather than overwritten. " +
+          "Works whether or not the item is owned; tags are shared metadata, not part of the spec.",
+        parameters: {
+          id: reqStr("Work item id, e.g. WI-064."),
+          add: {
+            type: "array",
+            items: { type: "string" },
+            description:
+              "Tags to add — only the new ones. Free-form: no controlled vocabulary and no namespacing convention; the common pattern is the project or component name (jellyfetch, hive-board, tooling). Bare tokens: letters, digits, dot, dash, underscore. Adding a tag that is already present is a harmless no-op.",
+          },
+          remove: {
+            type: "array",
+            items: { type: "string" },
+            description:
+              "Tags to remove — only those. Removing an absent tag is a harmless no-op. Naming the same tag in both add and remove is refused rather than guessed.",
+          },
+        },
+        output: TEXT_OUT,
+        async execute(args) {
+          const result = await editItemTags(
+            directory,
+            args.id.trim(),
+            {
+              ...(args.add !== undefined ? { add: args.add } : {}),
+              ...(args.remove !== undefined ? { remove: args.remove } : {}),
+            },
+            { by: "hive_board_tag" }
+          )
+          if (!result.ok) return `Refused (${result.reason}): ${result.detail}`
+          if (result.action === "tags-noop") return `${args.id.trim()}: tags already in that state — no write.`
+          return `${result.item.id} tags: [${result.item.tags.join(", ")}]`
+        },
+      })
+
+    // Register all 8; each disposer is scoped to this service so the tools
+    // unwind together with it. The deny mask on @hive/dsh-evolution
+    // (HIVE_TOOL_NAMES) covers these names; see
+    // packages/evolution/test/tool-gate-sync.test.mjs + this package's
+    // board-tools.test.mjs for both halves of that sync guarantee.
+    const registrations = [
+      listTool(),
+      searchTool(),
+      readTool(),
+      bindTool(),
+      createTool(),
+      respecTool(),
+      retitleTool(),
+      tagTool(),
+    ]
+    const disposers = registrations.map((def) => ctx.tools.register(def))
+    // A cordis effect's body returns the Disposable (a () => void disposer)
+    // that runs when the effect unwinds:
+    ctx.effect(() => () => {
+      for (const d of disposers) d()
     })
   }
 
-  // ── read surface (B1; the locked write surface arrives with the
-  //    transitions module in B2 — tools wrap these from B4) ──────────────────
+  // ── read surface (B1; the locked write surface lives in the lib modules —
+  //    the B4 tools wrap those directly) ───────────────────────────────────────
   boardDir = () => boardDir(this.directory)
   items = () => listItems(this.directory)
   readItem = (id: string) => readItem(this.directory, id)

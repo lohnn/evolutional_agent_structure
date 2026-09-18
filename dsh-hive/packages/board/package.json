@@ -30,10 +30,14 @@
     "@hive/dsh-dream-archive": "workspace:*"
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "^4.0.1"
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-llm": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-tools": "0.1.2-rc.1"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-llm": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-tools": "0.1.2-rc.1",
     "@types/node": "^22.0.0",
     "typescript": "^5.6.0"
   }
