@@ -238,6 +238,25 @@ if (removed > 0) {
 }
 NODE
 
+# Repair profiles scaffolded before the board merge: the kit's patch rows
+# gained the `board` load row (@hive/dsh-tools waits for the board service;
+# six-row profiles leave tools pending forever). Idempotent.
+node - "$PROFILE/cordis.patch.yml" <<'NODE'
+const fs = require("node:fs")
+const path = process.argv[2]
+if (!fs.existsSync(path)) process.exit(0)
+const text = fs.readFileSync(path, "utf8")
+if (text.includes("@hive/dsh-board")) process.exit(0)
+const row = "    - id: board\n      name: '@hive/dsh-board'\n"
+if (!/\n- insert:\n/.test(text)) {
+  fs.writeFileSync(path, `${text.replace(/\s*$/, "\n")}\n- insert:\n${row}`)
+  console.log("[dsh-hive-update] patch: appended board insert block (tools' board service row)")
+} else {
+  fs.writeFileSync(path, text.replace(/\s*$/, "\n") + row)
+  console.log("[dsh-hive-update] patch: appended the board load row (tools' board service row)")
+}
+NODE
+
 # ── install / update: tarball-first, git fallback ───────────────────────────
 # TARBALL mode (default): the kit ships PREBUILT cohort tarballs (packed at
 # release time — dist/ included). The updater copies them beside the
