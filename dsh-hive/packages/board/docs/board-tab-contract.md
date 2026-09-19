@@ -29,7 +29,7 @@ Both memories were true of **different surfaces**:
 |---|---|---|---|
 | **LIVE web profile** | `/root/.dsh/profiles/web` | `link:` symlinks into the monorepo for **all 10 cohort packages** (verified `node_modules/@hive/*` → `projects/evolutional_agent_structure/dsh-hive/packages/*`; only `dsh-web-search-searxng` is versioned) | the git **working tree** (W-084 applies on every reload) |
 | **Kit dist** | `/workspace/web` | tarball cohort (10 `*.tgz`, 2026-09-18) + **dual-mode** `.pnpmfile.cjs` (git **or** tarball siblings; tarball rewrites are ABSOLUTE `file:` paths anchored at the hook's `__dirname`, annotated "verified 2026-09-18, dsh 0.1.6-alpha.2 adoption gate") | other machines via `dsh plugin add` |
-| **Kit updater** | `/root/.dsh/hive-kit/dsh-hive-update.sh` | git-mode specs, **NINE** packages (svcwatch `pre_start` semantics, offline-tolerant) | `~/.dsh/profiles/*` on kit machines |
+| **Kit updater** | `/root/.dsh/hive-kit/dsh-hive-update.sh` | deployed stale copy (`0.1.6-alpha.1`-era, boardless) — the AUTHORED source is `/workspace/projects/evolutional_agent_structure/dsh-hive-dist/dsh-hive-update.sh` (**10 packages**, board included, `DSH_VERSION` default `0.1.6-alpha.2`); deployed kit refresh = coordinator cp from source | `~/.dsh/profiles/*` on kit machines |
 
 Consequences that pin later slices:
 
@@ -346,30 +346,49 @@ curl http://127.0.0.1:3080/                           → 401 unauthorized
 **slice 2** — after its bounce and one page reload. Slice 4 is kit durability only, not
 first visibility. Communicate the early visibility honestly to the user.
 
-### 6b. Kit surface — named slice-4 work items
+### 6b. Kit surface — slice 4 (DONE 2026-09-19, evidence inline)
 
-1. **updater gap**: `/root/.dsh/hive-kit/dsh-hive-update.sh` installs **NINE** packages and
-   `@hive/dsh-board` is **not** among its SPECS/PACKAGES arrays — a kit machine cannot
-   install board via the default git-mode path (its patch row would pend forever). Add
-   `dsh-hive/packages/board` + `@hive/dsh-board` (9→10). Also the script's in-file
-   `DSH_VERSION` default is stale (`0.1.6-alpha.1`) — bump deliberately per its own comment
-   (service TOML env is the single version source; this box's dsh-web TOML pin comment being
-   stale was already known).
-2. `.pnpmfile.cjs` (kit): board rows exist in PKG_PATHS + TARBALLS — **bump the TARBALLS row
-   whenever the board tarball version changes** (W-085). The absolute `file:`-anchored sibling
-   rewrites are intentional (unpacked-tarball relative specs re-anchor to the virtual store —
-   the hook documents it); do not "fix" them back to relative.
-3. Tarball: `pnpm pack` the board package with the new stanza + client file; ship as
-   prebuilt pinned tarball with a **version bump** (recommend 0.1.0: client addition is a new
-   face, and kit version pins must travel with W-085).
-4. Insert rows (`/workspace/web/cordis.patch.yml`): board row exists at the end of the insert
-   region — **no new row**; when rows are ever added, anchor at the end of the insert REGION,
-   never EOF (I-146 history).
-5. **Stale peer pins**: `@hive/dsh-board` (and siblings) pin `@deepseek-ai/dsh-llm` +
-   `@deepseek-ai/dsh-tools` at `0.1.2-rc.1` vs runtime `0.1.6-alpha.2` — named slice-4 item
-   coupled to W-085; do NOT silently bump (coordinator instruction).
+1. **updater gap (boardless NINE → TEN) — FIXED IN SOURCE, deployed copy pending one cp.**
+   The authored kit source `/workspace/projects/evolutional_agent_structure/dsh-hive-dist/dsh-hive-update.sh`
+   already carries board: SPECS/PACKAGES = **10** (`dsh-hive/packages/board` +
+   `@hive/dsh-board`), `DSH_VERSION` default **`0.1.6-alpha.2`** (line ~49), insert-region
+   splice for the board row, log lines "10 packages". The DEPLOYED `/root/.dsh/hive-kit/` copy
+   is older (boardless, `0.1.6-alpha.1`) — refreshing it is a sandbox-escalted cp outside this
+   capability's write scope (workspace-write denies `/root/.dsh/hive-kit`); coordinator one-liner:
+   `cp dsh-hive-dist/{dsh-hive-update.sh,.pnpmfile.cjs,cordis.patch.yml,cordis.yml} /root/.dsh/hive-kit/`.
+2. **W-085 coupling rows — DONE, four edit sites**: `dsh-hive-dist/.pnpmfile.cjs:43`,
+   `dsh-hive-dist/package.json:7` (cohort manifest), the updater's tarball-mode
+   `SPECS` array (`dsh-hive-update.sh:311` — `bash -n` clean), and the live tarball cohort
+   `/workspace/web/.pnpmfile.cjs:43` — all now `hive-dsh-board-0.1.0.tgz`. The
+   absolute `file:`-anchored sibling rewrites stay intentional (unpacked-tarball relative specs
+   re-anchor to the virtual store — hook documents it); do not "fix" them back to relative.
+   Loader row/id unchanged (`board` / `@hive/dsh-board`); `HAS_TARBALLS` probe file name
+   (dream-archive) unaffected.
+3. **Repack + version bump — DONE**: board `0.0.1 → 0.1.0` (`packages/board/package.json`);
+   `pnpm pack` ran the **prepare** client build fresh (tarball `package/client.js` greps
+   `hiveRunningAgents` — the 3E bundle, not a stale ear); tarball audited
+   (`dist/`, `client.js`, `dist/board-build.json`, `package.json` with the full `dsh` stanza +
+   `"files": ["dist","client.js"]`). Shipped `hive-dsh-board-0.1.0.tgz` to
+   `/workspace/web/` AND `dsh-hive-dist/`; both `hive-dsh-board-0.0.1.tgz` copies removed.
+4. **Insert rows** (`/workspace/web/cordis.patch.yml` + `dsh-hive-dist/cordis.patch.yml`):
+   board row sits at the end of the insert region — **no new row**, anchoring unchanged (the
+   updater's splice logic targets that same end-of-region anchor).
+5. **Stale peer pins — OPEN, deliberate**: `@hive/dsh-board` (and siblings) pin
+   `@deepseek-ai/dsh-llm` + `@deepseek-ai/dsh-tools` at `0.1.2-rc.1` vs runtime
+   `0.1.6-alpha.2` — NOT bumped (coordinator instruction; belongs to the version-bump spike
+   WI-044 / WI-063 cutover).
 6. Kit failure-tolerance footguns remain real: a failed `plugin-manager add` sweeps its own
    scaffolding (W-092) and tolerance layers must name their failure cause at WARN (W-087).
+
+### 6c. Coexistence decision — the 4400 viewer STAYS (user decision 2026-09-19, direct)
+
+Slice 5 (retire the standalone 4400 hive-board viewer + its svcwatch TOML) is **CANCELLED**
+by direct user decision. Two read-only surfaces now coexist deliberately over the ONE locked
+write path (the board store under `/workspace/.opencode/board`): the standalone 4400 viewer
+and the dsh-web tab. The 4400 viewer **remains** for as long as the user works through OLD
+ACTIVE WORK ITEMS in the OLD HARNESS. Revisit trigger: a direct future user decision only —
+never an inference from "the tab exists". The capability method file's operating-protocol line
+is amended to match (this amendment is user-authorized).
 
 ## 7. Verification gates (all slices)
 

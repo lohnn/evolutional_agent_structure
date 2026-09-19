@@ -308,7 +308,7 @@ if [ -f "$KIT_TARBALL" ] && [ "${DSH_HIVE_GIT_MODE:-0}" != "1" ]; then
   # rel-spec anchoring against the caller cwd is bypassed by the cd.
   SPECS=(
     file:./hive-dsh-agents-0.0.1.tgz
-    file:./hive-dsh-board-0.0.1.tgz
+    file:./hive-dsh-board-0.1.0.tgz
     file:./hive-dsh-dream-archive-0.0.1.tgz
     file:./hive-dsh-evolution-0.0.1.tgz
     file:./hive-dsh-hivemind-0.0.1.tgz
