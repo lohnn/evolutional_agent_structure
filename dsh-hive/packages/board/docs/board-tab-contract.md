@@ -92,13 +92,17 @@ From `@deepseek-ai/dsh-package-manifest/lib/types/types.d.ts` (0.1.6-alpha.2):
   captured at slice-2's first boot — the string `MissingClientBundleError` no longer appears
   in the 0.1.6-alpha.2 host tree, so the error may have been renamed; the operative gate is
   "boot log is loud, boot warnings are the install check").
-- ⚠ W-040 re-pin: the dream-era URL `/plugins/<pkg>/client.js` is **not** this version's
-  public path (unauthenticated probes 404 it; `/api/plugins/<pkg>/client.js` returned the
-  auth rejection). The bundle route is owned by the **`clientModules` service** ("dsh.client
-  scan + wire composition + bundle route + index injection rows": `graph()`, `clientPath(id)`,
-  `fetchBundle(request)`, `rebuilt(id)`, `onRebuilt(listener)`). Plugins add NO route for
-  their own client — the host serves `exports["./client"]` automatically. Exact browser URL:
-  to be captured from the page in slice 2 (asked, §8).
+- ⚠ W-040 re-pin, **CAPTURED LIVE 2026-09-19 (slice-2 post-bounce)**: the bundle route on
+  the wire is a **batched query form** — `/plugins/?<pkg>/client.js,<pkg>/client.js,…&rev=<hash>`
+  (one request serving every composed entry's client; 59 factories in the live web's batch).
+  The unsuffixed per-file path `/plugins/<pkg>/client.js` still 404s — the dream-era claim was
+  right about the prefix, wrong about the wire shape. Per-entry urls also ride in
+  `window.__DSH_BOOT__ = { rev, entries: [{ id, url }] }`. The route is served behind the
+  cookie fence (curl needs the cookie the `?token=` URL mints); the boot manifest
+  (clientModules.graph) is what builds the batch. Plugins add NO route for their own client —
+  the host serves `exports["./client"]` automatically; openness gate = the entry appears in
+  `__DSH_BOOT__.entries` on a live page. `@hive/dsh-board/client.js` verified IN the live
+  batch (proxy: file bytes + both slot keys served through the batched request).
 
 ### 3.2 Bundle file format (copy verbatim from `packages/berget-usage/client.js`)
 
@@ -278,6 +282,6 @@ first visibility. Communicate the early visibility honestly to the user.
    precedent (§5a) for the slice-2 read-only index route; re-ratify before any interactive or
    richer-data surface ships (slice 3+ re-check).** (c) remains the escalation path if the
    posture ever needs to change.
-2. Capture the browser's exact client-bundle URL (page devtools/network or a cookie-authed
-   curl) to close the W-040 re-pin with the 0.1.6 path shape (nice-to-have; not blocking).
+2. ~~Capture the browser's exact client-bundle URL~~ **DONE 2026-09-19 — captured live;
+   batched `/plugins/?…&rev=<hash>` form, see the W-040 re-pin in §3.1.**
 3. Slice-2 ack (per I-143 rhythm).
