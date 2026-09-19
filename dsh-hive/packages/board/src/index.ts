@@ -31,6 +31,7 @@
 import { Service } from "@deepseek-ai/cordis"
 import z from "@deepseek-ai/schemastery"
 import { defineTool } from "@deepseek-ai/dsh-tools"
+import { readFileSync } from "node:fs"
 import type { ContentBlock } from "@deepseek-ai/dsh-llm"
 
 import {
@@ -795,10 +796,19 @@ export class Board extends Service {
     const queued = rows.filter((it) => it.status === "backlog" || it.status === "todo").sort(byPriorityThenRecency)
     const active = rows.filter((it) => it.status === "in_progress").sort(byRecency)
     const done = all.filter((it) => it.status === "done").sort(byRecency)
+    // WI-062 slice 3: the viewer-parity port consumes FULL items (the old
+    // /api/state payload shipped the same whole records) — the store parse
+    // objects with the read-time problems overlay (the one-boundary normalize
+    // the old data/workitems.ts performed; here the route performs it). The
+    // slice-2 `columns` summaries are UNTOUCHED for compatibility.
+    const fullItems = all.map((it) => ({ ...it, problems: computeProblems(it) }))
     return {
       ok: true as const,
       status,
       generated: nowIso(),
+      // slice 3: the parity engine's BoardState adapter consumes these.
+      workspaceRoot: this.directory,
+      boardBuild: readBoardBuild(),
       counts: {
         total: all.length,
         queued: queued.length,
@@ -810,7 +820,24 @@ export class Board extends Service {
         in_progress: active.map(summarize),
         done: done.map(summarize),
       },
+      items: fullItems,
     }
+  }
+}
+
+/**
+ * The board package's own build stamp (the client bundle writes the same one —
+ * scripts/build-client.ts) — the host side of the I-152 staleness verdict
+ * payload. "unknown" when the stamp file is absent (never asserted fresh —
+ * the same discipline as the client's verdict).
+ */
+function readBoardBuild(): string {
+  try {
+    const raw = readFileSync(new URL("./board-build.json", import.meta.url), "utf8")
+    const parsed = JSON.parse(raw) as { boardBuild?: unknown }
+    return typeof parsed.boardBuild === "string" && parsed.boardBuild !== "" ? parsed.boardBuild : "unknown"
+  } catch {
+    return "unknown"
   }
 }
 

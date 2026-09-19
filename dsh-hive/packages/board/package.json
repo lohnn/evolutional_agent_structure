@@ -22,9 +22,9 @@
     "./package.json": "./package.json"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "prepare": "tsc -p tsconfig.json",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && bun scripts/build-client.ts",
+    "prepare": "tsc -p tsconfig.json && bun scripts/build-client.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.websrc.json",
     "test": "npm run build && node --test"
   },
   "dependencies": {

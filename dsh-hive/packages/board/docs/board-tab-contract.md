@@ -133,6 +133,28 @@ window.__ModuleLoader__.load({
   keys and throws, per the twin's comment).
 - Board's own title-decision (SHADOW-019) rides in this file's code ownership (slice 3).
 
+#### 3.2a Slice 3 — client.js is now GENERATED (viewer-parity port, 2026-09-19)
+
+`client.js` is no longer hand-written: `scripts/build-client.ts` (bun; `npm run build` chains it
+after `tsc`) bundles `websrc/client-main.ts` — the ported 4400 viewer engine (morph/filter/render/
+icon + data modules under `websrc/`, drift-tested byte-true against
+`src/board-viewer/{web,data}` by `test/board-tab-port.test.mjs`) into the SAME classic shape —
+`window.__ModuleLoader__.load({ id: '@hive/dsh-board', factory(require){…} })` — with the
+wrapper as the ONLY React-using code (React from the module table; W-044 holds).
+
+Two build facts pinned here because they were DISCOVERED, not assumed:
+
+- **bun's `format: "iife"` silently DROPS module exports** (`globalName` produced no global
+  assignment on bun 1.3.14 — the bundle ended `})();` with no `__BOARD_ENGINE =`). The engine
+  therefore crosses to the wrapper via an explicit side-effect assignment:
+  `globalThis.__BOARD_ENGINE = { CSS, CSS_OVERRIDES, SHELL_MARKUP, ICON_SVG, attachEngine }`
+  in `websrc/client-main.ts` (no `export` statements at all). The emitted guard asserts
+  `__BOARD_ENGINE=` exists, so a silent drop can never ship again.
+- The build stamps `__BOARD_BUILD_SHA__` via `define` (monorepo `git rev-parse --short HEAD`
+  + `-dirty` — the I-152 staleness-verdict client side) and writes `dist/board-build.json`
+  (the host side, read per payload by `tabIndex()`); the badge compares the two and the
+  three-way verdict (match/mismatch/**unknown-never-fresh**) is ported verbatim.
+
 ### 3.3 Slots — live-verified tree (coordinator's page-backed pull)
 
 - `main` — kind **keyed**, scope root; registration `{ name: 'main', key: string(required) }`;
@@ -182,7 +204,13 @@ window.__ModuleLoader__.load({
   - slice 2: `GET /api/hive-board/index` → JSON of `board.items()` shaped for the tab
     (status/priority/owner/recency/tags/title/spec size; include `computeProblems` flags and
     optional `status=live|all|<exact>` mirroring `STATUS_FILTERS`).
-  - slice 3: `GET /api/hive-board/item/:id` → `readItem` + `revisions` (+`readRevision` on
+  - slice 3 (DONE — payload extension, legacy keys untouched): the same route now ALSO carries
+    `items: full store records + problems` (the whole board — the parity engine's feed),
+    `workspaceRoot` (the service's board directory) and `boardBuild` (the package's own build
+    stamp from `dist/board-build.json`, `"unknown"` when absent — never asserted fresh).
+    `columns`/`counts`/`ok`/`status`/`generated` keep their slice-2 shapes; the 15-key row
+    contract of test 3 is unchanged.
+  - slice 3b (NEXT): `GET /api/hive-board/item/:id` → `readItem` + `revisions` (+`readRevision` on
     demand) + invariants + recency; byte-budgeted like `readItems`.
 - The bundle route is NOT ours (clientModules owns it, §3.1).
 

@@ -183,3 +183,47 @@ test("the handler stays ok-shaped when the payload builder throws", async () => 
   assert.ok(body.ok === true || body.ok === false)
   if (body.ok === false) assert.equal(typeof body.error, "string")
 })
+
+// ── slice-3 (WI-062): the viewer-parity extension of the same payload ─────────
+// The parity engine consumes FULL records (the old /api/state shipped the same
+// whole tokens); `columns` summaries above are UNTOUCHED for compatibility.
+
+test("tabIndex — slice-3: items[] carries full store records with problems overlay", () => {
+  const payload = board.tabIndex("all")
+  assert.ok(Array.isArray(payload.items), "items is an array")
+  assert.equal(payload.items.length, payload.counts.total, "items carries the whole board")
+  const first = payload.items[0]
+  assert.ok(first, "board non-empty")
+  for (const key of [
+    "id", "title", "status", "priority", "owner_session", "group_id", "origin",
+    "paused", "spec_hash", "released_sessions", "dream_id", "artifacts",
+    "created", "updated", "tags", "done_without_dream", "subtasks",
+    "todo_mirror", "todo_mirror_updated", "transitions", "body", "problems",
+  ]) {
+    assert.ok(key in first, `items row missing "${key}"`)
+  }
+  assert.ok(Array.isArray(first.problems), "problems attached per item")
+  assert.ok(Array.isArray(first.transitions) && first.transitions.every((t) => typeof t.at === "string" && typeof t.to === "string"), "transitions carry at/to (recency ordering + future item reader)")
+  // every summary row resolved by a full record (single source of truth)
+  for (const col of ["queued", "in_progress", "done"]) {
+    for (const row of payload.columns[col]) {
+      assert.ok(payload.items.some((it) => it.id === row.id), `full record present for column row ${row.id}`)
+    }
+  }
+})
+
+test("tabIndex — slice-3: boardBuild stamp + workspaceRoot present, never empty", () => {
+  const payload = board.tabIndex()
+  assert.equal(typeof payload.boardBuild, "string")
+  assert.ok(payload.boardBuild.length > 0)
+  assert.ok(payload.boardBuild === "unknown" || /^[0-9a-f]+(?:-dirty)?$/.test(payload.boardBuild), `build stamp shape: ${payload.boardBuild}`)
+  assert.equal(typeof payload.workspaceRoot, "string")
+  assert.ok(payload.workspaceRoot.length > 0)
+  // when the stamp file exists it must agree with the payload verbatim
+  try {
+    const stamp = JSON.parse(fs.readFileSync(new URL("../dist/board-build.json", import.meta.url), "utf8"))
+    assert.equal(payload.boardBuild, stamp.boardBuild)
+  } catch {
+    assert.equal(payload.boardBuild, "unknown", "no stamp file ⇒ payload says unknown, never a guess (I-152)")
+  }
+})
