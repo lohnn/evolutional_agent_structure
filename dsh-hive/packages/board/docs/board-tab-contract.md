@@ -210,8 +210,25 @@ Two build facts pinned here because they were DISCOVERED, not assumed:
     stamp from `dist/board-build.json`, `"unknown"` when absent — never asserted fresh).
     `columns`/`counts`/`ok`/`status`/`generated` keep their slice-2 shapes; the 15-key row
     contract of test 3 is unchanged.
-  - slice 3b (NEXT): `GET /api/hive-board/item/:id` → `readItem` + `revisions` (+`readRevision` on
-    demand) + invariants + recency; byte-budgeted like `readItems`.
+  - slice 3b (DONE — shipped as exact + query param, not `:id` path): `GET /api/hive-board/item?id=WI-…`
+    → `{ ok, generated, boardBuild, id, item: <full store record + problems + recency + body>,
+    truncated, bodyBytes, historyTotal }`. Only the `exact` route kind is in-cohort verified, so
+    the path-param shape gave way to `?id=` (the `prefix` kind has no twin precedent — recorded
+    here as the reason, not an oversight). Budgets follow the readItems discipline: spec body
+    capped at 10k chars with `truncated` + full `bodyBytes` (nothing silent), history capped at
+    50 with `historyTotal` (the record keeps everything — display cap only); unknown / malformed
+    ids answer `ok:false` + `missing:[id]`, never a crash; malformed ids are refused at the
+    handler by an id-shape guard (upstream-safe). The title rides RAW — the SHADOW-019
+    presentation (truncation + the dim "(raw title)" chip) lives client-side in
+    `websrc/title-pass.ts`, one place, with the revisit trigger named in its header (dsh
+    exposing a session-title surface).
+  - The CLIENT slice-3b consumers (all wrapped in the same client.js, guard-tested by emitted
+    markers): `websrc/icon-driver.ts` (`startFaviconDriver` — APPLY-LEVEL, panel-independent,
+    30 s cadence via 'timer', board-counts derivation with the session-channel literal-and-named
+    STUB `attachSessionSurface`) and `websrc/item-drawer.ts` (click-delegation on the cards'
+    existing `data-key="wi:…"` — zero ported-render bytes changed; anchors to document.body so
+    fixed positioning escapes transformed panel ancestors; dead `Open ↗` links route into the
+    drawer instead of soft-navigating the shell away).
 - The bundle route is NOT ours (clientModules owns it, §3.1).
 
 ## 5. AUTH + EXPOSURE — new pin, decision needed (load-bearing for slice 2)

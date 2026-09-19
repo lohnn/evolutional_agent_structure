@@ -15,6 +15,8 @@
  */
 import { CSS } from "./render.js"
 import { attachEngine } from "./tab-engine.js"
+import { DRAWER_CSS } from "./item-drawer.js"
+import { startFaviconDriver, attachSessionSurface } from "./icon-driver.js"
 
 /**
  * Shell-safety overrides for the ported viewer CSS. Authored (slice 3), not a
@@ -68,12 +70,19 @@ function iconSvg(size: number): string {
  * Engine handoff — SIDE-EFFECT module (no exports; bun's iife target silently
  * DROPS module exports, so the API must cross to the classic wrapper via an
  * explicit global assignment — the wrapper's E.CSS/E.ICON_SVG/E.SHELL_MARKUP/
- * E.attachEngine reads depend on exactly this line).
+ * E.attachEngine/E.startFaviconDriver reads depend on exactly this line).
+ * DRAWER_CSS (slice 3b) rides inside the same override block so the style tag
+ * stays ONE effect (the module system reads the data-plugin-css attribute).
  */
 ;(globalThis as unknown as Record<string, unknown>).__BOARD_ENGINE = {
   CSS,
-  CSS_OVERRIDES,
+  CSS_OVERRIDES: CSS_OVERRIDES + DRAWER_CSS,
   SHELL_MARKUP,
   ICON_SVG: iconSvg,
   attachEngine,
+  startFaviconDriver,
+  // Named, inert — carried on the global so the stub SURVIVES the bundle (an
+  // uncalled module-local would be tree-shaken away). Nothing calls it until
+  // dsh ships a session surface; see icon-driver.ts for the wiring contract.
+  attachSessionSurface,
 }

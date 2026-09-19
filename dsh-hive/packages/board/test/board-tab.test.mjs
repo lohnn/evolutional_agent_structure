@@ -227,3 +227,109 @@ test("tabIndex — slice-3: boardBuild stamp + workspaceRoot present, never empt
     assert.equal(payload.boardBuild, "unknown", "no stamp file ⇒ payload says unknown, never a guess (I-152)")
   }
 })
+
+// ── slice 3b (WI-062): the item depth route — read-only, budgeted, raw title ──
+
+test("tabItem route — registers /api/hive-board/item (exact) and serves a full record", async () => {
+  const routes = []
+  const fake = { register: (route) => { routes.push(route); return () => {} } }
+  const routeCtx = mkCtx()
+  const provide = typeof routeCtx.provide === "function"
+    ? routeCtx.provide.bind(routeCtx)
+    : (routeCtx.reflect && typeof routeCtx.reflect.provide === "function" ? routeCtx.reflect.provide.bind(routeCtx.reflect) : null)
+  provide("webServer", fake)
+  routeCtx.plugin(Board, { directory: realCopy })
+  await new Promise((r) => setTimeout(r, 100))
+  const route = routes.find((r) => r.path === "/api/hive-board/item")
+  assert.ok(route, "item route registers beside the index route")
+  assert.equal(route.kind, "exact")
+
+  const all = board.items()
+  const itemId = all.find((it) => it.id && all.length)?.id ?? all[0]?.id
+  assert.ok(itemId, "board copy non-empty")
+  const chunks = []
+  await route.handler({ url: `/api/hive-board/item?id=${encodeURIComponent(itemId)}` }, {
+    writeHead: () => {},
+    end: (c) => chunks.push(c),
+  })
+  const body = JSON.parse(chunks.join(""))
+  assert.equal(body.ok, true)
+  assert.equal(body.id, itemId)
+  const item = body.item
+  assert.ok(item, "item record present")
+  assert.equal(item.title, all.find((it) => it.id === itemId).title, "title rides RAW — the server never massages titles (SHADOW-019: presentation is the client's decision)")
+  assert.equal(typeof item.body, "string")
+  assert.ok(Array.isArray(item.problems), "problems overlay attached")
+  assert.ok(Array.isArray(item.transitions) && item.transitions.length > 0, "history (transitions) carried")
+  assert.ok(typeof item.recency === "string" && item.recency.length > 0, "recency present (strings — the shared recency key)")
+  assert.equal(typeof body.bodyBytes, "number", "full byte count reported even when un-truncated")
+  assert.equal(body.truncated, false, "small item is NOT flagged truncated")
+  assert.ok("boardBuild" in body, "build stamp rides the item payload too")
+})
+
+test("tabItem route — unknown id answers ok:false with the id named, never a crash", async () => {
+  const routes = []
+  const fake = { register: (route) => { routes.push(route); return () => {} } }
+  const routeCtx = mkCtx()
+  const provide = typeof routeCtx.provide === "function"
+    ? routeCtx.provide.bind(routeCtx)
+    : (routeCtx.reflect && typeof routeCtx.reflect.provide === "function" ? routeCtx.reflect.provide.bind(routeCtx.reflect) : null)
+  provide("webServer", fake)
+  routeCtx.plugin(Board, { directory: realCopy })
+  await new Promise((r) => setTimeout(r, 100))
+  const route = routes.find((r) => r.path === "/api/hive-board/item")
+  const chunks = []
+  await route.handler({ url: "/api/hive-board/item?id=WI-99999" }, {
+    writeHead: () => {},
+    end: (c) => chunks.push(c),
+  })
+  const body = JSON.parse(chunks.join(""))
+  assert.equal(body.ok, false)
+  assert.deepEqual(body.missing, ["WI-99999"], "unknown ids are ALWAYS reported by name (readItems discipline)")
+})
+
+test("tabItem route — malformed ids refused at the handler, upstream-safe", async () => {
+  const routes = []
+  const fake = { register: (route) => { routes.push(route); return () => {} } }
+  const routeCtx = mkCtx()
+  const provide = typeof routeCtx.provide === "function"
+    ? routeCtx.provide.bind(routeCtx)
+    : (routeCtx.reflect && typeof routeCtx.reflect.provide === "function" ? routeCtx.reflect.provide.bind(routeCtx.reflect) : null)
+  provide("webServer", fake)
+  routeCtx.plugin(Board, { directory: realCopy })
+  await new Promise((r) => setTimeout(r, 100))
+  const route = routes.find((r) => r.path === "/api/hive-board/item")
+  for (const raw of ["/api/hive-board/item", "/api/hive-board/item?id=", "/api/hive-board/item?id=../escape", "/api/hive-board/item?id=WI-9999%20extra"]) {
+    const chunks = []
+    await route.handler({ url: raw }, { writeHead: () => {}, end: (c) => chunks.push(c) })
+    const body = JSON.parse(chunks.join(""))
+    assert.equal(body.ok, false, `malformed id refused: ${raw}`)
+    assert.equal(typeof body.error, "string")
+  }
+})
+
+test("tabItem — spec body budget: truncated flag + full byte count, boards file untouched", async () => {
+  // fixture board: one real WI copied shape, body padded far past the budget
+  const fixtureBoard = fs.mkdtempSync(path.join(os.tmpdir(), "board-tab-item-"))
+  const dir = path.join(fixtureBoard, ".opencode", "board")
+  fs.mkdirSync(dir, { recursive: true })
+  const longBody = "## Long spec\n\n" + ("lorem ipsum dolor sit amet. ".repeat(900)) // ~27k chars
+  fs.writeFileSync(
+    path.join(dir, "WI-9001.md"),
+    `---\nid: WI-9001\ntitle: "budget fixture item"\nstatus: todo\nowner_session: null\ngroup_id: null\norigin: session-first\npaused: false\nspec_hash: null\nreleased_sessions: []\ndream_id: null\nartifacts: []\ncreated: 2026-09-19\nupdated: 2026-09-19\npriority: low\ntags: []\ndone_without_dream: false\nsubtasks: []\ntodo_mirror_updated: null\ntodo_mirror: []\ntransitions:\n  - { at: 2026-09-19T00:00:00Z, from: null, to: todo, by: fixture }\n---\n${longBody}\n`,
+  )
+  const ctx2 = mkCtx()
+  // NOTE: the service's `directory` option is the WORKSPACE ROOT — it reads
+  // <root>/.opencode/board (the realCopy tests pass the tmp root the same way).
+  ctx2.plugin(Board, { directory: fixtureBoard })
+  await new Promise((r) => setTimeout(r, 100))
+  const payload = ctx2.board.tabItem("WI-9001")
+  assert.equal(payload.ok, true)
+  const full = ctx2.board.items().find((i) => i.id === "WI-9001")
+  assert.ok(full, "fixture parsed by the store")
+  assert.equal(payload.truncated, true, "oversized body IS flagged")
+  assert.equal(payload.bodyBytes, full.body.length, "full byte count matches the store's own view")
+  assert.equal(payload.item.body.length, 10_000, "body rides the display cap (10k)")
+  assert.equal(payload.item.body, full.body.slice(0, 10_000), "capped body is a clean prefix of the real spec")
+  assert.ok(fs.readFileSync(path.join(dir, "WI-9001.md"), "utf8").includes(longBody), "the board file was never written or trimmed")
+})

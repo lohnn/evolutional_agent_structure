@@ -127,11 +127,21 @@ test("emitted client.js: no server-only import forms survive (I-192, byte-level)
   assert.equal(requires.length, 1, "exactly one require — the wrapper's React table read")
 })
 
-test("emitted client.js: carries the slice-3 surface markers", () => {
+test("emitted client.js: carries the slice-3 + 3b surface markers", () => {
   assert.ok(CLIENT.includes("__ModuleLoader__.load"), "classic loader registration present")
   assert.match(CLIENT, /__BOARD_ENGINE=/, "engine global assignment present")
   assert.ok(CLIENT.includes("build-badge"), "staleness badge markup present (I-152)")
   assert.ok(CLIENT.includes("filter-corpus"), "filter corpus island present (WI-084)")
   assert.ok(CLIENT.includes("data-col-toggle"), "column collapse strip present")
   assert.ok(CLIENT.includes("hive-board"), "board slot keys present")
+  // slice 3b markers (the favicon driver, the drawer, the title pass)
+  assert.ok(CLIENT.includes("startFaviconDriver"), "favicon driver exported through the engine global")
+  assert.ok(CLIENT.includes("hvb-favicon"), "favicon link id present")
+  assert.ok(CLIENT.includes("attachSessionSurface"), "named inert session-surface STUB present (not invented APIs, not absent)")
+  assert.ok(CLIENT.includes("/api/hive-board/item"), "item depth route url present")
+  assert.ok(CLIENT.includes("hvb-drawer"), "drawer mount present")
+  assert.ok(CLIENT.includes("raw-title-chip"), "SHADOW-019 raw title chip present")
+  // the drawer + scrim must anchor to document.body (fixed positioning must
+  // escape transformed panel ancestors) — asserted as a structural string
+  assert.ok(CLIENT.includes("document.body.appendChild"), "drawer body-mount present")
 })

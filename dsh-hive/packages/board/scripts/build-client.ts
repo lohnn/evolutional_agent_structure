@@ -113,18 +113,24 @@ const wrapper = `;window.__ModuleLoader__.load({
             }),
           );
         });
-        console.log('[@hive/dsh-board] client plugin applied (viewer-parity read-only board)');
+        // Favicon driver (slice 3b) — APPLY-LEVEL on purpose: it must run at
+        // plugin boot, BEFORE and INDEPENDENT of any board-panel mount, so the
+        // browser tab's icon reflects board truth while a different panel is
+        // active. Panel-level wiring (slots) above stays untouched.
+        E.startFaviconDriver(ctx);
+        console.log('[@hive/dsh-board] client plugin applied (viewer-parity read-only board + favicon driver + item drawer)');
       },
     };
   },
 });
 `
 
-const banner = `// @hive/dsh-board — GENERATED client bundle (WI-062 slice 3). DO NOT EDIT BY HAND.
+const banner = `// @hive/dsh-board — GENERATED client bundle (WI-062 slice 3+3b). DO NOT EDIT BY HAND.
 // Build: dsh-hive/packages/board/scripts/build-client.ts (bun) — bundles
-// websrc/client-main.ts (the ported 4400 viewer engine + the tab engine) into
-// the twin classic shape; the wrapper below is the only React-using code and
-// takes React from the loader's runtime module table (W-044).
+// websrc/client-main.ts (the ported 4400 viewer engine + the tab engine + the
+// favicon driver + the item drawer) into the twin classic shape; the wrapper
+// below is the only React-using code and takes React from the loader's runtime
+// module table (W-044).
 // Build stamp (both sides of the I-152 staleness verdict): ${sha}
 `
 

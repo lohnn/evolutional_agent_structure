@@ -732,6 +732,42 @@ export class Board extends Service {
         "board tab index route",
       )
       this.ctx.logger?.info?.("[board] tab index route registered at /api/hive-board/index")
+
+      // Slice 3b: the item depth view. Exact-kind + query param on purpose:
+      // only `exact` is in-cohort verified; the `prefix` kind exists in the
+      // catalog but has no twin precedent — the client (websrc/item-drawer.ts)
+      // calls /api/hive-board/item?id=WI-… Same auth posture, same WAIT.
+      serverCtx.effect(
+        () =>
+          webServer.register({
+            kind: "exact",
+            path: "/api/hive-board/item",
+            handler: async (req: unknown, res: WebLikeResponse) => {
+              let payload: unknown
+              let itemId = ""
+              try {
+                const reqAny = req as { url?: unknown } | null
+                const raw = typeof reqAny?.url === "string" ? reqAny.url : ""
+ itemId = new URLSearchParams(raw.includes("?") ? raw.slice(raw.indexOf("?") + 1) : "").get("id")?.trim() ?? ""
+                itemId = decodeURIComponent(itemId)
+                if (!itemId.match(/^[A-Za-z0-9._-]+$/)) {
+                  payload = { ok: false, error: "missing or malformed id query parameter", missing: itemId ? [itemId] : [] }
+                } else {
+                  payload = this.tabItem(itemId)
+                }
+              } catch (e) {
+                payload = { ok: false, error: String((e as Error)?.message ?? e), missing: itemId ? [itemId] : [] }
+              }
+              res.writeHead(200, {
+                "content-type": "application/json; charset=utf-8",
+                "cache-control": "no-store",
+              })
+              res.end(JSON.stringify(payload))
+            },
+          }),
+        "board tab item route",
+      )
+      this.ctx.logger?.info?.("[board] tab item route registered at /api/hive-board/item")
     })
   }
 
@@ -823,7 +859,50 @@ export class Board extends Service {
       items: fullItems,
     }
   }
+
+  /**
+   * Slice 3b — the item depth view's payload (GET /api/hive-board/item?id=…).
+   * Read-only, over the SAME single parse pass as tabIndex (this.items()); the
+   * budget discipline follows readItems: caps are explicit — the spec body is
+   * capped at ITEM_BODY_BUDGET chars with `truncated` + full `bodyBytes`, the
+   * transition history at HISTORY_CAP with `historyTotal` — nothing is dropped
+   * silently, and the board file is never written (one code path, read only).
+   * The title rides RAW — presentation (SHADOW-019 truncation) is the CLIENT's
+   * decision, the server never massages titles.
+   */
+  tabItem(itemId: string): unknown {
+    const all = this.items()
+    const found = all.find((it) => it.id === itemId || it.id.toLowerCase() === itemId.toLowerCase())
+    if (!found) {
+      return { ok: false as const, error: `no such work item on this board`, missing: [itemId] }
+    }
+    const bodyFull = found.body
+    const body = bodyFull.length > ITEM_BODY_BUDGET ? bodyFull.slice(0, ITEM_BODY_BUDGET) : bodyFull
+    const transitionsFull = Array.isArray(found.transitions) ? found.transitions : []
+    if (transitionsFull.length > HISTORY_CAP) {
+      this.ctx.logger?.info?.(`[board] item payload: history shown for ${found.id} capped at ${HISTORY_CAP} of ${transitionsFull.length}`)
+    }
+    return {
+      ok: true as const,
+      generated: nowIso(),
+      boardBuild: readBoardBuild(),
+      id: found.id,
+      item: { ...found, body, problems: computeProblems(found), transitions: transitionsFull.slice(0, HISTORY_CAP), recency: recencyKey(found) },
+      truncated: body.length < bodyFull.length,
+      bodyBytes: bodyFull.length,
+      historyTotal: transitionsFull.length,
+    }
+  }
 }
+
+/**
+ * Slice-3b payload budgets (readItems discipline, scaled for a drawer): the
+ * spec body of a real WI can be tens of thousands of chars; the drawer shows
+ * the head and names the cap. History is a display cap only — the record keeps
+ * every transition.
+ */
+const ITEM_BODY_BUDGET = 10_000
+const HISTORY_CAP = 50
 
 /**
  * The board package's own build stamp (the client bundle writes the same one —

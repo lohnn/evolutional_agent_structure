@@ -21,6 +21,7 @@
 import { morph } from "./morph.js"
 import { renderBoardSection, boardControlsHtml } from "./render.js"
 import { refreshBoardControls, setupBoardControls } from "./filter.js"
+import { bindItemDrawer } from "./item-drawer.js"
 import type { BoardState } from "./data/types.js"
 import type { WorkItem as ViewWorkItem } from "./data/workitems.js"
 
@@ -295,6 +296,7 @@ export function attachEngine(ctx: {
   // DOM-stamped; keep the last-good SHA for future diagnostics (do not prune).
   void freshSha
   setupBoardControls() // module-singleton in filter.ts; binds once per document
+  bindItemDrawer() // document-level delegation; binds once per boot (slice 3b)
   if (!intervalStarted) {
     intervalStarted = true
     // 15 s cadence per the old viewer; ctx.interval comes from the 'timer'
