@@ -183,6 +183,16 @@ export interface BoardState {
    * build stamp. "unknown" is never asserted fresh (I-152, ported verbatim).
    */
   buildSha: string
+  /**
+   * slice 3D (DSH ADAPTATION, authored field — no upstream counterpart): the
+   * live-activity feed from the host half — `{ runningAgents, sampledAt }`
+   * where runningAgents counts agents-registry rows with status "running"
+   * (LIVE-only registry: dissolved sessions are absent, staleness impossible
+   * by construction). Marks + favicon derive from THIS, never from lane
+   * counts. May be undefined on older payloads — unknown activity is never
+   * asserted busy.
+   */
+  activity?: { runningAgents?: number; runningJobs?: number; sampledAt?: string; feedAvailable?: boolean }
   /** GUI base for ?session= deep links (config knob, needed at render time). */
   guiBaseUrl: string
   capabilities: Capability[]

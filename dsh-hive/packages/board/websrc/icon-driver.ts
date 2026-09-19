@@ -1,30 +1,41 @@
 /**
- * WI-062 SLICE 3B — the favicon driver (USER REQUEST): the icon identity of
- * the 4400 viewer, as an APPLY-LEVEL effect. apply() is panel-independent —
- * this runs at PLUGIN BOOT, not at board-tab mount, so the browser tab reflects
- * board truth while the user works in a different panel (acceptance A).
+ * WI-062 slices 3B/3D — the icon identity driver: favicon + panel-head mark.
  *
- * ── What is ported vs substituted ─────────────────────────────────────────────
- * The RENDERER is the ported one (websrc/icon.ts — the reduced mark/data-URI
- * machinery, byte-ported): faviconHref(icon) — full percent-encoding, correct.
- * The DERIVATION is substituted: collectDeriveIconState (icon.ts, drift-locked)
- * reads ONLY session channels (actionRequired / sessionStatus / dreams) — every
- * one of those is a dead data source under dsh (no session surface, I-116), so
- * porting the derivation verbatim would weld the icon to "quiet" forever.
- * The tab's substitute derives from what IS true under dsh — board lane counts:
- *   session:  "intervene" when any actionRequired entry flags (STUB — structurally
- *             impossible today, wired for the day dsh exposes a session surface),
- *             "active" while item has in_progress work, else "quiet";
- *   dreaming: false — no dream surface under dsh (true only via the same future hook);
- *   count:    in-progress item count (what the top channel is showing — the
- *             ported channel contract).
- * document.title / <meta theme-color> are NOT touched: the dsh shell owns
- * <head> identity — hijacking the title from a plugin is exactly the kind of
- * head-fighting the coordinator's brief calls out; the count channel therefore
- * rides the tooltip instead of the tab strip title (documented degradation).
- * If the shell fights the injected <link rel=icon> (thrash/CSP), the symptom
- * gets REPORTED and the driver falls back to the in-panel badge (which the
- * morph already keeps fresh) rather than fighting back.
+ * The mark renderer is the ported one (websrc/icon.ts — reduced mark / full
+ * mark, byte-ported); the DERIVATION is the slice-3D resolution of the 3B
+ * session-channel problem: the derivation now runs on the HOST's live-activity
+ * feed instead of any proxy:
+ *
+ *   ⌐ payload.activity (index route): { runningAgents, sampledAt }
+ *     — runningAgents = agents-registry rows whose status is "running".
+ *       The agents registry is process-local and LIVE-only (disposed agents
+ *       are ABSENT from list()), so dissolved sessions cannot stale the
+ *       signal by construction. `AgentStatus = 'idle' | 'running'`
+ *       (@deepseek-ai/dsh-agent) — the registry knows each agent's phase.
+ *   ⌐ deriveBoardIcon(activity): runningAgents > 0 ⇒ the `active` channel
+ *     (breathe), else `quiet` (static). The in-progress-ITEMS proxy is GONE —
+ *     in_progress items outlive their sessions for weeks; "bound" never meant
+ *     "busy" (the user's own words: only if a session is ACTIVELY doing
+ *     things, not inactive-waiting).
+ *
+ * KNOWN EDGE (accepted, revisit via WI-063): an agent blocked awaiting a user
+ * answer mid-turn still reports `running` — expect a breathing icon while it
+ * WAITS FOR YOU; the ask/permission surface can distinguish this later.
+ *
+ * Poll lag (documented, honest): the sampled stamp rides the index payload;
+ * mark + favicon may trail reality by one poll cycle (15 s panel / 30 s
+ * driver). No stale timestamp is trusted; the sample time is shown in the
+ * mark tooltip ("as of" stamp — slice 3D).
+ *
+ * apply()-level: this runs at PLUGIN BOOT, not at board-tab mount, so the
+ * browser tab reflects board truth while the user works in a different panel.
+ * document.title / theme-color stay shell-owned; if the shell ever fights the
+ * favicon <link>, the symptom gets reported and the in-panel badge remains.
+ *
+ * The 3B stub `attachSessionSurface` is RESOLVED (removed), not renamed: the
+ * session surface it was waiting for shipped as payload.activity — the real
+ * feed flows through the same poll. The minify-guard asserts the FEED's
+ * surviving property names ("runningAgents"/"activity") instead of a stub.
  */
 import { faviconHref, fullMarkSvg } from "./icon.js"
 import { adapterState, INDEX_URL, type BoardIndexPayload } from "./tab-engine.js"
@@ -33,32 +44,39 @@ import type { IconState } from "./icon.js"
 const FAVICON_POLL_MS = 30_000
 const LINK_ID = "hvb-favicon"
 const LINK_ATTR = "data-plugin-favicon"
+const PANEL_MARK_SIZE = 34 // shell-safe density override lives in CSS_OVERRIDES
 
-/** Board-truth derivation (see module comment for the session→counts substitution). */
-export function deriveBoardIcon(items: { status: string; paused: boolean }[], actionRequired: Record<string, { awaitingQuestion: boolean; awaitingPermission: boolean }>): IconState {
-  let active = 0
-  for (const it of items) {
-    if (it.status === "in_progress" && !it.paused) active++
-  }
-  let intervening = 0
-  for (const key of Object.keys(actionRequired)) {
-    const ar = actionRequired[key]
-    if (ar && (ar.awaitingQuestion || ar.awaitingPermission)) intervening++
-  }
-  return intervening > 0
-    ? { session: "intervene", dreaming: false, count: intervening }
-    : active > 0
-      ? { session: "active", dreaming: false, count: active }
-      : { session: "quiet", dreaming: false, count: 0 }
+/** The slice-3D shape the index route ships (index payload GROWS this field). */
+export interface Activity {
+  runningAgents?: number
+  runningJobs?: number
+  sampledAt?: string
+  feedAvailable?: boolean
+}
+
+/**
+ * The one derivation both consumers share. runningAgents > 0 ⇒ the `active`
+ * channel (breathe), count = how many (the ported channel contract: the count
+ * channel shows what the top channel is showing). Anything non-numeric/absent
+ * ⇒ quiet — unknown activity is NEVER asserted busy.
+ */
+export function deriveBoardIcon(activity: Activity | undefined): IconState {
+  const running =
+    typeof activity?.runningAgents === "number" && isFinite(activity.runningAgents) && activity.runningAgents > 0
+      ? Math.floor(activity.runningAgents)
+      : 0
+  return running > 0
+    ? { session: "active", dreaming: false, count: running }
+    : { session: "quiet", dreaming: false, count: 0 }
 }
 
 let bound = false
 let lastHref = ""
 
-function stampFavicon(items: { status: string; paused: boolean }[], actionRequired: Record<string, { awaitingQuestion: boolean; awaitingPermission: boolean }>): void {
+function stampFavicon(activity: Activity | undefined): void {
   const link = document.getElementById(LINK_ID) as HTMLLinkElement | null
   if (!link) return // disposer ran (plugin unmounted) — keep quiet
-  const href = faviconHref(deriveBoardIcon(items, actionRequired))
+  const href = faviconHref(deriveBoardIcon(activity))
   if (href === lastHref) return // same href re-decode/rasterise churn guard (ported discipline)
   lastHref = href
   link.setAttribute("href", href)
@@ -71,8 +89,9 @@ async function poll(): Promise<void> {
     const payload = (await res.json()) as BoardIndexPayload
     if (!payload || typeof payload !== "object" || payload.ok !== true) return
     const state = adapterState(payload)
-    stampFavicon(state.items, state.actionRequired)
-    stampPanelMark(state.items, state.actionRequired) // marks stay agreeable even pre-engine-mount
+    const activity = state.activity
+    stampFavicon(activity)
+    stampPanelMark(activity)
   } catch {
     // transient — the next tick retries; the tab's previous icon persists
   }
@@ -82,47 +101,31 @@ function refreshIfVisible(): void {
   if (!document.hidden) void poll()
 }
 
-// ── the panel header mark (slice 3C) ─────────────────────────────────────────
-// SAME mapping as the favicon (deriveBoardIcon) — mark, favicon and board
-// truth can never disagree by construction. The mark is the ported FULL
-// drawing (not the 16px favicon): mesh nodes breathe via the ported
-// mark-breathe keyframes, gated by prefers-reduced-motion in the ported CSS
-// (motion stays opt-in, first-class). idPrefix "hvbp" namespaces its internal
-// clip ids away from everything else; the favicon never collides by
-// construction (data: URI = isolated document).
+// ── the panel header mark (slice 3C, derivation now slice 3D) ─────────────────
+// SAME mapping as the favicon (deriveBoardIcon) — mark, favicon and the live
+// agents truth can never disagree. The mark is the ported FULL drawing: mesh
+// nodes breathe via the ported mark-breathe keyframes, gated by
+// prefers-reduced-motion in the ported CSS. idPrefix "hvbp" namespaces its
+// clip ids; the favicon never collides (data: URI = isolated document).
 
-const PANEL_MARK_SIZE = 34 // shell-safe density override lives in CSS_OVERRIDES
 let lastPanelState = ""
 
 /** Stamp the active panel's top-left mark (no-op when no panel is mounted). */
-export function stampPanelMark(
-  items: { status: string; paused: boolean }[],
-  actionRequired: Record<string, { awaitingQuestion: boolean; awaitingPermission: boolean }>,
-): void {
+export function stampPanelMark(activity: Activity | undefined): void {
   const holder = document.getElementById("hvb-panel-mark")
   if (!holder) return // panel not mounted — favicon-only mode, by design
-  const icon = deriveBoardIcon(items, actionRequired)
+  const icon = deriveBoardIcon(activity)
   const stateKey = `${icon.session}:${icon.count}:${icon.dreaming}`
   if (stateKey === lastPanelState) return // no churn, no animation restarts
   lastPanelState = stateKey
+  const when = typeof activity?.sampledAt === "string" ? activity.sampledAt.slice(0, 16).replace("T", " ") : "?"
   holder.innerHTML = fullMarkSvg(icon, {
     idPrefix: "hvbp",
     animate: true,
     size: PANEL_MARK_SIZE,
-    title: "board activity — mark and favicon share one mapping",
+    // the "as of" honesty stamp (slice 3D): activity may lag one poll cycle
+    title: `board activity — ${icon.count} agent${icon.count === 1 ? "" : "s"} running · sampled ${when} UTC (may lag one poll cycle)`,
   })
-}
-
-/**
- * STUB — SESSION-SYNC HOOK (named, inert): the old viewer re-derived the icon
- * from live opencode session status/action-required endpoints. dsh exposes NO
- * session surface yet, so this stays a no-op placeholder. When dsh ships one,
- * wire it here (its data product feeds `actionRequired`/`sessionStatus` and
- * `dreaming`, and `deriveBoardIcon` already honors them ahead of lane counts).
- * Do NOT invent a transport in the meantime.
- */
-export function attachSessionSurface(_surface: unknown): void {
-  void _surface // inert until the dsh session surface exists (see module comment)
 }
 
 /** Boot the driver once per plugin apply (idempotent). */

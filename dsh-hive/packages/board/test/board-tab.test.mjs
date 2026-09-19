@@ -333,3 +333,53 @@ test("tabItem — spec body budget: truncated flag + full byte count, boards fil
   assert.equal(payload.item.body, full.body.slice(0, 10_000), "capped body is a clean prefix of the real spec")
   assert.ok(fs.readFileSync(path.join(dir, "WI-9001.md"), "utf8").includes(longBody), "the board file was never written or trimmed")
 })
+
+// ── slice 3D (WI-062): the live-activity feed replaces the lane-count proxy ──
+// Ground truth: agents.list() rows with status "running" (AgentStatus =
+// 'idle' | 'running', @deepseek-ai/dsh-agent); the registry is LIVE-only, so
+// dissolved sessions cannot staleness the signal by construction.
+
+const bootBoardWithAgents = async (rows) => {
+  const routeCtx = mkCtx()
+  const agentList = (() => rows)
+  const provide = typeof routeCtx.provide === "function"
+    ? routeCtx.provide.bind(routeCtx)
+    : (routeCtx.reflect && typeof routeCtx.reflect.provide === "function" ? routeCtx.reflect.provide.bind(routeCtx.reflect) : null)
+  assert.ok(provide, "a real cordis Context must expose provide")
+  provide("agents", { list: agentList })
+  routeCtx.plugin(Board, { directory: realCopy })
+  await new Promise((r) => setTimeout(r, 100))
+  return routeCtx.board
+}
+
+test("tabIndex — slice 3D: activity counts RUNNING agents only (live registry)", async () => {
+  const board2 = await bootBoardWithAgents([
+    { id: "a", status: "running" },
+    { id: "b", status: "idle" },
+    { id: "c", status: "running" },
+    { id: "d" }, // undefined status — unknown is NEVER asserted busy
+  ])
+  const payload = board2.tabIndex()
+  assert.ok(payload.activity, "index payload grew the activity field")
+  assert.equal(payload.activity.runningAgents, 2, "only status === 'running' rows count")
+  assert.equal(payload.activity.feedAvailable, true)
+  assert.equal(typeof payload.activity.sampledAt, "string")
+  // the payload still carries everything the parity engine needs
+  assert.ok(Array.isArray(payload.items) && payload.items.length === board2.items().length)
+})
+
+test("tabIndex — slice 3D: zero running ⇒ quiet, honestly sampled", async () => {
+  const board2 = await bootBoardWithAgents([{ id: "a", status: "idle" }, { id: "b", status: "idle" }])
+  const payload = board2.tabIndex()
+  assert.equal(payload.activity.runningAgents, 0)
+  assert.equal(payload.activity.feedAvailable, true)
+})
+
+test("tabIndex — slice 3D: no agents service ⇒ zeros + feedAvailable:false (shape-stable)", () => {
+  // every other test in this file boots WITHOUT providing agents — the WAIT
+  // never fires, and the payload must still be well-shaped and honest.
+  const payload = board.tabIndex()
+  assert.ok(payload.activity, "activity present even without the feed")
+  assert.equal(payload.activity.runningAgents, 0)
+  assert.equal(payload.activity.feedAvailable, false)
+})

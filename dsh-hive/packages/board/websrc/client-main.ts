@@ -16,7 +16,7 @@
 import { CSS } from "./render.js"
 import { attachEngine } from "./tab-engine.js"
 import { DRAWER_CSS } from "./item-drawer.js"
-import { startFaviconDriver, attachSessionSurface } from "./icon-driver.js"
+import { startFaviconDriver } from "./icon-driver.js"
 
 /**
  * Shell-safety overrides for the ported viewer CSS. Authored (slice 3), not a
@@ -96,8 +96,7 @@ function iconSvg(size: number): string {
   ICON_SVG: iconSvg,
   attachEngine,
   startFaviconDriver,
-  // Named, inert — carried on the global so the stub SURVIVES the bundle (an
-  // uncalled module-local would be tree-shaken away). Nothing calls it until
-  // dsh ships a session surface; see icon-driver.ts for the wiring contract.
-  attachSessionSurface,
+  // (slice 3D: the 3B stub attachSessionSurface is RESOLVED — removed. The
+  // real feed shipped as payload.activity; the minify-guard asserts the feed's
+  // surviving property names instead of a placeholder.)
 }

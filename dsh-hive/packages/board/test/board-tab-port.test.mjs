@@ -137,7 +137,8 @@ test("emitted client.js: carries the slice-3 + 3b surface markers", () => {
   // slice 3b markers (the favicon driver, the drawer, the title pass)
   assert.ok(CLIENT.includes("startFaviconDriver"), "favicon driver exported through the engine global")
   assert.ok(CLIENT.includes("hvb-favicon"), "favicon link id present")
-  assert.ok(CLIENT.includes("attachSessionSurface"), "named inert session-surface STUB present (not invented APIs, not absent)")
+  // slice 3D: the stub was RESOLVED, not renamed — real feed asserts follow
+  assert.ok(!CLIENT.includes("attachSessionSurface"), "3B stub gone from the bundle (real feed shipped)")
   assert.ok(CLIENT.includes("/api/hive-board/item"), "item depth route url present")
   assert.ok(CLIENT.includes("hvb-drawer"), "drawer mount present")
   assert.ok(CLIENT.includes("raw-title-chip"), "SHADOW-019 raw title chip present")
@@ -151,4 +152,10 @@ test("emitted client.js: carries the slice-3 + 3b surface markers", () => {
   assert.ok(CLIENT.includes('class="lit"'), "mark breathe hooks emitted when animate:true")
   assert.ok(CLIENT.includes("mark-breathe"), "ported breathe keyframes ship in the style tag")
   assert.ok(CLIENT.includes('idPrefix:"hvbp"'), "panel mark clip ids namespaced away from other marks")
+  // slice 3D — the live-activity feed (property names survive minification).
+  // NOTE: the per-agent `status === "running"` discriminator lives in the HOST
+  // (src/index.ts activityFor) — asserted there by the tab tests; the CLIENT
+  // only consumes activity.runningAgents, so that is what guards here.
+  assert.ok(CLIENT.includes("runningAgents"), "runningAgents feed read survives minify")
+  assert.ok(CLIENT.includes("board activity") && CLIENT.includes("running · sampled"), "mark tooltip carries the count semantics + the as-of stamp (minified template splits — assert fragments)")
 })

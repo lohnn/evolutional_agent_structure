@@ -280,6 +280,16 @@ export class Board extends Service {
 
   readonly directory: string
 
+  /**
+   * Slice 3D — the live-activity feed. Captured via the W-090 WAIT (below),
+   * read EXECUTE-time only, never mutated. Kept structurally typed so this
+   * package never needs agent-loop types (W-044 discipline): the ONLY field
+   * the board consumes is `status` of the agents registry's `list()` rows —
+   * `AgentStatus = 'idle' | 'running'` per @deepseek-ai/dsh-agent runtime
+   * types (mirrored on every `agent/status` transition).
+   */
+  private agentsSvc: { list?: () => Array<{ status?: unknown }> | undefined } | undefined
+
   constructor(ctx: import("@deepseek-ai/cordis").Context, config: { directory: string }) {
     super(ctx, "board")
     this.directory = config.directory
@@ -769,6 +779,24 @@ export class Board extends Service {
       )
       this.ctx.logger?.info?.("[board] tab item route registered at /api/hive-board/item")
     })
+
+    // Slice 3D — the live-activity feed. WAIT (the W-090 order-agnostic
+    // form), never a static inject dep: the twin's own test pins exactly
+    // this ("registry row rides a ctx.inject wait, never an inject dep") —
+    // on profiles without the agents service the callback simply never
+    // fires and `activityFor()` degrades to zeros, honestly sampled. PURE
+    // READ: list() returns a fresh array; nothing here mutates agent state.
+    // Registered on its own (NOT nested in the webServer wait) so the icon
+    // feed works on webless compositions too.
+    ctx.registry.inject(["agents"], (agentsCtx) => {
+      const svc = agentsCtx.get("agents") as { list?: unknown } | undefined
+      if (svc && typeof svc.list === "function") {
+        this.agentsSvc = svc as { list?(): Array<{ status?: unknown }> }
+        this.ctx.logger?.info?.("[board] agents feed captured — activity rides real agent status")
+      } else {
+        this.ctx.logger?.warn?.("[board] agents service arrived without list() — activity stays zero")
+      }
+    })
   }
 
   // ── read surface (B1; the locked write surface lives in the lib modules —
@@ -845,6 +873,8 @@ export class Board extends Service {
       // slice 3: the parity engine's BoardState adapter consumes these.
       workspaceRoot: this.directory,
       boardBuild: readBoardBuild(),
+      // slice 3D: live activity — the icon/mark derivation's ground truth.
+      activity: this.activityFor(),
       counts: {
         total: all.length,
         queued: queued.length,
@@ -857,6 +887,46 @@ export class Board extends Service {
         done: done.map(summarize),
       },
       items: fullItems,
+    }
+  }
+
+  /**
+   * Slice 3D — the icon/mark derivation's ground truth. RUNNERS, not bound
+   * items: the count of agents whose registry status is `running` RIGHT NOW.
+   * The old in-progress-item proxy is gone (in_progress items outlive their
+   * sessions for weeks — "bound" never meant "busy").
+   *
+   * CHOSEN DISCRIMINATOR (documented in the contract): `agents.list()` —
+   * process-local, LIVE-only (disposed agents are absent, so dissolved
+   * sessions are stale-proof by construction) — filtered by the per-agent
+   * `status` (`AgentStatus = 'idle' | 'running'`, @deepseek-ai/dsh-agent).
+   * runningJobs was deliberately NOT taken (the agents filter is direct and
+   * sufficient; every extra seam is one more thing to defend).
+   *
+   * KNOWN EDGE (accepted, revisit via WI-063's rewrite): an agent blocked
+   * awaiting a user answer mid-turn still reports `running` — a question does
+   * not flip the loop to idle. The icon may breathe while WAITING FOR YOU.
+   * Distinguishing blocked-await-answer from mid-turn needs the
+   * approval/userQuestions service state; not wired in this slice.
+   *
+   * @param missing — no agents service (wait never fired) ⇒ zeros + a flag;
+   *   the payload stays shape-stable and the client stays quiet, honestly.
+   */
+  activityFor(): { runningAgents: number; sampledAt: string; feedAvailable: boolean } {
+    const sampledAt = nowIso()
+    const svc = this.agentsSvc
+    if (!svc || typeof svc.list !== "function") {
+      return { runningAgents: 0, sampledAt, feedAvailable: false }
+    }
+    try {
+      const rows = svc.list() ?? []
+      const runningAgents = rows.filter((row) => row?.status === "running").length
+      return { runningAgents, sampledAt, feedAvailable: true }
+    } catch (e) {
+      this.ctx.logger?.warn?.("[board] agents.list() threw — activity sampled as zero", {
+        error: String((e as Error)?.message ?? e),
+      })
+      return { runningAgents: 0, sampledAt, feedAvailable: false }
     }
   }
 

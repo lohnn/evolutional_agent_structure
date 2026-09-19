@@ -238,6 +238,30 @@ Two build facts pinned here because they were DISCOVERED, not assumed:
     zero new head surfaces (the mark lives in the panel DOM; the breathe keyframes + reduced-motion
     gate are the already-ported `mark-breathe` CSS). Emitted guard asserts the holder, the
     `class="lit"` hook, the keyframes, and the id namespace.
+  - Slice 3D — the derivation's ground truth is LIVE AGENTS, not lane counts. The index payload
+    GROWS `activity: { runningAgents, sampledAt, feedAvailable }` (no other field changed; the
+    item route is untouched). Mapping: `runningAgents > 0 ⇒ active (breathe), else quiet` — the
+    in-progress-ITEMS proxy is GONE (in_progress items outlive their sessions for weeks; "bound"
+    never meant "busy" — the user's semantic: breathe only while a session is actively WORKING).
+    CHOSEN DISCRIMINATOR, exact source: the `agents` service (`ctx.agents`, key `agents`,
+    process-local registry) — `list()` rows filtered by the per-agent `status` field; that is
+    `AgentStatus = 'idle' | 'running'` from `@deepseek-ai/dsh-agent` runtime-types (mirrored on
+    every `agent/status` transition). Liveness is free: the registry only carries LIVE agents
+    (disposed = absent), so dissolved sessions cannot stale the signal by construction.
+    `runningJobs` was deliberately NOT taken (the agents filter is direct and sufficient; fewer
+    seams to defend). Injection is the W-090 WAIT (registry.inject, order-agnostic), NOT a
+    static inject dep — the twin's own test pins exactly this form, and on webless profiles the
+    wait never fires and `activityFor()` degrades to `{ runningAgents: 0, feedAvailable: false }`
+    (shape-stable, honestly sampled). PURE READ — list() is never mutated.
+    POLL-LAG CAVEAT (documented in the mark's tooltip): the sample rides the 15 s/30 s polls —
+    mark + favicon may trail reality by one cycle; the sample time is shown, never trusted.
+    KNOWN EDGE (accepted, revisit via WI-063's rewrite): an agent blocked awaiting a user answer
+    mid-turn still reports `running` — the icon may breathe while WAITING FOR YOU; distinguishing
+    blocked-await-answer from mid-turn needs the approval/userQuestions service state (not wired
+    in this slice). The 3B stub `attachSessionSurface` is RESOLVED (deleted — the feed shipped as
+    `payload.activity`); emitted guards now assert the feed's surviving property names
+    (`runningAgents`) so minify can never eat the derivation. Host-side tests: running-only
+    counting, zero-running quiet, and no-service degradation all asserted on real tab payloads.
 - The bundle route is NOT ours (clientModules owns it, §3.1).
 
 ## 5. AUTH + EXPOSURE — new pin, decision needed (load-bearing for slice 2)

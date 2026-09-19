@@ -108,6 +108,8 @@ export interface BoardIndexPayload {
   workspaceRoot?: string
   boardBuild?: string
   items?: WireWorkItem[]
+  /** slice 3D — the live agents feed (index payload GROWS this field only). */
+  activity?: { runningAgents?: number; runningJobs?: number; sampledAt?: string; feedAvailable?: boolean }
   [k: string]: unknown
 }
 
@@ -162,6 +164,9 @@ export function adapterState(payload: BoardIndexPayload): BoardState {
     generatedAt: typeof payload.generated === "string" ? payload.generated : "",
     workspaceRoot: typeof payload.workspaceRoot === "string" ? payload.workspaceRoot : "(unknown workspace)",
     buildSha: typeof payload.boardBuild === "string" && payload.boardBuild !== "" ? payload.boardBuild : "unknown",
+    // slice 3D: the live agents feed rides untouched into BoardState — the
+    // icon driver and the panel mark both consume exactly this field.
+    activity: payload.activity,
     guiBaseUrl: "",
     capabilities: [],
     dreams: EMPTY_DREAMS,
@@ -225,8 +230,8 @@ export async function poll(): Promise<void> {
     lastGood = state
     freshSha = state.buildSha
     // the panel head mark rides the SAME 15 s tick (outside the morph root —
-    // one mapping for mark, favicon and board truth)
-    stampPanelMark(state.items, state.actionRequired)
+    // one mapping for mark, favicon and the LIVE AGENTS truth — slice 3D)
+    stampPanelMark(state.activity)
     ensureControls(state)
     paint(state)
   } catch {
