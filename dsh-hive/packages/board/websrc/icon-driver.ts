@@ -37,7 +37,7 @@
  * feed flows through the same poll. The minify-guard asserts the FEED's
  * surviving property names ("runningAgents"/"activity") instead of a stub.
  */
-import { faviconHref, fullMarkSvg } from "./icon.js"
+import { fullMarkSvg, reducedMarkSvg } from "./icon.js"
 import { adapterState, INDEX_URL, type BoardIndexPayload } from "./tab-engine.js"
 import type { IconState } from "./icon.js"
 
@@ -46,28 +46,62 @@ const LINK_ID = "hvb-favicon"
 const LINK_ATTR = "data-plugin-favicon"
 const PANEL_MARK_SIZE = 34 // shell-safe density override lives in CSS_OVERRIDES
 
-/** The slice-3D shape the index route ships (index payload GROWS this field). */
+/** The slice-3D/3E shape the index route ships (index payload GROWS fields). */
 export interface Activity {
   runningAgents?: number
+  hiveRunningAgents?: number
   runningJobs?: number
   sampledAt?: string
   feedAvailable?: boolean
+  ledgerAvailable?: boolean
 }
 
 /**
- * The one derivation both consumers share. runningAgents > 0 ⇒ the `active`
- * channel (breathe), count = how many (the ported channel contract: the count
- * channel shows what the top channel is showing). Anything non-numeric/absent
- * ⇒ quiet — unknown activity is NEVER asserted busy.
+ * The two-tier derivation (slice 3E), shared by mark + favicon:
+ *   tier "hive"    — HIVE sessions running → breathe in the CURRENT orange
+ *                    (byte-unchanged amber, the ported active accent);
+ *   tier "ambient" — other sessions running, none HIVE → breathe in a MUTED
+ *                    same-hue ochre (#866d3c: ~half the amber saturation,
+ *                    ~20% darker — distinct from amber at favicon 16px AND
+ *                    at the 34px panel mark; a desaturated member of the
+ *                    ported palette's own amber family);
+ *   tier "quiet"   — nothing running → the ported static drawing.
+ * Unknown/absent activity ⇒ quiet — never asserted busy.
  */
-export function deriveBoardIcon(activity: Activity | undefined): IconState {
+export type ActivityTier = "hive" | "ambient" | "quiet"
+
+export function activityTier(activity: Activity | undefined): { tier: ActivityTier; running: number; hive: number } {
   const running =
     typeof activity?.runningAgents === "number" && isFinite(activity.runningAgents) && activity.runningAgents > 0
       ? Math.floor(activity.runningAgents)
       : 0
+  const hive =
+    typeof activity?.hiveRunningAgents === "number" && isFinite(activity.hiveRunningAgents) && activity.hiveRunningAgents > 0
+      ? Math.floor(activity.hiveRunningAgents)
+      : 0
+  if (running <= 0) return { tier: "quiet", running: 0, hive: 0 }
+  return hive > 0 ? { tier: "hive", running, hive } : { tier: "ambient", running, hive: 0 }
+}
+
+export function deriveBoardIcon(activity: Activity | undefined): IconState {
+  const { running } = activityTier(activity)
   return running > 0
     ? { session: "active", dreaming: false, count: running }
     : { session: "quiet", dreaming: false, count: 0 }
+}
+
+// Tier color mechanics (authored — see activityTier doc). The ported emitters
+// paint the active accent as the literal amber hex; the muted tier is the
+// SAME drawing re-accented via a string swap, so the ported files stay
+// byte-locked and both tiers keep crisp rendering at any size (no CSS filter
+// fuzz). Scope note: #d29922 also paints a DREAMING stratum, but dreaming is
+// structurally false under dsh (empty dreams feed) — swap-safe by
+// construction, documented in the contract.
+const AMBER_HEX = "#d29922"
+const AMBER_MUTED_HEX = "#866d3c"
+
+function reaccent(svg: string): string {
+  return svg.split(AMBER_HEX).join(AMBER_MUTED_HEX)
 }
 
 let bound = false
@@ -76,7 +110,10 @@ let lastHref = ""
 function stampFavicon(activity: Activity | undefined): void {
   const link = document.getElementById(LINK_ID) as HTMLLinkElement | null
   if (!link) return // disposer ran (plugin unmounted) — keep quiet
-  const href = faviconHref(deriveBoardIcon(activity))
+  const icon = deriveBoardIcon(activity)
+  const { tier } = activityTier(activity)
+  const svg = tier === "ambient" ? reaccent(reducedMarkSvg(icon)) : reducedMarkSvg(icon)
+  const href = "data:image/svg+xml," + encodeURIComponent(svg)
   if (href === lastHref) return // same href re-decode/rasterise churn guard (ported discipline)
   lastHref = href
   link.setAttribute("href", href)
@@ -115,17 +152,33 @@ export function stampPanelMark(activity: Activity | undefined): void {
   const holder = document.getElementById("hvb-panel-mark")
   if (!holder) return // panel not mounted — favicon-only mode, by design
   const icon = deriveBoardIcon(activity)
-  const stateKey = `${icon.session}:${icon.count}:${icon.dreaming}`
+  const { tier, running, hive } = activityTier(activity)
+  const stateKey = `${tier}:${icon.count}`
   if (stateKey === lastPanelState) return // no churn, no animation restarts
   lastPanelState = stateKey
   const when = typeof activity?.sampledAt === "string" ? activity.sampledAt.slice(0, 16).replace("T", " ") : "?"
-  holder.innerHTML = fullMarkSvg(icon, {
-    idPrefix: "hvbp",
-    animate: true,
-    size: PANEL_MARK_SIZE,
-    // the "as of" honesty stamp (slice 3D): activity may lag one poll cycle
-    title: `board activity — ${icon.count} agent${icon.count === 1 ? "" : "s"} running · sampled ${when} UTC (may lag one poll cycle)`,
-  })
+  // the as-of stamp NAMES the tier (slice 3E) — misreads must be cheap
+  const now =
+    tier === "hive"
+      ? `${running} HIVE agent${running === 1 ? "" : "s"} running`
+      : tier === "ambient"
+        ? `${running} other agent${running === 1 ? "" : "s"} running · no HIVE session active`
+        : "quiet — nothing running"
+  holder.innerHTML = reaccent(
+    fullMarkSvg(icon, {
+      idPrefix: "hvbp",
+      animate: true,
+      size: PANEL_MARK_SIZE,
+    }),
+  )
+  // the tooltip rides as an SVG <title> (the fullMarkSvg opts.title renders a
+  // different element; a <title> child is the accessible-layer standard)
+  const svg = holder.querySelector("svg")
+  if (svg) {
+    const t = document.createElementNS("http://www.w3.org/2000/svg", "title")
+    t.textContent = `${now} · sampled ${when} UTC (may lag one poll cycle)`
+    svg.insertBefore(t, svg.firstChild)
+  }
 }
 
 /** Boot the driver once per plugin apply (idempotent). */

@@ -334,12 +334,27 @@ test("tabItem — spec body budget: truncated flag + full byte count, boards fil
   assert.ok(fs.readFileSync(path.join(dir, "WI-9001.md"), "utf8").includes(longBody), "the board file was never written or trimmed")
 })
 
-// ── slice 3D (WI-062): the live-activity feed replaces the lane-count proxy ──
+// ── slice 3D/3E (WI-062): the live-activity feed + the HIVE/ambient split ─────
 // Ground truth: agents.list() rows with status "running" (AgentStatus =
 // 'idle' | 'running', @deepseek-ai/dsh-agent); the registry is LIVE-only, so
-// dissolved sessions cannot staleness the signal by construction.
+// dissolved sessions cannot staleness the signal by construction. 3E splits
+// running rows by membership in HIVE's own ledger
+// (<root>/.opencode/agents/hive-sessions.json — id-keyed member maps, the
+// registry the awaken/bind tools stamp).
 
-const bootBoardWithAgents = async (rows) => {
+const bootBoardWithAgents = async (rows, { ledgerIds, ledgerAbsent } = {}) => {
+  // own tmp root per boot so ledger writes can never leak between tests (the
+  // realCopy root stays shared and read-only for the pre-3D assertions)
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "board-tab-act-"))
+  fs.cpSync("/workspace/.opencode/board", path.join(root, ".opencode/board"), { recursive: true })
+  if (ledgerIds) {
+    const agentsDir = path.join(root, ".opencode", "agents")
+    fs.mkdirSync(agentsDir, { recursive: true })
+    fs.writeFileSync(
+      path.join(agentsDir, "hive-sessions.json"),
+      JSON.stringify({ v: 1, coordinators: Object.fromEntries(ledgerIds.map((id) => [id, { agent: "standard" }])) }, null, 2),
+    )
+  }
   const routeCtx = mkCtx()
   const agentList = (() => rows)
   const provide = typeof routeCtx.provide === "function"
@@ -347,31 +362,58 @@ const bootBoardWithAgents = async (rows) => {
     : (routeCtx.reflect && typeof routeCtx.reflect.provide === "function" ? routeCtx.reflect.provide.bind(routeCtx.reflect) : null)
   assert.ok(provide, "a real cordis Context must expose provide")
   provide("agents", { list: agentList })
-  routeCtx.plugin(Board, { directory: realCopy })
+  void ledgerAbsent
+  routeCtx.plugin(Board, { directory: root })
   await new Promise((r) => setTimeout(r, 100))
   return routeCtx.board
 }
 
-test("tabIndex — slice 3D: activity counts RUNNING agents only (live registry)", async () => {
-  const board2 = await bootBoardWithAgents([
-    { id: "a", status: "running" },
-    { id: "b", status: "idle" },
-    { id: "c", status: "running" },
-    { id: "d" }, // undefined status — unknown is NEVER asserted busy
-  ])
+test("tabIndex — slice 3D/3E: RUNNING-only count splits HIVE vs ambient via the ledger", async () => {
+  const board2 = await bootBoardWithAgents(
+    [
+      { id: "session-aaa", status: "running" },
+      { id: "session-bbb", status: "idle" },
+      { id: "session-ccc", status: "running" },
+      { id: "session-ddd" }, // undefined status — unknown is NEVER asserted busy
+      { id: null, status: "running" }, // id-less row — running, never invented HIVE
+    ],
+    { ledgerIds: ["session-aaa", "session-ccc"] },
+  )
   const payload = board2.tabIndex()
   assert.ok(payload.activity, "index payload grew the activity field")
-  assert.equal(payload.activity.runningAgents, 2, "only status === 'running' rows count")
+  assert.equal(payload.activity.runningAgents, 3, "only status === 'running' rows count (2 + the id-less one)")
+  assert.equal(payload.activity.hiveRunningAgents, 2, "ledger membership splits the HIVE tier")
+  assert.equal(payload.activity.ledgerAvailable, true, "the join was sighted, not blind")
   assert.equal(payload.activity.feedAvailable, true)
   assert.equal(typeof payload.activity.sampledAt, "string")
   // the payload still carries everything the parity engine needs
   assert.ok(Array.isArray(payload.items) && payload.items.length === board2.items().length)
 })
 
+test("tabIndex — slice 3E: running but NOT in the ledger ⇒ ambient tier numbers, honestly flagged", async () => {
+  const board2 = await bootBoardWithAgents(
+    [{ id: "session-xxx", status: "running" }, { id: "session-yyy", status: "running" }, { id: "session-hive1", status: "running" }],
+    { ledgerIds: ["session-hive1"] },
+  )
+  const payload = board2.tabIndex()
+  assert.equal(payload.activity.runningAgents, 3)
+  assert.equal(payload.activity.hiveRunningAgents, 1, "only the ledger member is HIVE")
+  assert.equal(payload.activity.ledgerAvailable, true)
+})
+
+test("tabIndex — slice 3E: blind ledger (no file) ⇒ join stays blind, never guessing", async () => {
+  const board2 = await bootBoardWithAgents([{ id: "session-aaa", status: "running" }])
+  const payload = board2.tabIndex()
+  assert.equal(payload.activity.runningAgents, 1)
+  assert.equal(payload.activity.hiveRunningAgents, 0, "no ledger ⇒ nobody is called HIVE")
+  assert.equal(payload.activity.ledgerAvailable, false, "blindness is VISIBLE in the payload")
+})
+
 test("tabIndex — slice 3D: zero running ⇒ quiet, honestly sampled", async () => {
   const board2 = await bootBoardWithAgents([{ id: "a", status: "idle" }, { id: "b", status: "idle" }])
   const payload = board2.tabIndex()
   assert.equal(payload.activity.runningAgents, 0)
+  assert.equal(payload.activity.hiveRunningAgents, 0)
   assert.equal(payload.activity.feedAvailable, true)
 })
 
@@ -381,5 +423,6 @@ test("tabIndex — slice 3D: no agents service ⇒ zeros + feedAvailable:false (
   const payload = board.tabIndex()
   assert.ok(payload.activity, "activity present even without the feed")
   assert.equal(payload.activity.runningAgents, 0)
+  assert.equal(payload.activity.hiveRunningAgents, 0)
   assert.equal(payload.activity.feedAvailable, false)
 })

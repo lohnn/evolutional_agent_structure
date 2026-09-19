@@ -262,6 +262,40 @@ Two build facts pinned here because they were DISCOVERED, not assumed:
     `payload.activity`); emitted guards now assert the feed's surviving property names
     (`runningAgents`) so minify can never eat the derivation. Host-side tests: running-only
     counting, zero-running quiet, and no-service degradation all asserted on real tab payloads.
+  - Slice 3E — TWO-TIER ACTIVITY (HIVE vs ambient). `activity` now carries
+    `{ runningAgents, hiveRunningAgents, sampledAt, feedAvailable, ledgerAvailable }` (additive —
+    no route-shape break). Mapping table (both mark + favicon, one derivation):
+
+      | state                                        | mark + favicon                          |
+      |----------------------------------------------|-----------------------------------------|
+      | runningAgents > 0 && hiveRunningAgents > 0   | breathe, CURRENT orange (ported amber `#d29922`, byte-unchanged) |
+      | runningAgents > 0 && hiveRunningAgents == 0  | breathe, MUTED ochre `#866d3c` (desaturated/darker same-hue member of the ported amber family — distinct at 16 px and 34 px) |
+      | runningAgents == 0 / unknown / feed absent   | ported static quiet drawing             |
+
+    DISCRIMINATION — one authoritative signal joins the registry:
+    `hiveRunningAgents` = running rows whose `id: SessionId` is a member of HIVE's own
+    live-session ledger `<workspace>/.opencode/agents/hive-sessions.json` (the SAME registry the
+    awaken/bind tools stamp — membership is authoritative; every id-keyed member map in the
+    document is unioned, `coordinators` today, future sections honored without code change).
+    Candidate B (dispatch-label prefixes on registry rows) was EVALUATED and DROPPED: the public
+    `Agent` face carries only `id: SessionId` + the runtime `status` — there is no label field to
+    read, and the ledger already contains label-less roots (the coordinator's own session id),
+    so the label signal had no case the ledger couldn't answer; the two-signal precedence
+    question collapses to one signal.
+    RESIDUAL STALENESS (honest): the ledger is a MEMBERSHIP record, not a liveness record — it
+    stamps on awaken/bind and does not track dispose. A leaked entry contributes nothing (the
+    join is with RUNNING rows only); the residual gap is the first seconds of a session that
+    runs BEFORE its ledger stamp — it reads AMBIENT until the stamp lands. A blind join
+    (ledger unreadable/absent) is VISIBLE: `ledgerAvailable:false` and nobody is called HIVE.
+    COLOR MECHANICS (authored, ported bytes locked): the muted tier re-accents the SAME ported
+    SVG by swapping the amber accent hex for `#866d3c` (string replace in the driver — neither
+    `icon.ts` nor `render.ts` bytes change; the am hex only paints the active accent and a
+    dreaming stratum, and dreaming is structurally false under dsh). Reduced-motion gating
+    carries over (port CSS). The as-of tooltip NAMES the tier: "N HIVE agents running" /
+    "N other agents running · no HIVE session active" / "quiet — nothing running", each with
+    the sampled stamp. Host-side tier tests: hive-only, ambient-only (1 HIVE + 2 others), blind
+    ledger, zero-running, absent-feed. Guards: `hiveRunningAgents`, `#866d3c`, tier tooltip
+    fragments survive minify.
 - The bundle route is NOT ours (clientModules owns it, §3.1).
 
 ## 5. AUTH + EXPOSURE — new pin, decision needed (load-bearing for slice 2)

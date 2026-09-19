@@ -32,6 +32,7 @@ import { Service } from "@deepseek-ai/cordis"
 import z from "@deepseek-ai/schemastery"
 import { defineTool } from "@deepseek-ai/dsh-tools"
 import { readFileSync } from "node:fs"
+import * as nodePath from "node:path"
 import type { ContentBlock } from "@deepseek-ai/dsh-llm"
 
 import {
@@ -286,9 +287,10 @@ export class Board extends Service {
    * package never needs agent-loop types (W-044 discipline): the ONLY field
    * the board consumes is `status` of the agents registry's `list()` rows —
    * `AgentStatus = 'idle' | 'running'` per @deepseek-ai/dsh-agent runtime
-   * types (mirrored on every `agent/status` transition).
+   * types (mirrored on every `agent/status` transition). Rows carry
+   * `id: SessionId` too — the slice-3E ledger join reads it (read-only).
    */
-  private agentsSvc: { list?: () => Array<{ status?: unknown }> | undefined } | undefined
+  private agentsSvc: { list?: () => Array<{ id?: unknown; status?: unknown }> | undefined } | undefined
 
   constructor(ctx: import("@deepseek-ai/cordis").Context, config: { directory: string }) {
     super(ctx, "board")
@@ -896,6 +898,26 @@ export class Board extends Service {
    * The old in-progress-item proxy is gone (in_progress items outlive their
    * sessions for weeks — "bound" never meant "busy").
    *
+   * Slice 3E — the count SPLITS into HIVE vs ambient: a running agent is HIVE
+   * iff its session id is a member of HIVE's own live-session ledger
+   * (<workspace>/.opencode/agents/hive-sessions.json — the SAME registry the
+   * awaken/bind tools stamp, so membership is authoritative; all its
+   * id-keyed member maps are unioned, `coordinators` today). Candidate B
+   * (dispatch-label prefixes) was EVALUATED and DROPPED: the public Agent
+   * face carries only `id: SessionId` + the runtime `status` — no label
+   * field exists to read without undocumented surfaces, and the ledger
+   * already carries label-less roots (the coordinator's own session id is in
+   * it), so the label signal had no case the ledger couldn't answer. With
+   * one authoritative signal the two-signal precedence question collapses.
+   *
+   * LEDGER STALENESS BOUNDARY (honest): the ledger is a MEMBERSHIP record,
+   * not a liveness record — it stamps on awaken/bind and does not track
+   * dispose. The join is with RUNNING registry rows only, so a leaked ledger
+   * entry contributes NOTHING unless its session runs right now. The
+   * residual gap runs the OTHER way: a session running before awaken/bind
+   * stamps the ledger reads AMBIENT until the stamp lands (seconds; never
+   * invented as HIVE; never silent — ledgerAvailable flags a blind join).
+   *
    * CHOSEN DISCRIMINATOR (documented in the contract): `agents.list()` —
    * process-local, LIVE-only (disposed agents are absent, so dissolved
    * sessions are stale-proof by construction) — filtered by the per-agent
@@ -905,29 +927,71 @@ export class Board extends Service {
    *
    * KNOWN EDGE (accepted, revisit via WI-063's rewrite): an agent blocked
    * awaiting a user answer mid-turn still reports `running` — a question does
-   * not flip the loop to idle. The icon may breathe while WAITING FOR YOU.
-   * Distinguishing blocked-await-answer from mid-turn needs the
-   * approval/userQuestions service state; not wired in this slice.
-   *
-   * @param missing — no agents service (wait never fired) ⇒ zeros + a flag;
-   *   the payload stays shape-stable and the client stays quiet, honestly.
+   * not flip the loop to idle. The icon may breathe while WAITING FOR YOU,
+   * inheriting its tier by HIVE-ness. Distinguishing blocked-await-answer
+   * from mid-turn needs the approval/userQuestions service state; not wired
+   * in this slice.
    */
-  activityFor(): { runningAgents: number; sampledAt: string; feedAvailable: boolean } {
+  activityFor(): {
+    runningAgents: number
+    hiveRunningAgents: number
+    sampledAt: string
+    feedAvailable: boolean
+    ledgerAvailable: boolean
+  } {
     const sampledAt = nowIso()
     const svc = this.agentsSvc
     if (!svc || typeof svc.list !== "function") {
-      return { runningAgents: 0, sampledAt, feedAvailable: false }
+      return { runningAgents: 0, hiveRunningAgents: 0, sampledAt, feedAvailable: false, ledgerAvailable: false }
     }
     try {
       const rows = svc.list() ?? []
-      const runningAgents = rows.filter((row) => row?.status === "running").length
-      return { runningAgents, sampledAt, feedAvailable: true }
+      const hive = this.hiveSessionIds()
+      let runningAgents = 0
+      let hiveRunningAgents = 0
+      for (const row of rows) {
+        if (row?.status !== "running") continue
+        runningAgents++
+        // The join REQUIRES the session id: a row without one counts as
+        // running (ambient at most) — never invented as HIVE.
+        if (row.id && hive.has(String(row.id))) hiveRunningAgents++
+      }
+      return { runningAgents, hiveRunningAgents, sampledAt, feedAvailable: true, ledgerAvailable: this.ledgerSeen }
     } catch (e) {
       this.ctx.logger?.warn?.("[board] agents.list() threw — activity sampled as zero", {
         error: String((e as Error)?.message ?? e),
       })
-      return { runningAgents: 0, sampledAt, feedAvailable: false }
+      return { runningAgents: 0, hiveRunningAgents: 0, sampledAt, feedAvailable: false, ledgerAvailable: false }
     }
+  }
+
+  /** Whether the last sample saw a readable ledger (payload-honest blindness). */
+  private ledgerSeen = false
+
+  /**
+   * Session ids HIVE's own ledger claims. Union of every id-keyed member map
+   * in the ledger document (today: `coordinators`), so a future section that
+   * registers sessions the same way is honored without a code change. Read
+   * PER SAMPLE (the file is small; this fires at poll cadence, not page
+   * render). Unreadable or absent ⇒ empty set + ledgerSeen:false — the join
+   * stays BLIND rather than guessing.
+   */
+  private hiveSessionIds(): Set<string> {
+    const ids = new Set<string>()
+    try {
+      const raw = readFileSync(nodePath.join(this.directory, ".opencode", "agents", "hive-sessions.json"), "utf8")
+      const ledger = JSON.parse(raw) as Record<string, unknown>
+      this.ledgerSeen = true
+      for (const value of Object.values(ledger ?? {})) {
+        if (!value || typeof value !== "object" || Array.isArray(value)) continue
+        for (const key of Object.keys(value)) {
+          if (key.startsWith("session-")) ids.add(key)
+        }
+      }
+    } catch {
+      this.ledgerSeen = false
+    }
+    return ids
   }
 
   /**

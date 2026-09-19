@@ -157,5 +157,10 @@ test("emitted client.js: carries the slice-3 + 3b surface markers", () => {
   // (src/index.ts activityFor) — asserted there by the tab tests; the CLIENT
   // only consumes activity.runningAgents, so that is what guards here.
   assert.ok(CLIENT.includes("runningAgents"), "runningAgents feed read survives minify")
-  assert.ok(CLIENT.includes("board activity") && CLIENT.includes("running · sampled"), "mark tooltip carries the count semantics + the as-of stamp (minified template splits — assert fragments)")
+  // slice 3E — the two-tier split (property strings + tier literals survive):
+  assert.ok(CLIENT.includes("hiveRunningAgents"), "hiveRunningAgents feed read survives minify")
+  assert.ok(CLIENT.includes("#866d3c"), "muted ambient accent present (tier 2 icon color)")
+  assert.ok(CLIENT.includes("no HIVE session active"), "ambient tooltip names the tier")
+  assert.ok(CLIENT.includes("HIVE agent"), "hive tooltip names the tier")
+  assert.ok(CLIENT.includes("may lag one poll cycle"), "as-of poll-lag caveat ships in the tooltip")
 })
