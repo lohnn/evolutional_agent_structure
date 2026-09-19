@@ -19,9 +19,11 @@ that the server responds.
 | Port | Bind | Owner | Notes |
 |---|---|---|---|
 | `3000` | `0.0.0.0` | OpenChamber | published |
+| `3080` | `0.0.0.0` | dsh web (socat relay → 127.0.0.1:4501) | published; the HIVE-on-dsh workbench. Chain: Tailscale Serve (Mac 443) → Mac 127.0.0.1:3080 → compose publish `3080:3080` → this relay. Relay is svcwatch-managed (`.opencode/services/dsh-relay.toml`); dsh itself is `dsh-web.toml` (pinned version, boot log tee'd to `/tmp/dsh-web.log` for the rotating `?token=`). 2026-09-07: moved off 4500 so the prototype range stays prototypes. |
 | `4096` | `127.0.0.1` | opencode itself | internal — do not expose |
 | `4400` | `0.0.0.0` | hive-board viewer | published; see `projects/evolutional_agent_structure/docs/board-viewer/deploy/`. Ships inside the HIVE plugin package (`src/board-viewer/`) — the old `projects/hive-board/` repo is gone. Binds loopback by DEFAULT; this deployment overrides it with `--host 0.0.0.0` and the server prints an exposure warning, which is expected here. |
-| `4500`–`4504` | `0.0.0.0` | **reserved — throwaway prototypes** | see below |
+| `4500`–`4504` | `0.0.0.0` | **reserved — throwaway prototypes** | see below. (dsh briefly squatted 4500 during migration; freed 2026-09-07.) |
+| `4501` | `127.0.0.1` | dsh web itself | internal — loopback only by dsh design (it refuses `--host 0.0.0.0`); always reached via the 3080 relay. |
 | `8096` | `0.0.0.0` | Jellyfin | published; JellyFetch plugin work |
 | *(ephemeral)* | `127.0.0.11` | Docker's embedded DNS | not ours; the port number changes per container start |
 

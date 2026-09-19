@@ -31,6 +31,8 @@
 import { Service } from "@deepseek-ai/cordis"
 import z from "@deepseek-ai/schemastery"
 import { defineTool } from "@deepseek-ai/dsh-tools"
+import { readFileSync } from "node:fs"
+import * as nodePath from "node:path"
 import type { ContentBlock } from "@deepseek-ai/dsh-llm"
 
 import {
@@ -278,6 +280,17 @@ export class Board extends Service {
   })
 
   readonly directory: string
+
+  /**
+   * Slice 3D — the live-activity feed. Captured via the W-090 WAIT (below),
+   * read EXECUTE-time only, never mutated. Kept structurally typed so this
+   * package never needs agent-loop types (W-044 discipline): the ONLY field
+   * the board consumes is `status` of the agents registry's `list()` rows —
+   * `AgentStatus = 'idle' | 'running'` per @deepseek-ai/dsh-agent runtime
+   * types (mirrored on every `agent/status` transition). Rows carry
+   * `id: SessionId` too — the slice-3E ledger join reads it (read-only).
+   */
+  private agentsSvc: { list?: () => Array<{ id?: unknown; status?: unknown }> | undefined } | undefined
 
   constructor(ctx: import("@deepseek-ai/cordis").Context, config: { directory: string }) {
     super(ctx, "board")
@@ -694,6 +707,98 @@ export class Board extends Service {
     ctx.effect(() => () => {
       for (const d of disposers) d()
     })
+
+    // ── WI-062 slice 2: the same-origin JSON route for the web tab ────────────
+    // WAIT form (contract §4, provider-usage precedent): webServer is a WAIT,
+    // never a hard inject — a plugin that awaits nothing mounts BEFORE the
+    // webserver finishes booting, and on web-less profiles this callback
+    // simply never runs while the rest of the service still boots.
+    // Read-only index; auth = the user-ratified "mirror precedent" posture
+    // (contract §5/§8.1, 2026-09-18): the route carries no token check,
+    // exactly like the live berget-usage snapshot route.
+    ctx.registry.inject(["webServer"], (serverCtx) => {
+      const webServer = serverCtx.get("webServer") as WebServerLike | undefined
+      if (!webServer || typeof webServer.register !== "function") {
+        this.ctx.logger?.warn?.("[board] webServer arrived without register — tab index route skipped")
+        return
+      }
+      serverCtx.effect(
+        () =>
+          webServer.register({
+            kind: "exact",
+            path: "/api/hive-board/index",
+            handler: async (_req: unknown, res: WebLikeResponse) => {
+              let payload: unknown
+              try {
+                payload = this.tabIndex()
+              } catch (e) {
+                payload = { ok: false, error: String((e as Error)?.message ?? e) }
+              }
+              res.writeHead(200, {
+                "content-type": "application/json; charset=utf-8",
+                "cache-control": "no-store",
+              })
+              res.end(JSON.stringify(payload))
+            },
+          }),
+        "board tab index route",
+      )
+      this.ctx.logger?.info?.("[board] tab index route registered at /api/hive-board/index")
+
+      // Slice 3b: the item depth view. Exact-kind + query param on purpose:
+      // only `exact` is in-cohort verified; the `prefix` kind exists in the
+      // catalog but has no twin precedent — the client (websrc/item-drawer.ts)
+      // calls /api/hive-board/item?id=WI-… Same auth posture, same WAIT.
+      serverCtx.effect(
+        () =>
+          webServer.register({
+            kind: "exact",
+            path: "/api/hive-board/item",
+            handler: async (req: unknown, res: WebLikeResponse) => {
+              let payload: unknown
+              let itemId = ""
+              try {
+                const reqAny = req as { url?: unknown } | null
+                const raw = typeof reqAny?.url === "string" ? reqAny.url : ""
+ itemId = new URLSearchParams(raw.includes("?") ? raw.slice(raw.indexOf("?") + 1) : "").get("id")?.trim() ?? ""
+                itemId = decodeURIComponent(itemId)
+                if (!itemId.match(/^[A-Za-z0-9._-]+$/)) {
+                  payload = { ok: false, error: "missing or malformed id query parameter", missing: itemId ? [itemId] : [] }
+                } else {
+                  payload = this.tabItem(itemId)
+                }
+              } catch (e) {
+                payload = { ok: false, error: String((e as Error)?.message ?? e), missing: itemId ? [itemId] : [] }
+              }
+              res.writeHead(200, {
+                "content-type": "application/json; charset=utf-8",
+                "cache-control": "no-store",
+              })
+              res.end(JSON.stringify(payload))
+            },
+          }),
+        "board tab item route",
+      )
+      this.ctx.logger?.info?.("[board] tab item route registered at /api/hive-board/item")
+    })
+
+    // Slice 3D — the live-activity feed. WAIT (the W-090 order-agnostic
+    // form), never a static inject dep: the twin's own test pins exactly
+    // this ("registry row rides a ctx.inject wait, never an inject dep") —
+    // on profiles without the agents service the callback simply never
+    // fires and `activityFor()` degrades to zeros, honestly sampled. PURE
+    // READ: list() returns a fresh array; nothing here mutates agent state.
+    // Registered on its own (NOT nested in the webServer wait) so the icon
+    // feed works on webless compositions too.
+    ctx.registry.inject(["agents"], (agentsCtx) => {
+      const svc = agentsCtx.get("agents") as { list?: unknown } | undefined
+      if (svc && typeof svc.list === "function") {
+        this.agentsSvc = svc as { list?(): Array<{ status?: unknown }> }
+        this.ctx.logger?.info?.("[board] agents feed captured — activity rides real agent status")
+      } else {
+        this.ctx.logger?.warn?.("[board] agents service arrived without list() — activity stays zero")
+      }
+    })
   }
 
   // ── read surface (B1; the locked write surface lives in the lib modules —
@@ -707,6 +812,261 @@ export class Board extends Service {
   readRevision = (id: string, hash: string) => readRevision(this.directory, id, hash)
   problems = (item: WorkItem) => computeProblems(item)
   recency = (item: Parameters<typeof recencyKey>[0]) => recencyKey(item)
+
+  // ── WI-062 slice 2: the web tab payload (read-only index) ─────────────────────
+  // Shape for GET /api/hive-board/index (contract: docs/board-tab-contract.md
+  // §4). Grouping and column sort are POLICY for this surface; recency itself
+  // stays the shared recencyKey (a FACT — recencyKey exists so two surfaces
+  // can never disagree on it). Read-only like every B1 surface: no lock, no
+  // write, no snapshot — each column may observe a different write instant,
+  // and the tab treats nothing it shows as a consistent transaction.
+  tabIndex(status: (typeof STATUS_FILTERS)[number] = "live") {
+    const all = this.items()
+    const rows =
+      status === "live"
+        ? all.filter((it) => it.status !== "done")
+        : status === "all"
+          ? all
+          : all.filter((it) => it.status === status)
+    const summarize = (it: WorkItem) => ({
+      id: it.id,
+      title: it.title,
+      status: it.status,
+      priority: it.priority,
+      owner: it.owner_session,
+      paused: it.paused,
+      tags: it.tags,
+      body_bytes: it.body.length,
+      subtasks: it.subtasks.length,
+      subtasks_done: it.subtasks.filter((s) => s.status === "completed").length,
+      todo_mirror: it.todo_mirror.length,
+      created: it.created,
+      updated: it.updated,
+      recency: recencyKey(it),
+      problems: computeProblems(it),
+    })
+    const priorityRank = { high: 3, medium: 2, low: 1 } as const
+    const byPriorityThenRecency = (a: WorkItem, b: WorkItem) => {
+      const p = (priorityRank[b.priority] ?? 0) - (priorityRank[a.priority] ?? 0)
+      if (p !== 0) return p
+      const r = recencyKey(b).localeCompare(recencyKey(a))
+      return r !== 0 ? r : a.id < b.id ? -1 : a.id > b.id ? 1 : 0
+    }
+    const byRecency = (a: WorkItem, b: WorkItem) =>
+      recencyKey(b).localeCompare(recencyKey(a)) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+    // Queued = backlog + todo (the two UN-OWNED statuses): priority is the
+    // PRIMARY sort key, recency second — the same promise hive_board_list
+    // makes. In Progress and Done sort newest-first via the shared recency
+    // key. Done rides along so the tab gets the whole board in one payload
+    // (the whole index is cheap by construction); the CLIENT caps rendering.
+    const queued = rows.filter((it) => it.status === "backlog" || it.status === "todo").sort(byPriorityThenRecency)
+    const active = rows.filter((it) => it.status === "in_progress").sort(byRecency)
+    const done = all.filter((it) => it.status === "done").sort(byRecency)
+    // WI-062 slice 3: the viewer-parity port consumes FULL items (the old
+    // /api/state payload shipped the same whole records) — the store parse
+    // objects with the read-time problems overlay (the one-boundary normalize
+    // the old data/workitems.ts performed; here the route performs it). The
+    // slice-2 `columns` summaries are UNTOUCHED for compatibility.
+    const fullItems = all.map((it) => ({ ...it, problems: computeProblems(it) }))
+    return {
+      ok: true as const,
+      status,
+      generated: nowIso(),
+      // slice 3: the parity engine's BoardState adapter consumes these.
+      workspaceRoot: this.directory,
+      boardBuild: readBoardBuild(),
+      // slice 3D: live activity — the icon/mark derivation's ground truth.
+      activity: this.activityFor(),
+      counts: {
+        total: all.length,
+        queued: queued.length,
+        in_progress: active.length,
+        done: done.length,
+      },
+      columns: {
+        queued: queued.map(summarize),
+        in_progress: active.map(summarize),
+        done: done.map(summarize),
+      },
+      items: fullItems,
+    }
+  }
+
+  /**
+   * Slice 3D — the icon/mark derivation's ground truth. RUNNERS, not bound
+   * items: the count of agents whose registry status is `running` RIGHT NOW.
+   * The old in-progress-item proxy is gone (in_progress items outlive their
+   * sessions for weeks — "bound" never meant "busy").
+   *
+   * Slice 3E — the count SPLITS into HIVE vs ambient: a running agent is HIVE
+   * iff its session id is a member of HIVE's own live-session ledger
+   * (<workspace>/.opencode/agents/hive-sessions.json — the SAME registry the
+   * awaken/bind tools stamp, so membership is authoritative; all its
+   * id-keyed member maps are unioned, `coordinators` today). Candidate B
+   * (dispatch-label prefixes) was EVALUATED and DROPPED: the public Agent
+   * face carries only `id: SessionId` + the runtime `status` — no label
+   * field exists to read without undocumented surfaces, and the ledger
+   * already carries label-less roots (the coordinator's own session id is in
+   * it), so the label signal had no case the ledger couldn't answer. With
+   * one authoritative signal the two-signal precedence question collapses.
+   *
+   * LEDGER STALENESS BOUNDARY (honest): the ledger is a MEMBERSHIP record,
+   * not a liveness record — it stamps on awaken/bind and does not track
+   * dispose. The join is with RUNNING registry rows only, so a leaked ledger
+   * entry contributes NOTHING unless its session runs right now. The
+   * residual gap runs the OTHER way: a session running before awaken/bind
+   * stamps the ledger reads AMBIENT until the stamp lands (seconds; never
+   * invented as HIVE; never silent — ledgerAvailable flags a blind join).
+   *
+   * CHOSEN DISCRIMINATOR (documented in the contract): `agents.list()` —
+   * process-local, LIVE-only (disposed agents are absent, so dissolved
+   * sessions are stale-proof by construction) — filtered by the per-agent
+   * `status` (`AgentStatus = 'idle' | 'running'`, @deepseek-ai/dsh-agent).
+   * runningJobs was deliberately NOT taken (the agents filter is direct and
+   * sufficient; every extra seam is one more thing to defend).
+   *
+   * KNOWN EDGE (accepted, revisit via WI-063's rewrite): an agent blocked
+   * awaiting a user answer mid-turn still reports `running` — a question does
+   * not flip the loop to idle. The icon may breathe while WAITING FOR YOU,
+   * inheriting its tier by HIVE-ness. Distinguishing blocked-await-answer
+   * from mid-turn needs the approval/userQuestions service state; not wired
+   * in this slice.
+   */
+  activityFor(): {
+    runningAgents: number
+    hiveRunningAgents: number
+    sampledAt: string
+    feedAvailable: boolean
+    ledgerAvailable: boolean
+  } {
+    const sampledAt = nowIso()
+    const svc = this.agentsSvc
+    if (!svc || typeof svc.list !== "function") {
+      return { runningAgents: 0, hiveRunningAgents: 0, sampledAt, feedAvailable: false, ledgerAvailable: false }
+    }
+    try {
+      const rows = svc.list() ?? []
+      const hive = this.hiveSessionIds()
+      let runningAgents = 0
+      let hiveRunningAgents = 0
+      for (const row of rows) {
+        if (row?.status !== "running") continue
+        runningAgents++
+        // The join REQUIRES the session id: a row without one counts as
+        // running (ambient at most) — never invented as HIVE.
+        if (row.id && hive.has(String(row.id))) hiveRunningAgents++
+      }
+      return { runningAgents, hiveRunningAgents, sampledAt, feedAvailable: true, ledgerAvailable: this.ledgerSeen }
+    } catch (e) {
+      this.ctx.logger?.warn?.("[board] agents.list() threw — activity sampled as zero", {
+        error: String((e as Error)?.message ?? e),
+      })
+      return { runningAgents: 0, hiveRunningAgents: 0, sampledAt, feedAvailable: false, ledgerAvailable: false }
+    }
+  }
+
+  /** Whether the last sample saw a readable ledger (payload-honest blindness). */
+  private ledgerSeen = false
+
+  /**
+   * Session ids HIVE's own ledger claims. Union of every id-keyed member map
+   * in the ledger document (today: `coordinators`), so a future section that
+   * registers sessions the same way is honored without a code change. Read
+   * PER SAMPLE (the file is small; this fires at poll cadence, not page
+   * render). Unreadable or absent ⇒ empty set + ledgerSeen:false — the join
+   * stays BLIND rather than guessing.
+   */
+  private hiveSessionIds(): Set<string> {
+    const ids = new Set<string>()
+    try {
+      const raw = readFileSync(nodePath.join(this.directory, ".opencode", "agents", "hive-sessions.json"), "utf8")
+      const ledger = JSON.parse(raw) as Record<string, unknown>
+      this.ledgerSeen = true
+      for (const value of Object.values(ledger ?? {})) {
+        if (!value || typeof value !== "object" || Array.isArray(value)) continue
+        for (const key of Object.keys(value)) {
+          if (key.startsWith("session-")) ids.add(key)
+        }
+      }
+    } catch {
+      this.ledgerSeen = false
+    }
+    return ids
+  }
+
+  /**
+   * Slice 3b — the item depth view's payload (GET /api/hive-board/item?id=…).
+   * Read-only, over the SAME single parse pass as tabIndex (this.items()); the
+   * budget discipline follows readItems: caps are explicit — the spec body is
+   * capped at ITEM_BODY_BUDGET chars with `truncated` + full `bodyBytes`, the
+   * transition history at HISTORY_CAP with `historyTotal` — nothing is dropped
+   * silently, and the board file is never written (one code path, read only).
+   * The title rides RAW — presentation (SHADOW-019 truncation) is the CLIENT's
+   * decision, the server never massages titles.
+   */
+  tabItem(itemId: string): unknown {
+    const all = this.items()
+    const found = all.find((it) => it.id === itemId || it.id.toLowerCase() === itemId.toLowerCase())
+    if (!found) {
+      return { ok: false as const, error: `no such work item on this board`, missing: [itemId] }
+    }
+    const bodyFull = found.body
+    const body = bodyFull.length > ITEM_BODY_BUDGET ? bodyFull.slice(0, ITEM_BODY_BUDGET) : bodyFull
+    const transitionsFull = Array.isArray(found.transitions) ? found.transitions : []
+    if (transitionsFull.length > HISTORY_CAP) {
+      this.ctx.logger?.info?.(`[board] item payload: history shown for ${found.id} capped at ${HISTORY_CAP} of ${transitionsFull.length}`)
+    }
+    return {
+      ok: true as const,
+      generated: nowIso(),
+      boardBuild: readBoardBuild(),
+      id: found.id,
+      item: { ...found, body, problems: computeProblems(found), transitions: transitionsFull.slice(0, HISTORY_CAP), recency: recencyKey(found) },
+      truncated: body.length < bodyFull.length,
+      bodyBytes: bodyFull.length,
+      historyTotal: transitionsFull.length,
+    }
+  }
+}
+
+/**
+ * Slice-3b payload budgets (readItems discipline, scaled for a drawer): the
+ * spec body of a real WI can be tens of thousands of chars; the drawer shows
+ * the head and names the cap. History is a display cap only — the record keeps
+ * every transition.
+ */
+const ITEM_BODY_BUDGET = 10_000
+const HISTORY_CAP = 50
+
+/**
+ * The board package's own build stamp (the client bundle writes the same one —
+ * scripts/build-client.ts) — the host side of the I-152 staleness verdict
+ * payload. "unknown" when the stamp file is absent (never asserted fresh —
+ * the same discipline as the client's verdict).
+ */
+function readBoardBuild(): string {
+  try {
+    const raw = readFileSync(new URL("./board-build.json", import.meta.url), "utf8")
+    const parsed = JSON.parse(raw) as { boardBuild?: unknown }
+    return typeof parsed.boardBuild === "string" && parsed.boardBuild !== "" ? parsed.boardBuild : "unknown"
+  } catch {
+    return "unknown"
+  }
+}
+
+/** Structural slices of the dsh webServer route seam — deliberately minimal, so this package never needs webserver types (W-044 discipline). */
+interface WebLikeResponse {
+  writeHead(code: number, headers: Record<string, string>): unknown
+  end(chunk: string): unknown
+}
+
+interface WebServerLike {
+  /** Returns the route's unregister disposer (the real webServer contract), handed to effect as the body's Disposer. */
+  register: (route: {
+    kind: string
+    path: string
+    handler: (req: unknown, res: WebLikeResponse) => void | Promise<void>
+  }) => () => void
 }
 
 export default Board
