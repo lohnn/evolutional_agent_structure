@@ -34,6 +34,14 @@ const CSS_OVERRIDES = `
 .hvb-root .col{flex:1 1 200px;min-width:200px;max-width:360px}
 .hvb-sub{color:rgba(128,128,128,.9);font-size:11.5px;margin:0 0 10px}
 .hvb-controls-note{color:rgba(128,128,128,.75);font-size:11px;margin:0 0 8px}
+/* head row (slice 3C): the animated full mark, top-left of the title row —
+   shell-safe sizing on purpose (the 4400 header's 40px sat on a full-page h1;
+   a side-panel row holds 34px without crowding the controls below). The
+   breathe ANIMATION itself comes from the ported keyframes (reduced-motion
+   gated there). The holder is OUTSIDE the morph root — survives polls. */
+.hvb-head-row{display:flex;gap:10px;align-items:center;margin:0 0 8px}
+.hvb-head-row .hb-mark{display:block;flex:0 0 auto;max-width:34px}
+.hvb-head-row .hb-mark svg{width:100%;height:auto;display:block}
 `
 
 const LOADING_HTML = '<div class="empty">Fetching the board…</div>'
@@ -47,6 +55,13 @@ const LOADING_HTML = '<div class="empty">Fetching the board…</div>'
  *   main#board-root     the morph root; starts in the loading state
  */
 const SHELL_MARKUP =
+  `<div class="hvb-head-row">` +
+  // the animated full mark (slice 3C) — holder outside the morph root; the
+  // icon driver stamps it (same deriveBoardIcon mapping as the favicon) so
+  // mark + favicon + board truth always agree. Static drawing until the
+  // first good payload.
+  `<span id="hvb-panel-mark" class="hb-mark" title="board activity"></span>` +
+  `</div>` +
   `<div class="hvb-sub">read-only view of the workspace board (WI-*) — the write path stays sealed behind the hive_board_* tools (WI-062)</div>` +
   `<div id="board-controls-host"></div>` +
   `<main id="board-root">${LOADING_HTML}</main>`

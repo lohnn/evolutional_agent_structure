@@ -144,4 +144,11 @@ test("emitted client.js: carries the slice-3 + 3b surface markers", () => {
   // the drawer + scrim must anchor to document.body (fixed positioning must
   // escape transformed panel ancestors) — asserted as a structural string
   assert.ok(CLIENT.includes("document.body.appendChild"), "drawer body-mount present")
+  // slice 3C — the animated panel-head mark (surviving string literals only:
+  // internal fn names minify away; CSS keyframe names, class hooks and id
+  // prefixes survive the minifier by being string literals)
+  assert.ok(CLIENT.includes("hvb-panel-mark"), "panel mark holder present in shell + driver lookup")
+  assert.ok(CLIENT.includes('class="lit"'), "mark breathe hooks emitted when animate:true")
+  assert.ok(CLIENT.includes("mark-breathe"), "ported breathe keyframes ship in the style tag")
+  assert.ok(CLIENT.includes('idPrefix:"hvbp"'), "panel mark clip ids namespaced away from other marks")
 })

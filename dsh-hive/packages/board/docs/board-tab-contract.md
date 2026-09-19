@@ -229,6 +229,15 @@ Two build facts pinned here because they were DISCOVERED, not assumed:
     existing `data-key="wi:…"` — zero ported-render bytes changed; anchors to document.body so
     fixed positioning escapes transformed panel ancestors; dead `Open ↗` links route into the
     drawer instead of soft-navigating the shell away).
+  - Slice 3C — the panel-head mark: `stampPanelMark()` in the same `icon-driver.ts` stamps the
+    ported FULL mark (`fullMarkSvg`, `idPrefix:"hvbp"`, `animate:true`, 34 px shell-size) into
+    `.hvb-head-row > #hvb-panel-mark` at the panel's top-left — OUTSIDE the morph root, stamped
+    on the engine's 15 s tick AND the driver's 30 s tick, state-keyed so innerHTML is only
+    rewritten on state CHANGE (no churn, no animation restarts). Same `deriveBoardIcon` mapping
+    as the favicon — mark, favicon and board truth can never disagree. Zero host-route changes;
+    zero new head surfaces (the mark lives in the panel DOM; the breathe keyframes + reduced-motion
+    gate are the already-ported `mark-breathe` CSS). Emitted guard asserts the holder, the
+    `class="lit"` hook, the keyframes, and the id namespace.
 - The bundle route is NOT ours (clientModules owns it, §3.1).
 
 ## 5. AUTH + EXPOSURE — new pin, decision needed (load-bearing for slice 2)

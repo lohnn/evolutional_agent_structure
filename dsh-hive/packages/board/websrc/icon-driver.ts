@@ -26,7 +26,7 @@
  * gets REPORTED and the driver falls back to the in-panel badge (which the
  * morph already keeps fresh) rather than fighting back.
  */
-import { faviconHref } from "./icon.js"
+import { faviconHref, fullMarkSvg } from "./icon.js"
 import { adapterState, INDEX_URL, type BoardIndexPayload } from "./tab-engine.js"
 import type { IconState } from "./icon.js"
 
@@ -72,6 +72,7 @@ async function poll(): Promise<void> {
     if (!payload || typeof payload !== "object" || payload.ok !== true) return
     const state = adapterState(payload)
     stampFavicon(state.items, state.actionRequired)
+    stampPanelMark(state.items, state.actionRequired) // marks stay agreeable even pre-engine-mount
   } catch {
     // transient — the next tick retries; the tab's previous icon persists
   }
@@ -79,6 +80,37 @@ async function poll(): Promise<void> {
 
 function refreshIfVisible(): void {
   if (!document.hidden) void poll()
+}
+
+// ── the panel header mark (slice 3C) ─────────────────────────────────────────
+// SAME mapping as the favicon (deriveBoardIcon) — mark, favicon and board
+// truth can never disagree by construction. The mark is the ported FULL
+// drawing (not the 16px favicon): mesh nodes breathe via the ported
+// mark-breathe keyframes, gated by prefers-reduced-motion in the ported CSS
+// (motion stays opt-in, first-class). idPrefix "hvbp" namespaces its internal
+// clip ids away from everything else; the favicon never collides by
+// construction (data: URI = isolated document).
+
+const PANEL_MARK_SIZE = 34 // shell-safe density override lives in CSS_OVERRIDES
+let lastPanelState = ""
+
+/** Stamp the active panel's top-left mark (no-op when no panel is mounted). */
+export function stampPanelMark(
+  items: { status: string; paused: boolean }[],
+  actionRequired: Record<string, { awaitingQuestion: boolean; awaitingPermission: boolean }>,
+): void {
+  const holder = document.getElementById("hvb-panel-mark")
+  if (!holder) return // panel not mounted — favicon-only mode, by design
+  const icon = deriveBoardIcon(items, actionRequired)
+  const stateKey = `${icon.session}:${icon.count}:${icon.dreaming}`
+  if (stateKey === lastPanelState) return // no churn, no animation restarts
+  lastPanelState = stateKey
+  holder.innerHTML = fullMarkSvg(icon, {
+    idPrefix: "hvbp",
+    animate: true,
+    size: PANEL_MARK_SIZE,
+    title: "board activity — mark and favicon share one mapping",
+  })
 }
 
 /**

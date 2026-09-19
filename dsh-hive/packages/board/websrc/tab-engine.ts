@@ -22,6 +22,7 @@ import { morph } from "./morph.js"
 import { renderBoardSection, boardControlsHtml } from "./render.js"
 import { refreshBoardControls, setupBoardControls } from "./filter.js"
 import { bindItemDrawer } from "./item-drawer.js"
+import { stampPanelMark } from "./icon-driver.js"
 import type { BoardState } from "./data/types.js"
 import type { WorkItem as ViewWorkItem } from "./data/workitems.js"
 
@@ -223,6 +224,9 @@ export async function poll(): Promise<void> {
     const state = adapterState(payload)
     lastGood = state
     freshSha = state.buildSha
+    // the panel head mark rides the SAME 15 s tick (outside the morph root —
+    // one mapping for mark, favicon and board truth)
+    stampPanelMark(state.items, state.actionRequired)
     ensureControls(state)
     paint(state)
   } catch {
