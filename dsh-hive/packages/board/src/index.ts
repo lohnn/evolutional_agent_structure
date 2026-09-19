@@ -694,6 +694,44 @@ export class Board extends Service {
     ctx.effect(() => () => {
       for (const d of disposers) d()
     })
+
+    // ── WI-062 slice 2: the same-origin JSON route for the web tab ────────────
+    // WAIT form (contract §4, provider-usage precedent): webServer is a WAIT,
+    // never a hard inject — a plugin that awaits nothing mounts BEFORE the
+    // webserver finishes booting, and on web-less profiles this callback
+    // simply never runs while the rest of the service still boots.
+    // Read-only index; auth = the user-ratified "mirror precedent" posture
+    // (contract §5/§8.1, 2026-09-18): the route carries no token check,
+    // exactly like the live berget-usage snapshot route.
+    ctx.registry.inject(["webServer"], (serverCtx) => {
+      const webServer = serverCtx.get("webServer") as WebServerLike | undefined
+      if (!webServer || typeof webServer.register !== "function") {
+        this.ctx.logger?.warn?.("[board] webServer arrived without register — tab index route skipped")
+        return
+      }
+      serverCtx.effect(
+        () =>
+          webServer.register({
+            kind: "exact",
+            path: "/api/hive-board/index",
+            handler: async (_req: unknown, res: WebLikeResponse) => {
+              let payload: unknown
+              try {
+                payload = this.tabIndex()
+              } catch (e) {
+                payload = { ok: false, error: String((e as Error)?.message ?? e) }
+              }
+              res.writeHead(200, {
+                "content-type": "application/json; charset=utf-8",
+                "cache-control": "no-store",
+              })
+              res.end(JSON.stringify(payload))
+            },
+          }),
+        "board tab index route",
+      )
+      this.ctx.logger?.info?.("[board] tab index route registered at /api/hive-board/index")
+    })
   }
 
   // ── read surface (B1; the locked write surface lives in the lib modules —
@@ -707,6 +745,88 @@ export class Board extends Service {
   readRevision = (id: string, hash: string) => readRevision(this.directory, id, hash)
   problems = (item: WorkItem) => computeProblems(item)
   recency = (item: Parameters<typeof recencyKey>[0]) => recencyKey(item)
+
+  // ── WI-062 slice 2: the web tab payload (read-only index) ─────────────────────
+  // Shape for GET /api/hive-board/index (contract: docs/board-tab-contract.md
+  // §4). Grouping and column sort are POLICY for this surface; recency itself
+  // stays the shared recencyKey (a FACT — recencyKey exists so two surfaces
+  // can never disagree on it). Read-only like every B1 surface: no lock, no
+  // write, no snapshot — each column may observe a different write instant,
+  // and the tab treats nothing it shows as a consistent transaction.
+  tabIndex(status: (typeof STATUS_FILTERS)[number] = "live") {
+    const all = this.items()
+    const rows =
+      status === "live"
+        ? all.filter((it) => it.status !== "done")
+        : status === "all"
+          ? all
+          : all.filter((it) => it.status === status)
+    const summarize = (it: WorkItem) => ({
+      id: it.id,
+      title: it.title,
+      status: it.status,
+      priority: it.priority,
+      owner: it.owner_session,
+      paused: it.paused,
+      tags: it.tags,
+      body_bytes: it.body.length,
+      subtasks: it.subtasks.length,
+      subtasks_done: it.subtasks.filter((s) => s.status === "completed").length,
+      todo_mirror: it.todo_mirror.length,
+      created: it.created,
+      updated: it.updated,
+      recency: recencyKey(it),
+      problems: computeProblems(it),
+    })
+    const priorityRank = { high: 3, medium: 2, low: 1 } as const
+    const byPriorityThenRecency = (a: WorkItem, b: WorkItem) => {
+      const p = (priorityRank[b.priority] ?? 0) - (priorityRank[a.priority] ?? 0)
+      if (p !== 0) return p
+      const r = recencyKey(b).localeCompare(recencyKey(a))
+      return r !== 0 ? r : a.id < b.id ? -1 : a.id > b.id ? 1 : 0
+    }
+    const byRecency = (a: WorkItem, b: WorkItem) =>
+      recencyKey(b).localeCompare(recencyKey(a)) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+    // Queued = backlog + todo (the two UN-OWNED statuses): priority is the
+    // PRIMARY sort key, recency second — the same promise hive_board_list
+    // makes. In Progress and Done sort newest-first via the shared recency
+    // key. Done rides along so the tab gets the whole board in one payload
+    // (the whole index is cheap by construction); the CLIENT caps rendering.
+    const queued = rows.filter((it) => it.status === "backlog" || it.status === "todo").sort(byPriorityThenRecency)
+    const active = rows.filter((it) => it.status === "in_progress").sort(byRecency)
+    const done = all.filter((it) => it.status === "done").sort(byRecency)
+    return {
+      ok: true as const,
+      status,
+      generated: nowIso(),
+      counts: {
+        total: all.length,
+        queued: queued.length,
+        in_progress: active.length,
+        done: done.length,
+      },
+      columns: {
+        queued: queued.map(summarize),
+        in_progress: active.map(summarize),
+        done: done.map(summarize),
+      },
+    }
+  }
+}
+
+/** Structural slices of the dsh webServer route seam — deliberately minimal, so this package never needs webserver types (W-044 discipline). */
+interface WebLikeResponse {
+  writeHead(code: number, headers: Record<string, string>): unknown
+  end(chunk: string): unknown
+}
+
+interface WebServerLike {
+  /** Returns the route's unregister disposer (the real webServer contract), handed to effect as the body's Disposer. */
+  register: (route: {
+    kind: string
+    path: string
+    handler: (req: unknown, res: WebLikeResponse) => void | Promise<void>
+  }) => () => void
 }
 
 export default Board

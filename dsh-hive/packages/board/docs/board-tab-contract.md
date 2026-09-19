@@ -273,10 +273,11 @@ first visibility. Communicate the early visibility honestly to the user.
 
 ## 8. Open items for the coordinator
 
-1. **Auth posture** (§5): confirm with the user that (a) mirroring the berget-usage exposure
-   posture is acceptable for the board index (read-only work-item metadata), or whether
-   (c) a dsh-core per-route auth hook should be requested instead. Not blocking slice 2
-   (default = mirror precedent), but must be a recorded user decision before slice 3.
+1. **Auth posture** (§5): ~~confirm with the user that (a) mirroring the berget-usage exposure
+   posture is acceptable for the board index~~ **RATIFIED — user decision 2026-09-18: mirror
+   precedent (§5a) for the slice-2 read-only index route; re-ratify before any interactive or
+   richer-data surface ships (slice 3+ re-check).** (c) remains the escalation path if the
+   posture ever needs to change.
 2. Capture the browser's exact client-bundle URL (page devtools/network or a cookie-authed
    curl) to close the W-040 re-pin with the 0.1.6 path shape (nice-to-have; not blocking).
 3. Slice-2 ack (per I-143 rhythm).
