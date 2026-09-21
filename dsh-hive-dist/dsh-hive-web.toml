@@ -17,6 +17,11 @@
 #                         BOTH pre_start (svcwatch passes the service env to
 #                         the hook) and the main command (bash expands
 #                         ${DSH_VERSION:?...}) read it. Never float latest.
+#                         VERSION-BUMP GUARD: before changing it, verify the
+#                         @deepseek-ai/cordis-plugin-group peer range declared
+#                         by @deepseek-ai/dsh-app-boot at the new version.
+#                         Update the 1.0.2 pin below if that peer range moves,
+#                         then run the HIVE-kit GitHub Actions workflow.
 #
 # Everything else has sane defaults; ports are env too:
 #   - DSH_PORT            the port dsh web listens on (loopback) — MUST match
@@ -79,7 +84,7 @@ exit 1
 # cwd: svcwatch chdirs LITERALLY (no env expansion), so keep it relative —
 # the workspace root is applied by the cd inside the command instead.
 cwd = "."
-command = ["bash", "-c", 'cd "${DSH_WORKSPACE_ROOT:?DSH_WORKSPACE_ROOT must be set -- see env line}" && exec pnpm dlx --allow-build @deepseek-ai/dsh-subprocess-local --allow-build @google/genai --allow-build koffi --allow-build node-pty --allow-build protobufjs @deepseek-ai/dsh@${DSH_VERSION:?DSH_VERSION must be set -- see env line} --profile hive --port ${DSH_PORT:?DSH_PORT must be set -- see env line} --no-open --trusted-host "${DSH_TRUSTED_HOST:?DSH_TRUSTED_HOST must be set -- see env line}" 2>&1 | tee /tmp/dsh-hive-web.log']
+command = ["bash", "-c", 'cd "${DSH_WORKSPACE_ROOT:?DSH_WORKSPACE_ROOT must be set -- see env line}" && exec pnpm --package @deepseek-ai/cordis-plugin-group@1.0.2 --package @deepseek-ai/dsh@${DSH_VERSION:?DSH_VERSION must be set -- see env line} dlx --allow-build @deepseek-ai/dsh-subprocess-local --allow-build @google/genai --allow-build koffi --allow-build node-pty --allow-build protobufjs dsh --profile hive --port ${DSH_PORT:?DSH_PORT must be set -- see env line} --no-open --trusted-host "${DSH_TRUSTED_HOST:?DSH_TRUSTED_HOST must be set -- see env line}" 2>&1 | tee /tmp/dsh-hive-web.log']
 restart = "always"
 restart_delay_sec = 3
 backoff_max_sec = 60

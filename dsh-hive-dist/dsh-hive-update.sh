@@ -423,14 +423,20 @@ NODE
 fi
 
 run_dsh_plugin() {
+  # dsh-app-boot imports this peer at runtime. Keep this bootstrap invocation
+  # aligned with the web service command: `pnpm dlx dsh` alone can resolve the
+  # CLI but then fails before `plugin add` runs with ERR_MODULE_NOT_FOUND.
   DSH_HIVE_REF="$REF" DSH_HIVE_REPO="$REPO" \
-    pnpm dlx \
+    pnpm \
+      --package "@deepseek-ai/cordis-plugin-group@1.0.2" \
+      --package "@deepseek-ai/dsh@$DSH_VERSION" \
+      dlx \
       --allow-build=@deepseek-ai/dsh-subprocess-local \
       --allow-build=@google/genai \
       --allow-build=koffi \
       --allow-build=node-pty \
       --allow-build=protobufjs \
-      "@deepseek-ai/dsh@$DSH_VERSION" \
+      dsh \
       plugin --profile "$NAME" "$@"
 }
 
