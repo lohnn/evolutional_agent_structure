@@ -123,13 +123,19 @@ fi
 adopt_berget_credentials
 
 # ── scaffold: copy-if-absent from THIS kit directory ────────────────────────
-for f in .pnpmfile.cjs cordis.yml cordis.patch.yml; do
+# The Cordis files are user-owned after their initial scaffold. The pnpm hook
+# is installer-owned: it describes the private cohort dependency graph and must
+# track its tarball names, so refresh it before every cohort installation.
+for f in cordis.yml cordis.patch.yml; do
   if [ ! -f "$PROFILE/$f" ]; then
     [ -f "$KIT/$f" ] || die "missing $KIT/$f — run from a complete dsh-hive-dist checkout"
     cp "$KIT/$f" "$PROFILE/$f"
     log "scaffold: wrote $f"
   fi
 done
+[ -f "$KIT/.pnpmfile.cjs" ] || die "missing $KIT/.pnpmfile.cjs — run from a complete dsh-hive-dist checkout"
+install -m 0644 "$KIT/.pnpmfile.cjs" "$PROFILE/.pnpmfile.cjs" || die "cannot refresh profile .pnpmfile.cjs"
+log "profile: refreshed managed .pnpmfile.cjs"
 
 ensure_setting() { # file, line, marker-grep
   if ! grep -qF "$3" "$1" 2>/dev/null; then
@@ -431,7 +437,7 @@ run_dsh_plugin() {
   # dsh-app-boot imports this peer at runtime. Keep this bootstrap invocation
   # aligned with the web service command: `pnpm dlx dsh` alone can resolve the
   # CLI but then fails before `plugin add` runs with ERR_MODULE_NOT_FOUND.
-  DSH_HIVE_REF="$REF" DSH_HIVE_REPO="$REPO" npm_config_ignore_scripts="$IGNORE_PACKAGE_SCRIPTS" \
+  DSH_HIVE_REF="$REF" DSH_HIVE_REPO="$REPO" PNPM_CONFIG_IGNORE_SCRIPTS="$IGNORE_PACKAGE_SCRIPTS" \
     pnpm \
       --package "@deepseek-ai/cordis-plugin-group@1.0.2" \
       --package "@deepseek-ai/dsh@$DSH_VERSION" \
@@ -443,6 +449,12 @@ run_dsh_plugin() {
       --allow-build=protobufjs \
       dsh \
       plugin --profile "$NAME" "$@"
+}
+
+has_usable_board() {
+  [ -f "$PROFILE/node_modules/@hive/dsh-board/dist/index.js" ] &&
+    [ -f "$PROFILE/node_modules/@hive/dsh-board/dist/lib/board-transitions.js" ] &&
+    [ -f "$PROFILE/node_modules/@hive/dsh-board/client.js" ]
 }
 
 OUT="$(mktemp)"
@@ -457,11 +469,11 @@ log "dsh plugin add — profile=$NAME (10 packages)"
 if ! ( cd "$PROFILE" && run_dsh_plugin add "${SPECS[@]}" 2>&1 ) | tee "$OUT"; then
   warn "add FAILED — last output lines:"
   tail -n 12 "$OUT" | while IFS= read -r l; do warn "  └ $l"; done
-  if [ -e "$PROFILE/node_modules/@hive/dsh-dream-archive/dist/index.js" ]; then
-    warn "add FAILED but an install already exists — keeping it (was it offline? see lines above)"
+  if [ -e "$PROFILE/node_modules/@hive/dsh-dream-archive/dist/index.js" ] && has_usable_board; then
+    warn "add FAILED but a complete board-capable install already exists — keeping it (was it offline? see lines above)"
     exit 0
   fi
-  die "add FAILED and no existing install — service start must be aborted"
+  die "add FAILED and no complete board-capable install exists — service start must be aborted"
 fi
 
 if [ "$HAS_KIT_TARBALLS" = "1" ] && [ "${DSH_HIVE_GIT_MODE:-0}" != "1" ]; then
@@ -477,8 +489,8 @@ fi
 
 warn "update FAILED — last output lines:"
 tail -n 12 "$OUT" | while IFS= read -r l; do warn "  └ $l"; done
-if [ -e "$PROFILE/node_modules/@hive/dsh-dream-archive/dist/index.js" ]; then
-  warn "update FAILED but an install already exists — keeping it (was it offline? see lines above)"
+if [ -e "$PROFILE/node_modules/@hive/dsh-dream-archive/dist/index.js" ] && has_usable_board; then
+  warn "update FAILED but a complete board-capable install already exists — keeping it (was it offline? see lines above)"
   exit 0
 fi
-die "update FAILED and no existing install — service start must be aborted"
+die "update FAILED and no complete board-capable install exists — service start must be aborted"

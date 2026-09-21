@@ -225,11 +225,13 @@ So:
   expands `${DSH_VERSION:?...}` from it (bash fails loudly if the line is
   removed) — bump in one place, both sides follow.
 - First run also bootstraps the profile scaffold from the kit dir next to
-  the script — the script is self-teaching; existing files are never
-  overwritten.
-- Offline with an existing install ⇒ keeps it and boots anyway (stale-but-up
-  beats down). Offline with nothing installed ⇒ the start aborts and backs
-  off until it succeeds.
+  the script. The Cordis files remain user-owned after that first write; the
+  managed `.pnpmfile.cjs` is refreshed on every run because it encodes the
+  cohort's private dependency graph and tarball names.
+- Offline with a complete board-capable install ⇒ keeps it and boots anyway
+  (stale-but-up beats down). An incomplete install, including a pre-board
+  cohort, aborts and backs off until it succeeds rather than silently serving
+  a boardless profile.
 - Requires a svcwatch with `pre_start` support (this plugin version); a
   running old watcher must be restarted once (or the container recreated).
   `svcwatch pre_start` also fixed a latent marker bug: ctl-stop of a
