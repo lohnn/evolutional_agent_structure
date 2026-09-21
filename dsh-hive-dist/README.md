@@ -187,12 +187,15 @@ relay is optional — only for exposing dsh beyond the machine (dsh refuses
 `--host 0.0.0.0` by design).
 
 **The TOML is the only locally maintained artifact.** Its `pre_start` is a
-short fetcher: on every (re)start it syncs the kit (`dsh-hive-update.sh`,
-`.pnpmfile.cjs`, both cordis ymls) from this repo at the pinned
-`DSH_HIVE_REF` into `~/.dsh/hive-kit` (repo is public; raw.githubusercontent,
-TLS), then execs the freshly fetched script. So the kit itself is
-always-current too — hand-copying `dsh-hive-dist/` is only needed for the
-tarball flow (Way B). Consequences, verified from a cold fake-HOME:
+short fetcher: on every (re)start it syncs the text kit
+(`dsh-hive-update.sh`, `.pnpmfile.cjs`, both cordis ymls) from this repo at
+the pinned `DSH_HIVE_REF` into `~/.dsh/hive-kit` (repo is public;
+raw.githubusercontent, TLS), then execs the freshly fetched script. The
+updater fetches any missing committed cohort tarballs from that same ref before
+installing. This lets an older locally maintained TOML self-heal when a cohort
+release adds a package. So the kit itself is always-current too — hand-copying
+`dsh-hive-dist/` is only needed for the offline tarball flow (Way B).
+Consequences, verified from a cold fake-HOME:
 
 - cold bootstrap: kit fetch + profile scaffold + cohort from the public
   GitHub transport in ~25s, then `--dump-config` exit 0 / 7 rows

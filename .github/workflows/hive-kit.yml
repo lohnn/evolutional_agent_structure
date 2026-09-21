@@ -1,0 +1,26 @@
+name: Validate HIVE kit
+
+on:
+  pull_request:
+    paths:
+      - dsh-hive-dist/**
+      - .github/workflows/hive-kit.yml
+  push:
+    branches: [main]
+    paths:
+      - dsh-hive-dist/**
+      - .github/workflows/hive-kit.yml
+
+permissions:
+  contents: read
+
+jobs:
+  updater-bootstrap:
+    name: Bootstrap complete tarball cohort
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate updater syntax
+        run: bash -n dsh-hive-dist/dsh-hive-update.sh
+      - name: Validate stale-kit bootstrap
+        run: bash dsh-hive-dist/test/updater-bootstrap.test.sh
