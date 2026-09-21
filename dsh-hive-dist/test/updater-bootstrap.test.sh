@@ -82,6 +82,7 @@ done
 
 grep -q "name: '@hive/dsh-board'" "$PROFILE/cordis.patch.yml"
 grep -Fq '@deepseek-ai/cordis-plugin-group@1.0.2' "$TRACE"
+grep -Fq '@deepseek-ai/cordis-plugin-group@1.0.2' dsh-hive-dist/dsh-hive-web.toml
 grep -q 'tarball mode: copied 10 kit tarballs' "$ROOT/updater.log"
 
 echo 'updater bootstrap test passed'
