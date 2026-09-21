@@ -24,8 +24,10 @@
 #
 # THE KIT IS FETCHED, NOT COPIED: pre_start syncs dsh-hive-update.sh +
 # .pnpmfile.cjs + the cordis ymls from the repo (raw.githubusercontent, TLS,
-# the pinned DSH_HIVE_REF) into ~/.dsh/hive-kit on EVERY (re)start, then runs
-# the freshly fetched script. That means: the only locally maintained
+# the pinned DSH_HIVE_REF) into ~/.dsh/hive-kit on EVERY (re)start. The
+# freshly fetched updater then fills in any missing committed cohort tarballs
+# from the same ref before installing, so older service TOMLs self-heal too.
+# That means: the only locally maintained
 # artifact is THIS TOML. Consequences:
 #   - offline with a cached kit -> boots on the cached copy (stale-but-up)
 #   - offline with NEVER-fetched kit -> pre_start fails, start backs off

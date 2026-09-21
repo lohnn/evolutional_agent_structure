@@ -278,7 +278,14 @@ NODE
 # never runs a prepare: no bun, no allowBuilds, no git-clone, and each
 # release's tarballs are the pinned version the profile gets.
 #
-# GIT fallback (kit tarballs absent): `dsh plugin add` with github:…
+# The service pre-start fetches the small text kit files from raw GitHub. Keep
+# this script self-sufficient too: an already-installed service TOML may be
+# older than the current template and therefore not fetch the tarballs itself.
+# Once this freshly fetched updater runs, it fills a missing kit from the same
+# ref before choosing a transport. That prevents a stale pre-start from
+# falling through to pnpm's fragile git-hosted prepare path.
+#
+# GIT fallback (kit tarballs unavailable): `dsh plugin add` with github:…
 # #path:… specs. pnpm >= 11 blocks the git-hosted `prepare` builds behind
 # an allowBuilds allowlist keyed by the RESOLVED spec (codeload URL with
 # the commit sha embedded) — `dangerouslyAllowAllBuilds: true` is pnpm-10
@@ -293,8 +300,60 @@ NODE
 # release artifacts). Also: pnpm 11's allowBuilds matcher rejects even the
 # exact keys it prints (upstream, 11.24 verified) — the fallback targets
 # pnpm 10.x or >=12.0 only.
-KIT_TARBALL="$KIT/hive-dsh-dream-archive-0.0.1.tgz"
-if [ -f "$KIT_TARBALL" ] && [ "${DSH_HIVE_GIT_MODE:-0}" != "1" ]; then
+KIT_TARBALLS=(
+  hive-dsh-agents-0.0.1.tgz
+  hive-dsh-board-0.1.0.tgz
+  hive-dsh-dream-archive-0.0.1.tgz
+  hive-dsh-evolution-0.0.1.tgz
+  hive-dsh-hivemind-0.0.1.tgz
+  hive-dsh-painpoints-0.0.1.tgz
+  hive-dsh-tools-0.0.1.tgz
+  dsh-berget-refresh-0.1.0.tgz
+  dsh-berget-usage-0.2.0.tgz
+  dsh-provider-usage-0.1.0.tgz
+)
+
+kit_has_all_tarballs() {
+  local archive
+  for archive in "${KIT_TARBALLS[@]}"; do
+    [ -f "$KIT/$archive" ] || return 1
+  done
+}
+
+fetch_missing_tarballs() {
+  [ "${DSH_HIVE_GIT_MODE:-0}" = "1" ] && return 0
+  command -v curl >/dev/null 2>&1 || return 0
+
+  local raw_root="${DSH_HIVE_RAW:-}"
+  if [ -z "$raw_root" ]; then
+    case "$REPO" in
+      github:*) raw_root="https://raw.githubusercontent.com/${REPO#github:}" ;;
+      git+https://github.com/*.git) raw_root="https://raw.githubusercontent.com/${REPO#git+https://github.com/}"; raw_root="${raw_root%.git}" ;;
+      https://github.com/*.git) raw_root="https://raw.githubusercontent.com/${REPO#https://github.com/}"; raw_root="${raw_root%.git}" ;;
+      *) return 0 ;;
+    esac
+  fi
+
+  local archive url tmp
+  for archive in "${KIT_TARBALLS[@]}"; do
+    [ -f "$KIT/$archive" ] && continue
+    url="${raw_root%/}/${REF}/dsh-hive-dist/$archive"
+    tmp="$KIT/.tmp.$archive"
+    if curl -fsSL --max-time 60 "$url" -o "$tmp"; then
+      mv "$tmp" "$KIT/$archive"
+      log "tarball: fetched $archive"
+    else
+      rm -f "$tmp"
+      warn "tarball: could not fetch $archive from $url"
+    fi
+  done
+}
+
+fetch_missing_tarballs
+HAS_KIT_TARBALLS=0
+if kit_has_all_tarballs; then HAS_KIT_TARBALLS=1; fi
+
+if [ "$HAS_KIT_TARBALLS" = "1" ] && [ "${DSH_HIVE_GIT_MODE:-0}" != "1" ]; then
   # ── TARBALL mode ──────────────────────────────────────────────────────────
   cp "$KIT"/*.tgz "$PROFILE/"
   log "tarball mode: copied $(ls "$KIT"/*.tgz | wc -l | tr -d ' ') kit tarballs beside the profile hook"
@@ -394,7 +453,7 @@ if ! ( cd "$PROFILE" && run_dsh_plugin add "${SPECS[@]}" 2>&1 ) | tee "$OUT"; th
   die "add FAILED and no existing install — service start must be aborted"
 fi
 
-if [ -f "$KIT_TARBALL" ] && [ "${DSH_HIVE_GIT_MODE:-0}" != "1" ]; then
+if [ "$HAS_KIT_TARBALLS" = "1" ] && [ "${DSH_HIVE_GIT_MODE:-0}" != "1" ]; then
   log "tarball mode: versions pinned by the shipped kit tarballs — nothing to re-resolve"
   exit 0
 fi
