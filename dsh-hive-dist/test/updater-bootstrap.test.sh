@@ -14,7 +14,7 @@ HOME_DIR="$ROOT/home"
 TRACE="$ROOT/pnpm.args"
 CURL_TRACE="$ROOT/curl.urls"
 ARCHIVE="$ROOT/archive.tgz"
-mkdir -p "$KIT" "$BIN" "$HOME_DIR"
+mkdir -p "$KIT" "$PROFILE" "$BIN" "$HOME_DIR"
 
 cp \
   dsh-hive-dist/dsh-hive-update.sh \
@@ -23,6 +23,8 @@ cp \
   dsh-hive-dist/cordis.patch.yml \
   "$KIT/"
 printf 'fixture archive\n' > "$ARCHIVE"
+# Simulate a profile created before a cohort release added the board rewrite.
+printf '// stale profile hook\n' > "$PROFILE/.pnpmfile.cjs"
 
 cat > "$BIN/curl" <<'EOF'
 #!/usr/bin/env bash
@@ -46,7 +48,7 @@ if [ "${1:-}" = "--version" ]; then
   echo '12.3.4'
   exit 0
 fi
-printf 'ignore_scripts=%q ' "${npm_config_ignore_scripts:-}" >> "$PNPM_TRACE"
+printf 'ignore_scripts=%q ' "${PNPM_CONFIG_IGNORE_SCRIPTS:-}" >> "$PNPM_TRACE"
 printf '%q ' "$@" >> "$PNPM_TRACE"
 printf '\n' >> "$PNPM_TRACE"
 EOF
@@ -81,6 +83,7 @@ for archive in "${archives[@]}"; do
   grep -Fq "file:./$archive" "$TRACE"
 done
 
+cmp -s "$KIT/.pnpmfile.cjs" "$PROFILE/.pnpmfile.cjs"
 grep -q "name: '@hive/dsh-board'" "$PROFILE/cordis.patch.yml"
 grep -Fq 'ignore_scripts=true' "$TRACE"
 grep -Fq '@deepseek-ai/cordis-plugin-group@1.0.2' "$TRACE"
