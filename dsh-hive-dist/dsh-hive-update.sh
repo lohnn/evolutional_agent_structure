@@ -352,8 +352,13 @@ fetch_missing_tarballs() {
 fetch_missing_tarballs
 HAS_KIT_TARBALLS=0
 if kit_has_all_tarballs; then HAS_KIT_TARBALLS=1; fi
+# Tarballs already include dist/. Their package manifests retain source-tree
+# prepare hooks, which pnpm otherwise runs while adding file: archives and
+# which cannot resolve the isolated cohort's workspace imports.
+IGNORE_PACKAGE_SCRIPTS=false
 
 if [ "$HAS_KIT_TARBALLS" = "1" ] && [ "${DSH_HIVE_GIT_MODE:-0}" != "1" ]; then
+  IGNORE_PACKAGE_SCRIPTS=true
   # ── TARBALL mode ──────────────────────────────────────────────────────────
   cp "$KIT"/*.tgz "$PROFILE/"
   log "tarball mode: copied $(ls "$KIT"/*.tgz | wc -l | tr -d ' ') kit tarballs beside the profile hook"
@@ -426,7 +431,7 @@ run_dsh_plugin() {
   # dsh-app-boot imports this peer at runtime. Keep this bootstrap invocation
   # aligned with the web service command: `pnpm dlx dsh` alone can resolve the
   # CLI but then fails before `plugin add` runs with ERR_MODULE_NOT_FOUND.
-  DSH_HIVE_REF="$REF" DSH_HIVE_REPO="$REPO" \
+  DSH_HIVE_REF="$REF" DSH_HIVE_REPO="$REPO" npm_config_ignore_scripts="$IGNORE_PACKAGE_SCRIPTS" \
     pnpm \
       --package "@deepseek-ai/cordis-plugin-group@1.0.2" \
       --package "@deepseek-ai/dsh@$DSH_VERSION" \

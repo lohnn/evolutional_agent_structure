@@ -46,6 +46,7 @@ if [ "${1:-}" = "--version" ]; then
   echo '12.3.4'
   exit 0
 fi
+printf 'ignore_scripts=%q ' "${npm_config_ignore_scripts:-}" >> "$PNPM_TRACE"
 printf '%q ' "$@" >> "$PNPM_TRACE"
 printf '\n' >> "$PNPM_TRACE"
 EOF
@@ -81,6 +82,7 @@ for archive in "${archives[@]}"; do
 done
 
 grep -q "name: '@hive/dsh-board'" "$PROFILE/cordis.patch.yml"
+grep -Fq 'ignore_scripts=true' "$TRACE"
 grep -Fq '@deepseek-ai/cordis-plugin-group@1.0.2' "$TRACE"
 grep -Fq '@deepseek-ai/cordis-plugin-group@1.0.2' dsh-hive-dist/dsh-hive-web.toml
 grep -q 'tarball mode: copied 10 kit tarballs' "$ROOT/updater.log"
