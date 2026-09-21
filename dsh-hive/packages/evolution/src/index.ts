@@ -146,12 +146,17 @@ function readCapabilityFrontmatter(filePath: string): { energy: number | null; d
  *   NOT exist on dsh and is deliberately absent from this census),
  * - this package: hive_dispatch.
  *
- * This is the awaken gate's deny mask (T2/D2): a dormant top-level agent has
+ * This is the awaken gate's deny BASE (T2/D2): a dormant top-level agent has
  * these tools REMOVED from visibility AND execution while the session is
- * un-awakened — the tools read as absent, not denied. KEEP IN SYNC with the
+ * un-awakened — the tools read as absent, not denied. WI-066 REFINES the
+ * mask: the board's discovery/authoring half is re-opened to dormant
+ * sessions (see HIVE_DORMANT_OPEN_TOOLS below) — everything in HERE that is
+ * not on that list stays absent for the un-awakened. KEEP IN SYNC with the
  * defineTool registrations across the monorepo: a new hive_* tool MUST be
- * added here in the same commit it ships, or it leaks past the gate.
- * Guarded by `test/tool-gate-sync.test.mjs`, which re-derives the set from
+ * added here in the same commit it ships, or it leaks past the gate (a tool
+ * meant for dormant sessions must simultaneously join HIVE_DORMANT_OPEN_TOOLS;
+ * the default is masked).
+ * Guarded by `test/tool-gate-sync.test.mjs`, which re-derives both sets from
  * every package's src and asserts equality — a forgotten entry fails the
  * suite, not a user's security model.
  *
@@ -194,6 +199,53 @@ export const HIVE_TOOL_NAMES = [
   "hive_board_tag",
   // ── this package ─────────────────────────────────────────────────────────
   "hive_dispatch",
+] as const
+
+/**
+ * WI-066 — the dormant OPEN surface: the hive tools a not-yet-awakened
+ * top-level session keeps. The awaken gate's deny mask is
+ * `HIVE_TOOL_NAMES` MINUS this list, so dormancy still reads as ABSENCE
+ * (D2/I-141) for everything not named here — lifecycle commands, dispatch,
+ * dream tooling, HIVEmind, painpoints, and `hive_board_bind` — while the
+ * hive-board's discovery and authoring half (list / search / read / create /
+ * respec / retitle / tag) stays usable. This is a deliberate REFINEMENT of
+ * the dsh-only lifecycle surface (SHADOW-010: the port has no OpenCode parity
+ * baseline for it), closing the structural gap W-048 names: dsh commands are
+ * model-invisible, so a session that could never run /awaken had no
+ * self-serve floor at all — it could not even read the wall it was asked to
+ * file on.
+ *
+ * `hive_board_bind` is DELIBERATELY NOT on this list: ownership stays
+ * awakened-only. The invariant "only the awakened may own" (SNG-038: identity
+ * is stamped by the runtime, never claimed by the caller) keeps its strongest
+ * enforcement layer for a dormant session — the claim surface does not exist,
+ * so an illegal claim can never reach code — while the D5 module gates stay
+ * exactly as they are for every context bind DOES mount in (awakened
+ * coordinators, lineage-exempt children: the depth>0 refusal and the
+ * isSessionAwakened refusal inside the tool body itself, pinned by
+ * @hive/dsh-board's tool test). Ownership legitimately begins AT /awaken:
+ * the flip's autoRegister is the create-or-bind that starts a coordinator's
+ * 1:1 work item (board-decisions D6/D8), so there is no pre-awaken use bind
+ * could serve — presence would only manufacture failures worse than absence.
+ *
+ * KEEP IN SYNC (same discipline as HIVE_TOOL_NAMES): every name here must be
+ * a global defineTool registration in @hive/dsh-board AND a member of
+ * HIVE_TOOL_NAMES above (a rename must update both lists in one commit, or
+ * the renamed tool silently falls back into the deny mask), and
+ * `hive_board_bind` must keep NOT appearing. Guarded by
+ * `test/tool-gate-sync.test.mjs` (mask-vs-cohort leg) and
+ * `test/dormant-open-surface.test.mjs` (the runtime leg: real registration,
+ * real deny, real lift).
+ */
+export const HIVE_DORMANT_OPEN_TOOLS = [
+  // ── @hive/dsh-board (WI-066: discovery + authoring; bind stays masked) ───
+  "hive_board_list",
+  "hive_board_search",
+  "hive_board_read",
+  "hive_board_create",
+  "hive_board_respec",
+  "hive_board_retitle",
+  "hive_board_tag",
 ] as const
 
 /**
@@ -460,6 +512,16 @@ export class Evolution extends Service {
           // Dormant top-level agent: hive tools vanish (restrict returns the
           // exact disposer that lifts the restriction) + the dormant
           // explainer at 51, just below the roster. Held for /awaken to lift.
+          //
+          // WI-066 refinement of D2: the deny mask is the census MINUS the
+          // dormant OPEN surface (HIVE_DORMANT_OPEN_TOOLS) — the board's
+          // discovery/authoring tools stay usable pre-awaken, so the dormant
+          // session can read the wall and file on it; bind and every other
+          // hive tool here still reads as absent. The subtraction happens
+          // BEFORE the registration filter below: an open name never reaches
+          // restrict() at all (so a board-less install cannot throw on it),
+          // and a masked name that this process did not register filters out.
+          //
           // deny-mask filtering: tools.restrict() VALIDATES its names against
           // the process's registered globals and THROWS on unknowns — and a
           // throw inside this serial listener fails agent publication. The
@@ -467,9 +529,10 @@ export class Evolution extends Service {
           // the full cohort (production) restricts all of it; a
           // standalone-evolution install (some other profile shape) degrades
           // to masking only the tools that exist. tool-gate-sync.test.mjs
-          // pins the mask to the cohort surface so this filter is a safety
-          // net, not a whitelist license.
-          const deny = HIVE_TOOL_NAMES.filter((name) => {
+          // pins BOTH the mask and the open surface to the cohort source so
+          // this filter is a safety net, not a whitelist license.
+          const openNames: readonly string[] = HIVE_DORMANT_OPEN_TOOLS
+          const deny = HIVE_TOOL_NAMES.filter((name) => !openNames.includes(name)).filter((name) => {
             try {
               return ctx.tools.get(name) !== undefined
             } catch {
