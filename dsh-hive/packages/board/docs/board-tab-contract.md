@@ -29,7 +29,7 @@ Both memories were true of **different surfaces**:
 |---|---|---|---|
 | **LIVE web profile** | `/root/.dsh/profiles/web` | `link:` symlinks into the monorepo for **all 10 cohort packages** (verified `node_modules/@hive/*` → `projects/evolutional_agent_structure/dsh-hive/packages/*`; only `dsh-web-search-searxng` is versioned) | the git **working tree** (W-084 applies on every reload) |
 | **Kit dist** | `/workspace/web` | tarball cohort (10 `*.tgz`, 2026-09-18) + **dual-mode** `.pnpmfile.cjs` (git **or** tarball siblings; tarball rewrites are ABSOLUTE `file:` paths anchored at the hook's `__dirname`, annotated "verified 2026-09-18, dsh 0.1.6-alpha.2 adoption gate") | other machines via `dsh plugin add` |
-| **Kit updater** | `/root/.dsh/hive-kit/dsh-hive-update.sh` | deployed stale copy (`0.1.6-alpha.1`-era, boardless) — the AUTHORED source is `/workspace/projects/evolutional_agent_structure/dsh-hive-dist/dsh-hive-update.sh` (**10 packages**, board included, `DSH_VERSION` default `0.1.6-alpha.2`); deployed kit refresh = coordinator cp from source | `~/.dsh/profiles/*` on kit machines |
+| **Kit updater** | `/root/.dsh/hive-kit/dsh-hive-update.sh` | deployed stale copy (`0.1.6-alpha.1`-era, boardless) — the AUTHORED source is `/workspace/projects/evolutional_agent_structure/dsh-hive-dist/dsh-hive-update.sh` (**10 packages**, board included, `DSH_VERSION` default `0.1.7-alpha.2`); deployed kit refresh = coordinator cp from source | `~/.dsh/profiles/*` on kit machines |
 
 Consequences that pin later slices:
 
@@ -351,7 +351,7 @@ first visibility. Communicate the early visibility honestly to the user.
 1. **updater gap (boardless NINE → TEN) — FIXED IN SOURCE, deployed copy pending one cp.**
    The authored kit source `/workspace/projects/evolutional_agent_structure/dsh-hive-dist/dsh-hive-update.sh`
    already carries board: SPECS/PACKAGES = **10** (`dsh-hive/packages/board` +
-   `@hive/dsh-board`), `DSH_VERSION` default **`0.1.6-alpha.2`** (line ~49), insert-region
+   `@hive/dsh-board`), `DSH_VERSION` default **`0.1.7-alpha.2`** (line ~49), insert-region
    splice for the board row, log lines "10 packages". The DEPLOYED `/root/.dsh/hive-kit/` copy
    is older (boardless, `0.1.6-alpha.1`) — refreshing it is a sandbox-escalted cp outside this
    capability's write scope (workspace-write denies `/root/.dsh/hive-kit`); coordinator one-liner:
@@ -373,10 +373,15 @@ first visibility. Communicate the early visibility honestly to the user.
 4. **Insert rows** (`/workspace/web/cordis.patch.yml` + `dsh-hive-dist/cordis.patch.yml`):
    board row sits at the end of the insert region — **no new row**, anchoring unchanged (the
    updater's splice logic targets that same end-of-region anchor).
-5. **Stale peer pins — OPEN, deliberate**: `@hive/dsh-board` (and siblings) pin
-   `@deepseek-ai/dsh-llm` + `@deepseek-ai/dsh-tools` at `0.1.2-rc.1` vs runtime
-   `0.1.6-alpha.2` — NOT bumped (coordinator instruction; belongs to the version-bump spike
-   WI-044 / WI-063 cutover).
+5. **Peer pins bumped 2026-09-22 (`0.1.2-rc.1` → exact `0.1.7-alpha.2`)** — supersedes the
+   earlier deliberate OPEN hold (`dsh-llm`/`dsh-tools` at `0.1.2-rc.1` vs runtime
+   `0.1.6-alpha.2`, deferred to "the version-bump spike WI-044 / WI-063 cutover" —
+   that spike is this change). The corridor audit found no removal hits on any seam the
+   cohort consumes; `dsh-agent@0.1.7-alpha.2` DECLARES the `agent/created` payload
+   `{ agent, source: SessionStartSource, signal? }` (runtime-types.d.ts:227-231), so
+   evolution's structural `source` read is typed again; `dsh-agent-presets` is
+   re-pointed to `dsh-agent-preset-registry` (the `agentPresets` service key survives);
+   `cordis-plugin-group` moves to `1.0.4` per `dsh-app-boot`'s peer range.
 6. Kit failure-tolerance footguns remain real: a failed `plugin-manager add` sweeps its own
    scaffolding (W-092) and tolerance layers must name their failure cause at WARN (W-087).
 

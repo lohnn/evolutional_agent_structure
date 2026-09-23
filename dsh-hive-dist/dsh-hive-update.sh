@@ -10,7 +10,7 @@
 #   DSH_HIVE_REF   git ref to track                        (default: main)
 #   DSH_HIVE_REPO  git base for the specs                  (default: github:lohnn/evolutional_agent_structure)
 #   DSH_VERSION   pinned harness version for `dsh plugin` (default:
-#                 0.1.6-alpha.2; when run under the dsh-hive-web service, the
+#                 0.1.7-alpha.2; when run under the dsh-hive-web service, the
 #                 TOML `env` sets this and remains the single version source —
 #                 bump THAT line, and keep it >= the version the profile
 #                 actually serves)
@@ -46,7 +46,7 @@ done
 PROFILE="${PROFILE:-${HOME}/.dsh/profiles/hive}"
 REF="${DSH_HIVE_REF:-main}"
 REPO="${DSH_HIVE_REPO:-github:lohnn/evolutional_agent_structure}"
-DSH_VERSION="${DSH_VERSION:-0.1.6-alpha.2}"
+DSH_VERSION="${DSH_VERSION:-0.1.7-alpha.2}"
 KIT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NAME="$(basename "$PROFILE")"
 STAMP="[dsh-hive-update]"
@@ -439,7 +439,7 @@ run_dsh_plugin() {
   # CLI but then fails before `plugin add` runs with ERR_MODULE_NOT_FOUND.
   DSH_HIVE_REF="$REF" DSH_HIVE_REPO="$REPO" PNPM_CONFIG_IGNORE_SCRIPTS="$IGNORE_PACKAGE_SCRIPTS" \
     pnpm \
-      --package "@deepseek-ai/cordis-plugin-group@1.0.2" \
+      --package "@deepseek-ai/cordis-plugin-group@1.0.4" \
       --package "@deepseek-ai/dsh@$DSH_VERSION" \
       dlx \
       --allow-build=@deepseek-ai/dsh-subprocess-local \
