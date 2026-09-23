@@ -176,6 +176,9 @@ own workspace install), same `cordis.*.yml` scaffold, `pnpm install`, verify.
   `0.1.2-rc.1`), cordis `^4.0.1`. `dsh-hive-update.sh` defaults its
   `DSH_VERSION` pin to `0.1.7-alpha.2` — the service TOML's `env` remains the
   single version source when present.
+- **Full update runbook** (host pin + cohort + kit update path, exercised
+  end-to-end on `0.1.7-alpha.2`): [`docs/DSH-UPDATE-RUNBOOK.md`](../docs/DSH-UPDATE-RUNBOOK.md)
+  in this repo.
 
 ## Run it as a service (the other machine)
 
