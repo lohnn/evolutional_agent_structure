@@ -34,6 +34,7 @@
  */
 import { presentTitle, RAW_TITLE_CHIP } from "./title-pass.js"
 import { renderSessionSection } from "./session-open.js"
+import { renderAwakenSection } from "./awaken.js"
 
 export const ITEM_URL = "/api/hive-board/item"
 const DRAWER_ID = "hvb-drawer"
@@ -267,6 +268,14 @@ function renderItem(drawer: HTMLElement, item: NonNullable<ItemPayload["item"]>,
   // successful open the main panel is already on the session's conversation.
   renderSessionSection(drawer, item, closeDrawer)
 
+  // WI-064 — the awaken affordance: for items with NO connected session (not
+  // done, not paused), offer the real session-creation POST
+  // (/api/hive-board/awaken; host-side opt-in `awaken:true`). Built by
+  // ./awaken.ts in the same honesty discipline: no dead buttons (404 flows
+  // render as typed notes), errors verbatim, success surfaces the new
+  // session id with the WI-087 open flow. The drawer itself stays read-only.
+  renderAwakenSection(drawer, item, closeDrawer)
+
   const problems = item.problems ?? []
   if (problems.length > 0) {
     const prow = el("div", "hvb-problems")
@@ -380,4 +389,6 @@ export const DRAWER_CSS = `
 #hvb-drawer .hvb-session-note[data-flash="1"]{color:#3fb950}
 #hvb-drawer .hvb-session-dot{flex:0 0 auto;width:7px;height:7px;border-radius:50%;background:#3fb950}
 @media (prefers-reduced-motion: reduce){#hvb-drawer .hvb-session-dot{animation:none}}
+/* ── WI-064 awaken affordance (same palette; reuses hvb-session-open-btn) ── */
+#hvb-drawer .hvb-session-open-btn[disabled]{color:#8b949e;border-color:#21262d;cursor:default}
 `

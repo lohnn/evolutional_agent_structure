@@ -101,6 +101,32 @@ export function sessionOpenHandles(): { uiWorkspace: boolean; sessions: boolean 
   return { uiWorkspace: uiWorkspace !== undefined, sessions: sessions !== undefined }
 }
 
+/**
+ * Is the in-app open flow resolvable at all right now? (The awaken affordance
+ * uses this to decide whether an "Open ⇢" button would be a dead affordance —
+ * WI-087 rule: never offer an action the composition cannot serve.)
+ */
+export function openFlowAvailable(): boolean {
+  return uiWorkspace !== undefined
+}
+
+/**
+ * Open one session in-app through the same uiWorkspace flow the sidebar
+ * session-row click runs (WI-087). Shared with the WI-064 awaken affordance
+ * so a freshly-awakened session can be opened by the exact same mechanism.
+ * @returns true when the flow existed and was invoked, false when this
+ * composition carries no uiWorkspace (the caller must degrade honestly).
+ */
+export function tryOpenSession(sessionId: string): boolean {
+  if (uiWorkspace?.openSession === undefined) return false
+  try {
+    uiWorkspace.openSession(sessionId)
+    return true
+  } catch {
+    return false
+  }
+}
+
 function liveCatalog(): SessionCatalogLike | undefined {
   try {
     return sessions?.list?.getSnapshot?.()
