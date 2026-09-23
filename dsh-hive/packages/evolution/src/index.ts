@@ -415,7 +415,11 @@ export class Evolution extends Service {
     // once-per-day tick sat dead (hive-state.json's lastTick frozen for 5+
     // days) and the tests never caught it because they emitted the phantom
     // event name themselves. Guarded by test/event-catalog-guard.test.mjs.
-    ctx.on("agent/created", () => {
+    // dsh-agent@0.1.7-alpha.2 types the listener contract as
+    // `undefined | Promise<undefined>` (runtime-types.d.ts:227-231) — these
+    // two listeners are annotated accordingly; their bare returns stay
+    // implicit-undefined, exactly the pre-bump behavior.
+    ctx.on("agent/created", (): undefined => {
       const { results, skipped } = this.tick()
       if (!skipped) {
         ctx.emit("hive/tick", results)
@@ -450,7 +454,7 @@ export class Evolution extends Service {
     // Agent object identity is new. The disposers are scoped registrations, so
     // a disposed agent unwinds them anyway; agent/disposed cleanup exists so
     // the Map itself never grows with dead sessions.
-    ctx.on("agent/created", (payload) => {
+    ctx.on("agent/created", (payload): undefined => {
       const agent = payload.agent
       // Access path verified against dsh 0.1.6-alpha.2 types (and the live
       // alpha.2 profile boot): the Agent
@@ -463,14 +467,14 @@ export class Evolution extends Service {
       const sessionId = String(agent.session?.id ?? agent.id)
       const depth = agent.session?.header?.delegationDepth
       // The compaction seam reads `source` (the SessionStartSource —
-      // 'startup' | 'resume' | 'clear' | 'compact'): present and typed in the
-      // LIVE runtime (0.1.6-alpha.2 declares the payload
-      // `{ agent, source, signal }`), ABSENT from this package's pinned type
-      // corridor (0.1.2-rc.1 declares `{ agent }` only) — so the read stays a
-      // structural access with `?`, not a typed field. Drop the cast when the
-      // pin bumps to a corridor that declares it; until then undefined simply
-      // means "not a compaction republication" and the seam stays quiet.
-      const source = (payload as { source?: string }).source
+      // 'startup' | 'resume' | 'clear' | 'compact'). Corridor-diff W-073,
+      // 2026-09-22: the pinned corridor `@deepseek-ai/dsh-agent@0.1.7-alpha.2`
+      // DECLARES the payload `{ agent, source: SessionStartSource, signal? }`
+      // (runtime-types.d.ts:227-231), so the historical
+      // `(payload as { source?: string })` cast is dropped and the read is
+      // typed again — fulfilling the standing instruction left by the
+      // previous corridor (0.1.2-rc.1 declared `{ agent }` only).
+      const source = payload.source
       switch (decideGate(depth, isAwakened(this.directory, sessionId))) {
         case "skip":
           // Exempt child (depth > 0) — participants by lineage. No section, no
