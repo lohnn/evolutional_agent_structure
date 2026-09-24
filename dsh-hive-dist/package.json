@@ -13,6 +13,7 @@
     "dsh-berget-refresh": "file:./dsh-berget-refresh-0.1.0.tgz",
     "dsh-berget-usage": "file:./dsh-berget-usage-0.2.0.tgz",
     "dsh-provider-usage": "file:./dsh-provider-usage-0.1.0.tgz",
+    "dsh-web-search-searxng": "file:./dsh-web-search-searxng-0.5.0.tgz",
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/schemastery": "^3.18.2",
     "@deepseek-ai/dsh-agent": "0.1.7-alpha.2",

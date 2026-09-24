@@ -35,6 +35,7 @@ done
 SPECS+=("github:lohnn/evolutional_agent_structure#$REF&path:dsh-hive/packages/berget-refresh")
 SPECS+=("github:lohnn/evolutional_agent_structure#$REF&path:dsh-hive/packages/berget-usage")
 SPECS+=("github:lohnn/evolutional_agent_structure#$REF&path:dsh-hive/packages/provider-usage")
+SPECS+=("github:lohnn/evolutional_agent_structure#$REF&path:dsh-hive/packages/web-search-searxng")
 
 DSH_HIVE_REF=$REF pnpm dlx --allow-build @deepseek-ai/dsh-subprocess-local --allow-build @google/genai --allow-build koffi --allow-build node-pty --allow-build protobufjs @deepseek-ai/dsh plugin --profile hive add "${SPECS[@]}"
 ```

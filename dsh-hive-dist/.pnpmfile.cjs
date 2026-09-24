@@ -49,6 +49,7 @@ const TARBALLS = {
   "dsh-berget-refresh": TARBALL_FILE("dsh-berget-refresh-0.1.0.tgz"),
   "dsh-berget-usage": TARBALL_FILE("dsh-berget-usage-0.2.0.tgz"),
   "dsh-provider-usage": TARBALL_FILE("dsh-provider-usage-0.1.0.tgz"),
+  "dsh-web-search-searxng": TARBALL_FILE("dsh-web-search-searxng-0.5.0.tgz"),
 }
 
 // git+https://…/repo.git#ref&path:…  or  github:owner/repo#ref&path:…
