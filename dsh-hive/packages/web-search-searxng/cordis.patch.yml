@@ -1,0 +1,17 @@
+# dsh-web-search-searxng profile bundle: registers the SearXNG provider and
+# pins it as the web search provider.
+#
+# The pin matters: the seam auto-selects only when exactly one provider is
+# usable, and dsh-web-search-deepseek reports usable whenever its credential
+# resolver exists — so adding a second provider without naming one makes
+# every search fail as ambiguous. A later layer that patches the `web` row
+# replaces its whole config: restate `searchProvider: searxng` there.
+- insert:
+    - id: web-search-searxng
+      name: dsh-web-search-searxng
+      config:
+        baseURL: http://127.0.0.1:8080
+
+- id: web
+  config:
+    searchProvider: searxng

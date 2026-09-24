@@ -1,0 +1,31 @@
+{
+  "name": "dsh-web-search-searxng",
+  "version": "0.5.0",
+  "private": true,
+  "description": "SearXNG-backed web search provider for the dsh ctx.web seam: self-hosted metasearch, no API key, no model turn per search.",
+  "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "README.md",
+    "cordis.patch.yml"
+  ],
+  "scripts": {
+    "test": "node --test"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-web": "0.1.7-alpha.2"
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "^3.18.2"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}
