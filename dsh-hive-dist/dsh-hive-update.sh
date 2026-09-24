@@ -317,6 +317,7 @@ KIT_TARBALLS=(
   dsh-berget-refresh-0.1.0.tgz
   dsh-berget-usage-0.2.0.tgz
   dsh-provider-usage-0.1.0.tgz
+  dsh-web-search-searxng-0.5.0.tgz
 )
 
 kit_has_all_tarballs() {
@@ -387,11 +388,12 @@ if [ "$HAS_KIT_TARBALLS" = "1" ] && [ "${DSH_HIVE_GIT_MODE:-0}" != "1" ]; then
     file:./dsh-berget-refresh-0.1.0.tgz
     file:./dsh-berget-usage-0.2.0.tgz
     file:./dsh-provider-usage-0.1.0.tgz
+    file:./dsh-web-search-searxng-0.5.0.tgz
   )
   PACKAGES_NAMES=(
     @hive/dsh-agents @hive/dsh-board @hive/dsh-dream-archive @hive/dsh-evolution
     @hive/dsh-hivemind @hive/dsh-painpoints @hive/dsh-tools
-    dsh-berget-refresh dsh-berget-usage dsh-provider-usage
+    dsh-berget-refresh dsh-berget-usage dsh-provider-usage dsh-web-search-searxng
   )
 else
   # ── GIT fallback mode ─────────────────────────────────────────────────────
@@ -423,13 +425,13 @@ NODE
     warn "pnpm 11.x detected: its allowBuilds matcher rejects even the exact keys it prints (upstream, 11.24 verified) — ship kit tarballs or move to pnpm 10.x/>=12.0"
   fi
   SPECS=()
-  for p in agents board dream-archive evolution hivemind painpoints tools berget-refresh berget-usage provider-usage; do
+  for p in agents board dream-archive evolution hivemind painpoints tools berget-refresh berget-usage provider-usage web-search-searxng; do
     SPECS+=("$REPO#$REF&path:dsh-hive/packages/$p")
   done
   PACKAGES_NAMES=(
     @hive/dsh-agents @hive/dsh-board @hive/dsh-dream-archive @hive/dsh-evolution
     @hive/dsh-hivemind @hive/dsh-painpoints @hive/dsh-tools
-    dsh-berget-refresh dsh-berget-usage dsh-provider-usage
+    dsh-berget-refresh dsh-berget-usage dsh-provider-usage dsh-web-search-searxng
   )
 fi
 
