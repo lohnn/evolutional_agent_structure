@@ -21,8 +21,10 @@ const SRC_DIR = fileURLToPath(new URL("../src", import.meta.url))
 // Events the plugin may LISTEN on. Allowlist discipline:
 //
 // (a) every name here must exist as a PUBLISHED event in the dsh runtime
-//     catalog for the pinned harness version (0.1.6-alpha.2; see the
-//     peerDependencies pin in package.json for the corridor). `agent/created`
+//     catalog for the pinned harness version (0.1.7-alpha.2, re-derived
+//     2026-09-22 per clause (c) against `@deepseek-ai/dsh-agent@0.1.7-alpha.2`
+//     runtime-types.d.ts:227 (`agent/created`) and :240 (`agent/disposed`);
+//     see the peerDependencies pin in package.json for the corridor). `agent/created`
 //     (serial: payload `{ agent, source, signal }`, fires once per agent
 //     publication — startup, resume, clear, compact) is real there;
 //     `agent/session-start` is NOT — binding to that invented name cost us a

@@ -20,7 +20,7 @@
 #                         VERSION-BUMP GUARD: before changing it, verify the
 #                         @deepseek-ai/cordis-plugin-group peer range declared
 #                         by @deepseek-ai/dsh-app-boot at the new version.
-#                         Update the 1.0.2 pin below if that peer range moves,
+#                         Update the 1.0.4 pin below if that peer range moves,
 #                         then run the HIVE-kit GitHub Actions workflow.
 #
 # Everything else has sane defaults; ports are env too:
@@ -62,7 +62,7 @@
 # boot. REQUIRES a svcwatch with pre_start support (this plugin version) —
 # restart a running old watcher (or recreate the container) once.
 name = "dsh-hive-web"
-env = { DSH_WORKSPACE_ROOT = "/home/you/your-workspace", DSH_TRUSTED_HOST = "127.0.0.1", DSH_HIVE_REF = "main", DSH_VERSION = "0.1.2-rc.1", DSH_PORT = "3002" }
+env = { DSH_WORKSPACE_ROOT = "/home/you/your-workspace", DSH_TRUSTED_HOST = "127.0.0.1", DSH_HIVE_REF = "main", DSH_VERSION = "0.1.7-alpha.2", DSH_PORT = "3002" }
 pre_start = ["bash", "-c", '''
 d="$HOME/.dsh/hive-kit"; mkdir -p "$d"
 base="${DSH_HIVE_RAW:-https://raw.githubusercontent.com/lohnn/evolutional_agent_structure}/${DSH_HIVE_REF:-main}/dsh-hive-dist"
@@ -84,7 +84,7 @@ exit 1
 # cwd: svcwatch chdirs LITERALLY (no env expansion), so keep it relative —
 # the workspace root is applied by the cd inside the command instead.
 cwd = "."
-command = ["bash", "-c", 'cd "${DSH_WORKSPACE_ROOT:?DSH_WORKSPACE_ROOT must be set -- see env line}" && exec pnpm --package @deepseek-ai/cordis-plugin-group@1.0.2 --package @deepseek-ai/dsh@${DSH_VERSION:?DSH_VERSION must be set -- see env line} dlx --allow-build @deepseek-ai/dsh-subprocess-local --allow-build @google/genai --allow-build koffi --allow-build node-pty --allow-build protobufjs dsh --profile hive --port ${DSH_PORT:?DSH_PORT must be set -- see env line} --no-open --trusted-host "${DSH_TRUSTED_HOST:?DSH_TRUSTED_HOST must be set -- see env line}" 2>&1 | tee /tmp/dsh-hive-web.log']
+command = ["bash", "-c", 'cd "${DSH_WORKSPACE_ROOT:?DSH_WORKSPACE_ROOT must be set -- see env line}" && exec pnpm --package @deepseek-ai/cordis-plugin-group@1.0.4 --package @deepseek-ai/dsh@${DSH_VERSION:?DSH_VERSION must be set -- see env line} dlx --allow-build @deepseek-ai/dsh-subprocess-local --allow-build @google/genai --allow-build koffi --allow-build node-pty --allow-build protobufjs dsh --profile hive --port ${DSH_PORT:?DSH_PORT must be set -- see env line} --no-open --trusted-host "${DSH_TRUSTED_HOST:?DSH_TRUSTED_HOST must be set -- see env line}" 2>&1 | tee /tmp/dsh-hive-web.log']
 restart = "always"
 restart_delay_sec = 3
 backoff_max_sec = 60

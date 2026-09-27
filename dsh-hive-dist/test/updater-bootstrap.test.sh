@@ -74,6 +74,7 @@ archives=(
   dsh-berget-refresh-0.1.0.tgz
   dsh-berget-usage-0.2.0.tgz
   dsh-provider-usage-0.1.0.tgz
+  dsh-web-search-searxng-0.5.0.tgz
 )
 
 for archive in "${archives[@]}"; do
@@ -86,8 +87,8 @@ done
 cmp -s "$KIT/.pnpmfile.cjs" "$PROFILE/.pnpmfile.cjs"
 grep -q "name: '@hive/dsh-board'" "$PROFILE/cordis.patch.yml"
 grep -Fq 'ignore_scripts=true' "$TRACE"
-grep -Fq '@deepseek-ai/cordis-plugin-group@1.0.2' "$TRACE"
-grep -Fq '@deepseek-ai/cordis-plugin-group@1.0.2' dsh-hive-dist/dsh-hive-web.toml
-grep -q 'tarball mode: copied 10 kit tarballs' "$ROOT/updater.log"
+grep -Fq '@deepseek-ai/cordis-plugin-group@1.0.4' "$TRACE"
+grep -Fq '@deepseek-ai/cordis-plugin-group@1.0.4' dsh-hive-dist/dsh-hive-web.toml
+grep -q 'tarball mode: copied 11 kit tarballs' "$ROOT/updater.log"
 
 echo 'updater bootstrap test passed'
