@@ -303,6 +303,102 @@ check("dissolve.roster", !ctx.evolution.buildRoster().includes("beta"), "roster 
   check("awaken.reawaken-evolve", awakenFollowups.length === followupsBefore + 1 && awakenFollowups.at(-1).content[0].text.includes("hive_evolve"), "re-awaken summons the evolution analysis instead")
 }
 
+// ── WI-074: refusal is not consumption — the awaken batch summon's recovery ───
+// contract (E1–E4). SNG-020's negative case: a fully-refused first call must
+// NOT spend the summon the success-path pin above exercises. Fresh sessions:
+// each arc runs on its own summon (a consumed summon is never re-armed).
+{
+  const summonFresh = async (sid) => {
+    const a = { id: sid, session: { id: sid, header: {} }, followup: () => {} }
+    const scope = createScope(ctx, a, {})
+    a.ctx = scope.ctx
+    ctx.emit("agent/created", { agent: a, source: "startup" })
+    const out = await ctx.commands.find(undefined, "awaken").handler({ rawInput: `wi-074 recovery arc ${sid}`, agent: a, commandId: `c_wi074_${sid}`, attachments: [], signal: AbortSignal.timeout(2000) })
+    check(`wi074.awaken.${sid}`, out.kind === "success", `${sid} flipped for the WI-074 arc`)
+    return a
+  }
+
+  // (a)+(b) fully-refused first call → ✗ report on a normal result, tool armed.
+  const refuseAgent = await summonFresh("ses_wi074_refuse")
+  const batchRefuse = ctx.tools.get("hive_awaken_spawn", refuseAgent)
+  check("wi074.refusal.summon-armed", batchRefuse !== undefined, "hive_awaken_spawn armed after the flip")
+  if (batchRefuse) {
+    const refusedText = String(await batchRefuse.execute(
+      { capabilities: [{ description: "has a description but no name" }, { name: "missing-desc" }] },
+      { agent: refuseAgent, signal: AbortSignal.timeout(2000) }
+    ))
+    check("wi074.refusal.still-armed", ctx.tools.get("hive_awaken_spawn", refuseAgent) !== undefined, "(a) fully-refused first call does NOT consume — the tool is still registered")
+    check("wi074.refusal.report-shape", refusedText.includes("0/2 manifested") && (refusedText.match(/✗ refused/g) ?? []).length === 2, "the ✗ report rides a normal result, one line per refused entry")
+    check("wi074.refusal.names-fields", refusedText.includes("`description`") && refusedText.includes("`name`") && refusedText.includes("canonical entry shape is"), "(E3) refusals name entry, missing field, and the canonical shape")
+    // (b) W-049: the still-armed line asserts ACTIONABILITY (the corrective
+    // move), not bare presence — and E4: nothing is asked of the user.
+    check("wi074.refusal.armed-line", /re-call `hive_awaken_spawn` with the corrected payload/.test(refusedText), "(b) the still-armed line names the corrective move: re-call with the corrected payload")
+    check("wi074.refusal.consent-fact", /no re-approval is needed/.test(refusedText) && !/ask the user/i.test(refusedText), "(E4) the refusal states consent survives and asks the user for nothing")
+    check("wi074.refusal.no-mutation", !fs.existsSync(path.join(synth, ".opencode/agents/capabilities/missing-desc")), "refused entries materialized nothing (mutation never ran)")
+
+    // (c) corrected retry manifests under the SAME approval…
+    const correctedText = String(await batchRefuse.execute(
+      { capabilities: [{ name: "missing-desc", description: "recovered in the corrected retry", persona: { enables: "enables wi074 recovery drills", triggers: "when wi074 recovery drills run" } }] },
+      { agent: refuseAgent, signal: AbortSignal.timeout(2000) }
+    ))
+    check("wi074.refusal.corrected-manifests", correctedText.includes("Spawning missing-desc") && correctedText.includes("✓ manifested"), "(c) the corrected retry manifests (E1 round-trip)")
+    // …and (d) consumption retracts — the E5 power bound: one manifestation, no more.
+    check("wi074.refusal.retracted-after-consumption", ctx.tools.get("hive_awaken_spawn", refuseAgent) === undefined, "(d) summon retracted once an entry manifested (E2 consumption)")
+  }
+
+  // decline-ack: `capabilities: []` is a recorded decline and consumes (E2).
+  const declineAgent = await summonFresh("ses_wi074_decline")
+  const batchDecline = ctx.tools.get("hive_awaken_spawn", declineAgent)
+  const declineText = String(await batchDecline.execute({ capabilities: [] }, { agent: declineAgent, signal: AbortSignal.timeout(2000) }))
+  check("wi074.decline.recorded", /decline recorded/i.test(declineText), "the empty-list call reports 'decline recorded'")
+  check("wi074.decline.retracts", ctx.tools.get("hive_awaken_spawn", declineAgent) === undefined, "the recorded decline retracts the summon (E2)")
+
+  // absent payload: NOT consumption. Two layers pin the real production
+  // semantics (I-058/W-046 stay honored — the schema keeps `required` and the
+  // body keeps model-actionable text as the fallback):
+  // 1. tool level — the defineTool schema wrapper rejects the missing
+  //    `capabilities` BEFORE the body runs (host ToolArgsError), and the
+  //    summon demonstrably stays armed through that throw;
+  const absentAgent = await summonFresh("ses_wi074_absent")
+  let absentThrew = false
+  const absentSrc = ctx.tools.get("hive_awaken_spawn", absentAgent)
+  let absentError = null
+  try {
+    await absentSrc.execute({}, { agent: absentAgent, signal: AbortSignal.timeout(2000) })
+  } catch (err) {
+    absentThrew = true
+    absentError = err
+  }
+  check(
+    "wi074.absent.schema-reject-still-armed",
+    absentThrew && absentError?.code === "INVALID_ARGS" && ctx.tools.get("hive_awaken_spawn", absentAgent) !== undefined,
+    "an absent `capabilities` is host-refused (INVALID_ARGS) and the summon stays armed (throw consumed nothing)"
+  )
+  // 2. body level — the historical raw throw is CONVERTED into the
+  //    refusal-report verdict (defense-in-depth for compositions where the
+  //    wrapper does not enforce; WI-074 E2: the actionability line rides a
+  //    normal result, never a raw throw).
+  const absentBody = ctx.evolution.spawnBatch({})
+  check(
+    "wi074.absent.body-refusal-shape",
+    absentBody.consumed === false && absentBody.text.includes("✗ refused (payload)") && absentBody.text.includes("canonical entry shape is"),
+    "spawnBatch({}) returns the refusal-report verdict (consumed: false), not a throw"
+  )
+  absentError = null
+  let absentTypeThrew = false
+  try {
+    ctx.evolution.spawnBatch({ capabilities: 42 })
+  } catch {
+    absentTypeThrew = true
+  }
+  check("wi074.absent.body-does-not-throw", !absentTypeThrew, "a non-array payload is also a refusal verdict at body level (the old throw is gone)")
+  const absentOwned = String(await (ctx.tools.get("hive_awaken_spawn", absentAgent)).execute(
+    { capabilities: [{ name: "absent-ok", description: "manifested from the refused state" }] },
+    { agent: absentAgent, signal: AbortSignal.timeout(2000) }
+  ))
+  check("wi074.absent.corrected-manifests", absentOwned.includes("✓ manifested") && ctx.tools.get("hive_awaken_spawn", absentAgent) === undefined, "the summon stayed usable: the corrected call manifests and retracts")
+}
+
 // ── T2: spawn without persona — pinned byte-identical output ──────────────────
 // The no-persona path must keep typing the pre-T2 yml byte for byte (the
 // minimal two-line spawn stays valid, D7); persona sections ride ABOVE it.
@@ -341,6 +437,29 @@ check("dissolve.roster", !ctx.evolution.buildRoster().includes("beta"), "roster 
     check("t4.identityline-first", ymlT4.includes("You are the theta capability: the theta capability"), "identity line still leads the persona block")
   } else {
     check("t4.persona-rendered", false, "hive_spawn not resolvable — cannot execute")
+  }
+}
+
+// ── WI-074 secondary: /spawn's per-capability summon (analogous refusal path) ─
+// Persona-shape refusal → still armed on a normal report; corrected persona
+// manifests → retract (SNG-020's negative case for the secondary summon).
+{
+  const spawnCmdW = ctx.commands.find(undefined, "spawn")
+  const followupsIdx = followups.length
+  const outSp = await spawnCmdW.handler({ rawInput: "sigma — the sigma capability", agent: fakeAgent, commandId: "c_wi074sp", attachments: [], signal: AbortSignal.timeout(2000) })
+  check("wi074.spawn.summon", outSp.kind === "success" && followups.length === followupsIdx + 1, "/spawn summons hive_spawn for the recovery arc")
+  check("wi074.spawn.brief", followups.at(-1).content[0].text.includes("A refused call does not consume the summon"), "/spawn brief teaches refusal-not-consumption")
+  const spTool = ctx.tools.get("hive_spawn", fakeAgent)
+  check("wi074.spawn.armed", spTool !== undefined, "hive_spawn armed for the recovery arc")
+  if (spTool) {
+    const refusedSp = String(await spTool.execute({ persona: { enables: "enables only — no triggers section" } }, { agent: fakeAgent, signal: AbortSignal.timeout(2000) }))
+    check("wi074.spawn.refusal-still-armed", ctx.tools.get("hive_spawn", fakeAgent) !== undefined && refusedSp.includes("✗ refused (payload)"), "an invalid persona shape does NOT consume the /spawn summon")
+    check("wi074.spawn.refusal-actionable", /re-call `hive_spawn`/.test(refusedSp), "the still-armed line names the corrective re-call")
+    check("wi074.spawn.no-mutation", !fs.existsSync(path.join(synth, ".opencode/agents/capabilities/sigma/preset.yml")), "the refused persona materialized nothing")
+    const okSp = String(await spTool.execute({ persona: { enables: "enables sigma work", triggers: "when sigma work appears" } }, { agent: fakeAgent, signal: AbortSignal.timeout(2000) }))
+    check("wi074.spawn.corrected-manifests", okSp.includes("Capability `sigma` manifested"), "the corrected persona manifests")
+    check("wi074.spawn.retracted", ctx.tools.get("hive_spawn", fakeAgent) === undefined, "the summon retracts after the manifest (E5: one manifestation, no more)")
+    check("wi074.spawn.preset", fs.existsSync(path.join(synth, ".opencode/agents/capabilities/sigma/preset.yml")), "sigma materialized through the mutated tool call only (WI-036/037)")
   }
 }
 

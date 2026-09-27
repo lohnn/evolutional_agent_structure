@@ -317,6 +317,46 @@ const SPAWN_PARAMETERS: ParameterSchemaSpec = {
 }
 
 /**
+ * WI-074 — a consumption-gated summon body's verdict. registerLifecycleTool's
+ * shared retraction contract is "retract after the first call, success or
+ * failure" (the zero-arg pattern, pinned by test). A summon whose body
+ * validates payloads itself opts OUT of that blanket only by returning this
+ * verdict AND registering with `consumeOnVerdict: true`:
+ *
+ * - `consumed: true` — the summon is spent (≥1 entry manifested, or a recorded
+ *   decline / terminal refusal it cannot serve a corrected retry for): the tool
+ *   retracts, exactly like the unconditional pattern.
+ * - `consumed: false` — the payload was REFUSED before any mutation (WI-074 E1):
+ *   the refusal is not consumption and the summon stays armed. The gate — the
+ *   one component that actually owns the mount state — appends the single
+ *   live-derived actionability line to the report (E3/E4).
+ *
+ * A plain `string` return consumes unconditionally even on gated summons (both
+ * manifest paths report this way). Expected input refusals are CAUGHT by the
+ * gated bodies and converted into verdicts (the absent/non-array throw is
+ * converted too, so the actionability line rides a normal result); only an
+ * unprocessed internal error would propagate out of a gated `execute`, and that
+ * also keeps the summon armed (E2: nothing was processed, nothing is consumed).
+ */
+export interface SummonOutcome {
+  /** The report text the tool returns (the ✗ refusal report or the manifest report). */
+  text: string
+  /** true = the summon is spent (retract); false = refused before any mutation (stay armed). */
+  consumed: boolean
+}
+
+/**
+ * The canonical entry shape the awaken batch summon refuses WITH (SNG-035/
+ * SNG-038: refusals carry the canonical form, so every correction teaches the
+ * right grammar). One source, so a shape drift between the ✗ lines, the
+ * refusal report, and the schema description cannot fork.
+ */
+const CANONICAL_SPAWN_ENTRY =
+  "canonical entry shape is { name: string, description: string, persona?: { enables: string, triggers: string, " +
+  "protocol?: string, selfModification?: string, boundaries?: string, history?: string } } — " +
+  "`enables` + `triggers` are REQUIRED whenever a persona is given"
+
+/**
  * Fill the awaken/re-awaken briefs' template placeholders. Exactly two names
  * are legal in the shipped assets (drift-guarded); anything else surfacing as
  * a literal `{{ ... }}` in a followup means an asset/handler placeholder
@@ -415,7 +455,7 @@ export class Evolution extends Service {
     // once-per-day tick sat dead (hive-state.json's lastTick frozen for 5+
     // days) and the tests never caught it because they emitted the phantom
     // event name themselves. Guarded by test/event-catalog-guard.test.mjs.
-    ctx.on("agent/created", () => {
+    ctx.on("agent/created", (): undefined => {
       const { results, skipped } = this.tick()
       if (!skipped) {
         ctx.emit("hive/tick", results)
@@ -423,6 +463,11 @@ export class Evolution extends Service {
           results: results.length,
         })
       }
+      // Serial-listener contract (dsh-agent ≥ 0.1.7 types): listeners return
+      // `undefined | Promise<undefined>` — an explicit undefined keeps the
+      // pre-corridor-drift behavior (the runtime reads nothing) while the
+      // newer event typing compiles. Behavior-identical on every corridor.
+      return undefined
     })
 
     // ── Awaken gate (T2 / D1–D2) ─────────────────────────────────────────────
@@ -450,7 +495,11 @@ export class Evolution extends Service {
     // Agent object identity is new. The disposers are scoped registrations, so
     // a disposed agent unwinds them anyway; agent/disposed cleanup exists so
     // the Map itself never grows with dead sessions.
-    ctx.on("agent/created", (payload) => {
+    // (The `: undefined` return annotation is the dsh-agent ≥ 0.1.7 serial
+    // event contract — `undefined | Promise<undefined>` — which the pinned
+    // rc.1-era typings predate; behavior-identical on every corridor: serial
+    // listeners returning undefined are indistinguishable from void ones.)
+    ctx.on("agent/created", (payload): undefined => {
       const agent = payload.agent
       // Access path verified against dsh 0.1.6-alpha.2 types (and the live
       // alpha.2 profile boot): the Agent
@@ -730,17 +779,54 @@ export class Evolution extends Service {
                   "Boundaries / Evolution History (the OpenCode capability template; enables + triggers are " +
                   "REQUIRED when a persona is given, empty sections are dropped). A quick spawn WITHOUT a " +
                   "persona stays valid, but it leaves the coordinator nothing to read for its use-vs-spawn " +
-                  "decision — the method IS the capability.",
-                (args) => {
-                  const persona = parseCapabilityPersona(((args ?? {}) as { persona?: unknown }).persona)
-                  const dir = this.spawn(name, description, persona)
-                  return `Capability \`${name}\` manifested at ${dir} (energy 50). Dispatch it with hive_dispatch (capability "${name}").`
+                  "decision — the method IS the capability. An invalid persona shape consumes nothing:" +
+                  " the summon stays armed for the corrected re-call (no new approval needed).",
+                // WI-074 secondary (analogous refusal paths): the same
+                // consumption semantics as the awaken batch summon. The
+                // persona-shape refusal is correctable (re-author, re-call) so
+                // it keeps the summon armed; a name-guard refusal (duplicate,
+                // reserved) has NO corrected retry through THIS summon — the
+                // name is this command's argument, not a tool-arg — so it is
+                // recorded as a terminal, summon-spending outcome.
+                (args): SummonOutcome => {
+                  let persona: CapabilityPersona | undefined
+                  try {
+                    persona = parseCapabilityPersona(((args ?? {}) as { persona?: unknown }).persona)
+                  } catch (err) {
+                    return {
+                      consumed: false,
+                      text:
+                        `✗ refused (payload): ${err instanceof Error ? err.message : String(err)}\n` +
+                        `✗ canonical persona shape is { enables: string, triggers: string, protocol?: string, ` +
+                        `selfModification?: string, boundaries?: string, history?: string } — ` +
+                        "\`enables\` + \`triggers\` are REQUIRED whenever a persona is given; empty sections are dropped. " +
+                        "Nothing was manifested; the /spawn payload was not processed.",
+                    }
+                  }
+                  try {
+                    const dir = this.spawn(name, description, persona)
+                    return {
+                      consumed: true,
+                      text: `Capability \`${name}\` manifested at ${dir} (energy 50). Dispatch it with hive_dispatch (capability "${name}").`,
+                    }
+                  } catch (err) {
+                    return {
+                      consumed: true,
+                      text:
+                        `Refusal recorded: ${err instanceof Error ? err.message : String(err)} — nothing was manifested. ` +
+                        `The summon is consumed and retracted: this command's capability name cannot be re-targeted by ` +
+                        `re-calling, so a corrected /spawn run (different name) or dissolving the existing capability ` +
+                        `first is the path forward.`,
+                    }
+                  }
                 },
-                SPAWN_PARAMETERS
+                SPAWN_PARAMETERS,
+                { consumeOnVerdict: true }
               ),
             `Manifest a new capability: name \`${name}\`, description "${description}". ` +
-              `Author its persona first (the method sections above), then call the summoned tool ONCE with the persona ` +
-              `object. Omitting the persona is allowed only for a deliberate quick spawn.`
+              `Author its persona first (the method sections above), then call the summoned tool with the persona ` +
+              `object. A refused call does not consume the summon — correct the payload and re-call; the summon ` +
+              `retracts once the capability manifests. Omitting the persona is allowed only for a deliberate quick spawn.`
           )
         },
       })
@@ -953,9 +1039,18 @@ export class Evolution extends Service {
                 " (name, description, and — recommended — a structured persona: What This Enables /" +
                 " Activation Triggers / Operating Protocol / Self-Modification Protocol / Boundaries /" +
                 " Evolution History). `enables` and `triggers` are required when a persona is given." +
-                " The tool reports one line per manifest and retracts itself after this single call.",
+                " A call whose entries all refuse with correctable errors (missing name/description," +
+                " invalid persona shape, or an absent/non-array `capabilities`) consumes nothing:" +
+                " the summon stays armed — fix every ✗ line and re-call with the corrected payload;" +
+                " no new user approval is needed. An empty `capabilities: []` records an explicit" +
+                " decline and consumes the summon. The summon retracts once any entry manifests" +
+                " or a decline is recorded.",
               (args) => this.spawnBatch(args),
-              AWAKEN_SPAWN_PARAMETERS
+              AWAKEN_SPAWN_PARAMETERS,
+              // WI-074: refusal is not consumption — the batch summon's body
+              // returns consumption verdicts (E1/E2; zero-arg summons stay on
+              // the unconditional finally-retraction pattern).
+              { consumeOnVerdict: true }
             )
           } catch (err) {
             return { kind: "error" as const, text: `/awaken: failed to summon the batch spawn tool: ${String(err)}` }
@@ -1195,27 +1290,71 @@ export class Evolution extends Service {
    * `parameters` defaults to `{}` (the no-argument lifecycle tools); the
    * awaken batch summon passes its `capabilities` schema. `run` always
    * receives the call's parsed args — the zero-arg tools simply ignore them.
+   *
+   * WI-074 opt-in consumption gate: without `consumeOnVerdict` the shared
+   * contract is exactly the historical one (retract after the first call,
+   * success or failure — `finally`, every path; behavior and wiring stay
+   * byte-identical for the zero-arg tools). A summon opts IN to
+   * refusal-is-not-consumption only by passing the flag: then its body
+   * classifies the call via a `SummonOutcome` verdict, and `consumed: false`
+   * leaves the summon mounted (E1/E2) while the gate appends the ONE
+   * still-armed actionability line (E3/E4). The line is live-derived, not
+   * template memory (I-151): it composes on the code path where the
+   * non-retraction decision was literally just made for THIS call, from the
+   * registration's own tool name — if the mount semantics ever change, the
+   * line no longer exists rather than lying (W-049: assert on actionability —
+   * what to call, what to do — never bare presence).
    */
   private registerLifecycleTool(
     agentCtx: import("@deepseek-ai/cordis").Context,
     name: string,
     description: string,
-    run: (args: unknown) => string,
-    parameters: ParameterSchemaSpec = {}
+    run: (args: unknown) => string | SummonOutcome,
+    parameters: ParameterSchemaSpec = {},
+    options: { consumeOnVerdict?: boolean } = {}
   ): () => void {
     let disposer: (() => void) | undefined
+    // The still-armed actionability line (E3/E4). Derived from THIS
+    // registration's name at gate-time — it fires only on the path where the
+    // gate kept the tool mounted, and it names the corrective move and the
+    // consent fact (no re-approval, nothing asked of the user) rather than
+    // bare presence.
+    const armedLine = (): string =>
+      `Summon still armed: this refusal consumed nothing — no entry manifested and no approval was spent, ` +
+      `so no re-approval is needed for the corrected retry. Correct every ✗ line above and re-call \`${name}\` ` +
+      `with the corrected payload; the summon stays mounted for it.`
     disposer = agentCtx.tools.register(
       defineTool({
         name,
         description,
         parameters,
         execute: async (args) => {
-          try {
-            return run(args)
-          } finally {
-            // Turn-scoped: retract after the first call, success or failure.
-            disposer?.()
+          if (options.consumeOnVerdict !== true) {
+            try {
+              return run(args) as string
+            } finally {
+              // Turn-scoped: retract after the first call, success or failure.
+              disposer?.()
+            }
           }
+          // ── WI-074 consumption gate (opt-in) ────────────────────────────────
+          // An uncaught throw from `run` keeps the summon ARMED and surfaces
+          // the ordinary way: an unprocessed error consumed nothing (E2). The
+          // gated bodies catch their expected input refusals and return
+          // verdicts, so nothing correctable ever reaches this line.
+          const result = run(args)
+          if (typeof result === "string") {
+            disposer?.()
+            return result
+          }
+          if (result.consumed) {
+            disposer?.()
+            return result.text
+          }
+          // Refusal (E1): the refusal-report result rides a normal return; the
+          // gate — having just decided NOT to retract for THIS call — appends
+          // the one live-derived actionability line.
+          return `${result.text}\n\n${armedLine()}`
         },
         output: TEXT_OUT,
       })
@@ -1402,34 +1541,92 @@ export class Evolution extends Service {
    * hand-writes capability files (WI-036/037). A refused entry (duplicate,
    * reserved name, invalid persona) reports a ✗ line and does not abort the
    * rest of the batch.
+   *
+   * WI-074 recovery contract (consumption, not attempt — E1/E2): the summon
+   * returns a `SummonOutcome` verdict because it registers with
+   * `consumeOnVerdict`. Consumption means the payload was PROCESSED — at least
+   * one entry manifested, or an explicit decline recorded (`capabilities: []`).
+   * A fully-refused list (0 manifested) and an absent/non-array payload are
+   * CORRECTABLE refusals: the ✗ report rides a normal result and the summon
+   * stays armed for the corrected re-call (the gate appends the one armed
+   * line; nothing here consumes the user's already-given approval, E4). Every
+   * ✗ line names the entry, the missing field, and the canonical shape (E3,
+   * SNG-035), appended from CANONICAL_SPAWN_ENTRY in one place.
    */
-  spawnBatch = (rawArgs: unknown): string => {
+  spawnBatch = (rawArgs: unknown): SummonOutcome => {
     const args = (rawArgs ?? {}) as { capabilities?: unknown }
     const list = args.capabilities
-    if (!Array.isArray(list) || list.length === 0) {
-      throw new Error("hive_awaken_spawn requires a non-empty `capabilities` array ({ name, description, persona? })")
+    // Explicit DECLINE (E2): an empty array is the model's decision not to
+    // spawn anything from this awakening — the approval is spent on a recorded
+    // no, the summon consumes and retracts. (Replaces the old throw, which
+    // burned the approval on a non-decision.)
+    if (Array.isArray(list) && list.length === 0) {
+      return {
+        consumed: true,
+        text:
+          "Decline recorded: an empty `capabilities` array is an explicit decline of the awakening's spawn approval " +
+          "— 0 entries requested, 0 manifested, nothing to correct. The summon is consumed and retracted; " +
+          "no further spawning is possible through hive_awaken_spawn.",
+      }
+    }
+    if (!Array.isArray(list)) {
+      // Correctable REFUSAL (E2) — converted from the historical raw throw so
+      // the still-armed actionability line rides a normal result. Absent
+      // payloads include the "forgot the argument entirely" case, which the
+      // scoped summon has no schema hard-require to enforce (I-058/W-046:
+      // validation stays body-level and model-actionable on purpose).
+      const received =
+        list === undefined
+          ? "the `capabilities` field is absent"
+          : list === null
+            ? "`capabilities` is null"
+            : `\`capabilities\` is a ${typeof list}, not an array`
+      return {
+        consumed: false,
+        text:
+          "HIVE awakening manifests: refused — no payload was processed.\n\n" +
+          `✗ refused (payload): the \`hive_awaken_spawn\` tool needs a NON-EMPTY \`capabilities\` array of entry objects; ` +
+          `${received} — ${CANONICAL_SPAWN_ENTRY}. ` +
+          "(An empty `capabilities: []` would instead be recorded as an explicit decline.)",
+      }
     }
     const lines: string[] = []
     let manifested = 0
-    for (const entry of list) {
-      const rec = (entry ?? {}) as { name?: unknown; description?: unknown; persona?: unknown }
+    for (let i = 0; i < list.length; i++) {
+      const rec = (list[i] ?? {}) as { name?: unknown; description?: unknown; persona?: unknown }
       const name = typeof rec.name === "string" ? rec.name : ""
-      const description = typeof rec.description === "string" ? rec.description : ""
-      lines.push(`Spawning ${name}…`)
+      // E3: every ✗ line names its entry even when the entry itself is
+      // nameless (index identifies it; the echo names only what exists).
+      const where = name ? `${i + 1}/${list.length} "${name}"` : `${i + 1}/${list.length}`
+      lines.push(`Spawning ${name || `entry ${where} (no name)`}…`)
       try {
-        if (!name) throw new Error("entry is missing its `name`")
-        if (!description) throw new Error("entry is missing its `description`")
+        if (typeof rec.name !== "string" || rec.name === "") {
+          throw new Error(`missing required field \`name\` (received ${rec.name === undefined ? "nothing" : typeof rec.name})`)
+        }
+        if (typeof rec.description !== "string" || rec.description === "") {
+          throw new Error(`missing required field \`description\` (received ${rec.description === undefined ? "nothing" : typeof rec.description})`)
+        }
         const persona = parseCapabilityPersona(rec.persona)
-        const dir = this.spawn(String(name), String(description), persona)
+        const dir = this.spawn(name, rec.description, persona)
         manifested++
         lines.push(`  ✓ manifested at ${dir} (energy 50)`)
       } catch (err) {
-        lines.push(`  ✗ refused: ${err instanceof Error ? err.message : String(err)}`)
+        lines.push(`  ✗ refused (${where}): ${err instanceof Error ? err.message : String(err)} — ${CANONICAL_SPAWN_ENTRY}`)
       }
     }
-    return (
-      `HIVE awakening manifests: ${manifested}/${list.length} manifested.\n\n` + lines.join("\n")
-    )
+    if (manifested === 0) {
+      // Fully-refused list (E1): the report is unchanged in shape, but the
+      // verdict keeps the summon armed — the corrected payload may be re-called
+      // under the SAME approval (the gate appends the armed line).
+      return {
+        consumed: false,
+        text: `HIVE awakening manifests: 0/${list.length} manifested.\n\n` + lines.join("\n"),
+      }
+    }
+    return {
+      consumed: true,
+      text: `HIVE awakening manifests: ${manifested}/${list.length} manifested.\n\n` + lines.join("\n"),
+    }
   }
 
   /**
