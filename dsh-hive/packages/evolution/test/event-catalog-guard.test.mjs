@@ -24,6 +24,8 @@ const SRC_DIR = fileURLToPath(new URL("../src", import.meta.url))
 //     catalog for the pinned harness version (0.1.7-alpha.2, re-derived
 //     2026-09-22 per clause (c) against `@deepseek-ai/dsh-agent@0.1.7-alpha.2`
 //     runtime-types.d.ts:227 (`agent/created`) and :240 (`agent/disposed`);
+//     carried to 0.1.7-rc.2 in the rc.2 cohort bump — the dsh-agent lib/ is
+//     byte-identical alpha.2→rc.2 (npm-mode audit), so the derivation holds;
 //     see the peerDependencies pin in package.json for the corridor). `agent/created`
 //     (serial: payload `{ agent, source, signal }`, fires once per agent
 //     publication — startup, resume, clear, compact) is real there;

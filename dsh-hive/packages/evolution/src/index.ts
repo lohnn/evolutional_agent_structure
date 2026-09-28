@@ -455,7 +455,7 @@ export class Evolution extends Service {
     // once-per-day tick sat dead (hive-state.json's lastTick frozen for 5+
     // days) and the tests never caught it because they emitted the phantom
     // event name themselves. Guarded by test/event-catalog-guard.test.mjs.
-    // dsh-agent@0.1.7-alpha.2 types the listener contract as
+    // dsh-agent@0.1.7-rc.2 types the listener contract as
     // `undefined | Promise<undefined>` (runtime-types.d.ts:227-231) — these
     // two listeners are annotated accordingly; their bare returns stay
     // implicit-undefined, exactly the pre-bump behavior.
