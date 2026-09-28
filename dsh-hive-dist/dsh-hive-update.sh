@@ -13,7 +13,10 @@
 #                 0.1.7-alpha.2; when run under the dsh-hive-web service, the
 #                 TOML `env` sets this and remains the single version source —
 #                 bump THAT line, and keep it >= the version the profile
-#                 actually serves)
+#                 actually serves). Cohort bumps: kit tarballs must be
+#                 REVERSIONED (see the COHORT BUMP RULE block below) —
+#                 same-name repacks do not resolve as updates in tarball
+#                 mode.
 #
 # Behavior:
 #   - First run: creates the profile scaffold next to what a `pnpm install`
@@ -31,6 +34,23 @@
 #     has the cohort installed, we keep the existing install and exit 0 so the
 #     service still boots (stale-but-up beats down). If nothing is installed,
 #     exit non-zero — svcwatch aborts the start and backs off.
+#
+# ═══ COHORT BUMP RULE — kit tarballs are name-addressed ═════════════════════
+# Tarball mode (the DEFAULT transport here) resolves updates by tarball NAME:
+# `dsh plugin add file:./hive-dsh-board-0.1.0.tgz` finds the installed
+# @hive/dsh-board@0.1.0 already satisfied and installs NOTHING even when the
+# archive's contents changed (verified on a kit machine during the
+# 0.1.7-rc.2 bump, PR #50). Same for the fetch path: fetch_missing_tarballs()
+# skips any archive already present under its old name. Therefore, whenever
+# kit tarballs are repacked for a content change (cohort bump, or any plugin
+# change that ships to kit machines):
+#   1. bump the changed packages' versions in dsh-hive/packages/*/package.json
+#      (e.g. 0.1.0 → 0.1.1) BEFORE `pnpm pack:all`
+#   2. re-point the KIT_TARBALLS and SPECS arrays below, and the tarball
+#      names the .pnpmfile.cjs hook rewrites, to the new names
+#   3. commit the refreshed tarballs in the same PR.
+# Git fallback mode (Way A) re-resolves by moving ref and is unaffected.
+# Full checklist: docs/DSH-UPDATE-RUNBOOK.md.
 set -u
 set -o pipefail
 
@@ -39,7 +59,7 @@ PROFILE=""
 for a in "$@"; do
   case "$a" in
     --berget-only) BERGET_ONLY=1 ;;
-    -h|--help) sed -n '2,20p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    -h|--help) sed -n '2,26p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) PROFILE="$a" ;;
   esac
 done

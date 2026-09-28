@@ -10,6 +10,24 @@ to install on a new machine, pick one:
 | **B. tarballs + scaffold (this dir)** | offline / pinned-freeze installs | this directory |
 | **C. `link:` to a checkout** | development on the plugins themselves | a built monorepo checkout |
 
+## Release identity: reversion requirement
+
+Tarball names **are** the release identity. Tarball-mode updates
+(`dsh plugin add file:./…` — Way B, and the service pre-start's default
+transport) resolve an installed `pkg@version` as satisfied **even when the
+archive's contents changed**: a same-name repack ships to nobody (hit for
+real during the 0.1.7-rc.2 bump, PR #50 — kit machines resolved nothing as
+new). So before repacking the kit for ANY content change:
+
+1. bump the changed packages' versions in `dsh-hive/packages/*/package.json`
+   (e.g. `0.0.1` → `0.0.2`), *then* `pnpm pack:all`;
+2. re-point `KIT_TARBALLS` + `SPECS` in `dsh-hive-update.sh` and the names
+   the `.pnpmfile.cjs` hook rewrites to the new tarball names;
+3. commit the refreshed tarballs in the same PR.
+
+Way A (git) re-resolves by moving ref — unaffected. Full cohort-bump
+checklist: `../docs/DSH-UPDATE-RUNBOOK.md`.
+
 Prereqs for all ways: **Node 22+, pnpm 11, git** (Way A's cohort is
 git-hosted; pnpm `dlx` likewise needs it), and a model-provider credential —
 see "Shared notes" (the step people miss).
