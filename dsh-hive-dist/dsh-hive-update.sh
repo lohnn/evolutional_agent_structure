@@ -10,7 +10,7 @@
 #   DSH_HIVE_REF   git ref to track                        (default: main)
 #   DSH_HIVE_REPO  git base for the specs                  (default: github:lohnn/evolutional_agent_structure)
 #   DSH_VERSION   pinned harness version for `dsh plugin` (default:
-#                 0.1.7-rc.2; when run under the dsh-hive-web service, the
+#                 0.2.0-rc.2; when run under the dsh-hive-web service, the
 #                 TOML `env` sets this and remains the single version source —
 #                 bump THAT line, and keep it >= the version the profile
 #                 actually serves). Cohort bumps: kit tarballs must be
@@ -37,7 +37,7 @@
 #
 # ═══ COHORT BUMP RULE — kit tarballs are name-addressed ═════════════════════
 # Tarball mode (the DEFAULT transport here) resolves updates by tarball NAME:
-# `dsh plugin add file:./hive-dsh-board-0.1.0.tgz` finds the installed
+# `dsh plugin add file:./hive-dsh-board-0.1.1.tgz` finds the installed
 # @hive/dsh-board@0.1.0 already satisfied and installs NOTHING even when the
 # archive's contents changed (verified on a kit machine during the
 # 0.1.7-rc.2 bump, PR #50). Same for the fetch path: fetch_missing_tarballs()
@@ -66,7 +66,7 @@ done
 PROFILE="${PROFILE:-${HOME}/.dsh/profiles/hive}"
 REF="${DSH_HIVE_REF:-main}"
 REPO="${DSH_HIVE_REPO:-github:lohnn/evolutional_agent_structure}"
-DSH_VERSION="${DSH_VERSION:-0.1.7-rc.2}"
+DSH_VERSION="${DSH_VERSION:-0.2.0-rc.2}"
 KIT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NAME="$(basename "$PROFILE")"
 STAMP="[dsh-hive-update]"
@@ -327,17 +327,17 @@ NODE
 # exact keys it prints (upstream, 11.24 verified) — the fallback targets
 # pnpm 10.x or >=12.0 only.
 KIT_TARBALLS=(
-  hive-dsh-agents-0.0.1.tgz
-  hive-dsh-board-0.1.0.tgz
+  hive-dsh-agents-0.0.2.tgz
+  hive-dsh-board-0.1.1.tgz
   hive-dsh-dream-archive-0.0.1.tgz
-  hive-dsh-evolution-0.0.1.tgz
-  hive-dsh-hivemind-0.0.1.tgz
-  hive-dsh-painpoints-0.0.1.tgz
-  hive-dsh-tools-0.0.1.tgz
+  hive-dsh-evolution-0.0.2.tgz
+  hive-dsh-hivemind-0.0.2.tgz
+  hive-dsh-painpoints-0.0.2.tgz
+  hive-dsh-tools-0.0.2.tgz
   dsh-berget-refresh-0.1.0.tgz
   dsh-berget-usage-0.2.0.tgz
   dsh-provider-usage-0.1.0.tgz
-  dsh-web-search-searxng-0.5.0.tgz
+  dsh-web-search-searxng-0.5.1.tgz
 )
 
 kit_has_all_tarballs() {
@@ -392,23 +392,23 @@ if [ "$HAS_KIT_TARBALLS" = "1" ] && [ "${DSH_HIVE_GIT_MODE:-0}" != "1" ]; then
   # Relative specs ONLY, and the add must run with the profile as the pnpm
   # cwd. Absolute file: args get re-anchored through the dsh plugin-manager
   # chain with the profile name injected as a phantom segment (observed:
-  # "…/profiles/web/web/hive-dsh-agents-0.0.1.tgz", and "hive/hive/…"
+  # "…/profiles/web/web/hive-dsh-agents-0.0.2.tgz", and "hive/hive/…"
   # before it) — relative "./x.tgz" args resolve against the manifest's own
   # dir and never travel through that code. The updater therefore `cd`s
   # into the profile (restoring cwd after) and the plugin-manager's own
   # rel-spec anchoring against the caller cwd is bypassed by the cd.
   SPECS=(
-    file:./hive-dsh-agents-0.0.1.tgz
-    file:./hive-dsh-board-0.1.0.tgz
+    file:./hive-dsh-agents-0.0.2.tgz
+    file:./hive-dsh-board-0.1.1.tgz
     file:./hive-dsh-dream-archive-0.0.1.tgz
-    file:./hive-dsh-evolution-0.0.1.tgz
-    file:./hive-dsh-hivemind-0.0.1.tgz
-    file:./hive-dsh-painpoints-0.0.1.tgz
-    file:./hive-dsh-tools-0.0.1.tgz
+    file:./hive-dsh-evolution-0.0.2.tgz
+    file:./hive-dsh-hivemind-0.0.2.tgz
+    file:./hive-dsh-painpoints-0.0.2.tgz
+    file:./hive-dsh-tools-0.0.2.tgz
     file:./dsh-berget-refresh-0.1.0.tgz
     file:./dsh-berget-usage-0.2.0.tgz
     file:./dsh-provider-usage-0.1.0.tgz
-    file:./dsh-web-search-searxng-0.5.0.tgz
+    file:./dsh-web-search-searxng-0.5.1.tgz
   )
   PACKAGES_NAMES=(
     @hive/dsh-agents @hive/dsh-board @hive/dsh-dream-archive @hive/dsh-evolution

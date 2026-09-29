@@ -39,17 +39,17 @@ const PKG_PATHS = {
 const TARBALL_FILE = (name) => `file:${require("node:path").join(__dirname, name)}`
 
 const TARBALLS = {
-  "@hive/dsh-agents": TARBALL_FILE("hive-dsh-agents-0.0.1.tgz"),
-  "@hive/dsh-board": TARBALL_FILE("hive-dsh-board-0.1.0.tgz"),
+  "@hive/dsh-agents": TARBALL_FILE("hive-dsh-agents-0.0.2.tgz"),
+  "@hive/dsh-board": TARBALL_FILE("hive-dsh-board-0.1.1.tgz"),
   "@hive/dsh-dream-archive": TARBALL_FILE("hive-dsh-dream-archive-0.0.1.tgz"),
-  "@hive/dsh-evolution": TARBALL_FILE("hive-dsh-evolution-0.0.1.tgz"),
-  "@hive/dsh-hivemind": TARBALL_FILE("hive-dsh-hivemind-0.0.1.tgz"),
-  "@hive/dsh-painpoints": TARBALL_FILE("hive-dsh-painpoints-0.0.1.tgz"),
-  "@hive/dsh-tools": TARBALL_FILE("hive-dsh-tools-0.0.1.tgz"),
+  "@hive/dsh-evolution": TARBALL_FILE("hive-dsh-evolution-0.0.2.tgz"),
+  "@hive/dsh-hivemind": TARBALL_FILE("hive-dsh-hivemind-0.0.2.tgz"),
+  "@hive/dsh-painpoints": TARBALL_FILE("hive-dsh-painpoints-0.0.2.tgz"),
+  "@hive/dsh-tools": TARBALL_FILE("hive-dsh-tools-0.0.2.tgz"),
   "dsh-berget-refresh": TARBALL_FILE("dsh-berget-refresh-0.1.0.tgz"),
   "dsh-berget-usage": TARBALL_FILE("dsh-berget-usage-0.2.0.tgz"),
   "dsh-provider-usage": TARBALL_FILE("dsh-provider-usage-0.1.0.tgz"),
-  "dsh-web-search-searxng": TARBALL_FILE("dsh-web-search-searxng-0.5.0.tgz"),
+  "dsh-web-search-searxng": TARBALL_FILE("dsh-web-search-searxng-0.5.1.tgz"),
 }
 
 // git+https://…/repo.git#ref&path:…  or  github:owner/repo#ref&path:…
