@@ -1,6 +1,6 @@
 {
   "name": "@hive/dsh-agents",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "private": true,
   "files": [
     "dist",
@@ -25,11 +25,11 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-skill": "0.1.7-rc.2"
+    "@deepseek-ai/dsh-skill": "0.2.0-rc.2"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-skill": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-skill": "0.2.0-rc.2",
     "@types/node": "^22.0.0",
     "typescript": "^5.6.0"
   }
