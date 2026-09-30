@@ -1,0 +1,43 @@
+{
+  "name": "dsh-research-rampage",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The /research-rampage command: a coordinator-run, multi-subagent deep-research protocol delivered as prompt injection.",
+  "files": [
+    "dist",
+    "assets"
+  ],
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepare": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "npm run build && node --test"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-commands": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-llm": "0.2.0-rc.2"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-commands": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-llm": "0.2.0-rc.2",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
+  }
+}
