@@ -1,0 +1,9 @@
+# dsh-research-rampage profile bundle: joins the load stack of any profile
+# that adds this package as a dependency (`dsh plugin add` reconciles
+# dsh.bundle packages automatically — no user-patch rows needed).
+# Config-free by design: the command is pure prompt injection; the coordinator
+# writes its artifacts into the session workspace, so there is nothing to
+# configure at mount time.
+- insert:
+    - id: research-rampage
+      name: dsh-research-rampage
