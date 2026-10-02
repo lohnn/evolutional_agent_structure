@@ -85,6 +85,14 @@ function collectDreamtimePartition() {
   return new Set([...indexSrc.slice(start, end).matchAll(/"(hive_[a-z0-9_]+)"/g)].map((m) => m[1]))
 }
 
+function collectHivemindPartition() {
+  const indexSrc = fs.readFileSync(path.join(PKG, "src", "index.ts"), "utf8")
+  const start = indexSrc.indexOf("export const HIVEMIND_STANDING_TOOLS")
+  assert.ok(start >= 0, "HIVEMIND_STANDING_TOOLS must exist in evolution src (TOKEN-ECONOMY D5-B)")
+  const end = indexSrc.indexOf("]", start)
+  return new Set([...indexSrc.slice(start, end).matchAll(/"(hive_[a-z0-9_]+)"/g)].map((m) => m[1]))
+}
+
 function collectBoardCohortTools() {
   const names = new Set()
   walkTs(path.join(MONOREPO, "packages", "board", "src"), (file) => {
@@ -209,5 +217,28 @@ test("dreamtime partition ⊆ census and disjoint from the dormant open surface"
   // partition must change in the same commit.
   for (const standing of ["hive_dream_rank", "hive_dream_query", "hive_dream_list", "hive_dream_residue", "hive_note_painpoint", "hive_painpoints_list"]) {
     assert.ok(!part.has(standing), `${standing} must stay on the standing surface (rank-first recall + residue/painpoint at bite time)`)
+  }
+})
+
+// TOKEN-ECONOMY D5-B: the HIVEmind standing partition — config-gated
+// (`hivemind: false`) off the TOP-LEVEL surface; children keep it by lineage.
+test("hivemind partition == the 4 mailbox tools, ⊆ census, disjoint from dormant-open and dispatch tools", () => {
+  const hiv = collectHivemindPartition()
+  assert.deepEqual(
+    [...hiv].sort(),
+    ["hive_listen", "hive_retire", "hive_sent", "hive_signal"],
+    `HIVEMIND_STANDING_TOOLS drifted — got [${[...hiv].sort().join(", ")}]`
+  )
+  const census = collectDenyMask()
+  const open = collectOpenSurface()
+  const dreamtime = collectDreamtimePartition()
+  const notCensused = [...hiv].filter((n) => !census.has(n))
+  const overlap = [...hiv].filter((n) => open.has(n) || dreamtime.has(n))
+  assert.deepEqual({ notCensused, overlap }, { notCensused: [], overlap: [] })
+  // The coordinator's dispatch toolset NEVER joins a standing partition — the
+  // awakened surface without hivemind must still fully dispatch and steer.
+  for (const core of ["hive_dispatch", "hive_send", "hive_children"]) {
+    assert.ok(census.has(core), `${core} must exist in the census`)
+    assert.ok(!dreamtime.has(core) && !hiv.has(core), `${core} must never be standing-restricted`)
   }
 })

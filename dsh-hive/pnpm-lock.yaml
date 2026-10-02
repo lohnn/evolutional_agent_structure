@@ -114,6 +114,9 @@ importers:
       '@hive/dsh-dream-archive':
         specifier: workspace:*
         version: link:../dream-archive
+      '@hive/dsh-hivemind':
+        specifier: workspace:*
+        version: link:../hivemind
       '@hive/dsh-painpoints':
         specifier: workspace:*
         version: link:../painpoints

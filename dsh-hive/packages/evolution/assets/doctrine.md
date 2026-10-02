@@ -68,18 +68,18 @@ only the /awaken hint.
 - `/evolve` — self-analysis: gaps, overlaps, decay (with an Audit-grade
   dream sweep)
 - `/dissolve` — return a capability to the void
-- `/tick` — apply the energy tick by hand
-- `/status` — view the ecosystem: roster, energy, the void
+- `/tick` — apply the energy tick by hand · `/status` — roster, energy, the void
 - `/dream` — open/close the dream surface (the dreamtime tools live only during a dream)
 
 ## Dispatch
 
 `hive_dispatch` is how work leaves you. Its semantics, learned once:
 dispatching **always starts a new instance** of a capability — to continue
-ongoing work on an existing child, do not re-dispatch; send a message to the
-child's durable session id (`send_message`; ids come from the dispatch
-result, and `list_agents` shows every live instance, each label carrying the
-capability it belongs to).
+ongoing work on an existing child, do not re-dispatch; point `hive_send` at
+the child's durable session id (ids come from the dispatch result, and
+`hive_children` lists your children with their dispatch labels). The
+built-in `send_message`/`list_agents` are Team-member tools, not child
+tools.
 
 The default shape is **resident**: a background child that works while you
 keep talking to the user, its report arriving as a message. Capability work

@@ -212,6 +212,8 @@ export const HIVE_TOOL_NAMES = [
   "hive_board_tag",
   // ── this package ─────────────────────────────────────────────────────────
   "hive_dispatch",
+  "hive_send",
+  "hive_children",
 ] as const
 
 /**
@@ -291,6 +293,22 @@ export const DREAMTIME_SUMMONED_TOOLS = [
   "hive_dream_mark_stale",
   "hive_dream_detect_duplicates",
   "hive_painpoints_harvest",
+] as const
+
+/**
+ * TOKEN-ECONOMY D5-B — the hivemind standing partition. The four HIVEmind
+ * mailbox tools predate dsh's built-in team messaging; on a synchronous
+ * deployment (capabilities report through the coordinator, steer via
+ * `hive_send`) they are dead standing weight (~1.5K tokens/turn). Config
+ * `hivemind: false` adds them to the TOP-LEVEL standing mask (children keep
+ * them by lineage — the async mailbox is still a capability-child surface).
+ * Default `true`: no behavior change until a deployment opts out.
+ */
+export const HIVEMIND_STANDING_TOOLS = [
+  "hive_signal",
+  "hive_listen",
+  "hive_sent",
+  "hive_retire",
 ] as const
 
 /**
@@ -472,12 +490,22 @@ export class Evolution extends Service {
         deep: z.string().default(""),
       })
       .default({ mechanical: "", standard: "", deep: "" }),
+    /**
+     * TOKEN-ECONOMY D5-B — `false` removes the four HIVEmind mailbox tools
+     * from the top-level coordinator's standing surface (children keep them
+     * by lineage). Default true (no behavior change). Choose false when the
+     * deployment coordinates synchronously: dispatch + report + hive_send,
+     * no async capability-to-capability mailbox.
+     */
+    hivemind: z.boolean().default(true),
   })
 
   readonly directory: string
   readonly capabilitiesPath: string
   /** D1 — the parsed deployment tier→route table ("" entries dropped). */
   readonly modelRoutes: ModelRouteTable
+  /** D5-B — whether the HIVEmind mailbox stays on the coordinator's standing surface. */
+  readonly hivemind: boolean
 
   constructor(
     ctx: import("@deepseek-ai/cordis").Context,
@@ -486,6 +514,7 @@ export class Evolution extends Service {
       capabilitiesPath?: string
       capabilitiesTrust: string
       modelRoutes?: { mechanical?: string; standard?: string; deep?: string }
+      hivemind?: boolean
     }
   ) {
     super(ctx, "evolution")
@@ -494,6 +523,7 @@ export class Evolution extends Service {
       (config.capabilitiesPath ?? "") !== ""
         ? (config.capabilitiesPath as string)
         : path.join(config.directory, ".opencode/agents/capabilities")
+    this.hivemind = config.hivemind !== false
     // Collapse the schema's defaulted "" entries into absent ones — the
     // resolver treats absent and empty identically (degrade to inherit),
     // but a clean table makes the [model] log line honest.
@@ -636,7 +666,7 @@ export class Evolution extends Service {
           // happens on the next resume) and including a cold-resume MID-dream
           // (the surface re-masks: re-run /dream; a documented edge, the
           // dream state is safe on disk).
-          this.applyStandingDreamRestriction(sessionId, agent)
+          this.applyStandingRestrictions(sessionId, agent)
           // ── Compaction seam (T6) ────────────────────────────────────────────
           // dsh publishes no standalone compaction event; a session that was
           // just summarized RE-PUBLISHES through this same event with
@@ -1110,7 +1140,7 @@ export class Evolution extends Service {
           //     restriction the gate applies on every publication, applied
           //     here too because the flip does not republish the agent: the
           //     DREAMTIME partition pops onto the surface only via /dream.
-          this.applyStandingDreamRestriction(sessionId, agent)
+          this.applyStandingRestrictions(sessionId, agent)
           // (4) Board auto-register — the EXACT junction where the OpenCode
           //     plugin called autoRegister() for the new coordinator
           //     (src/tools.ts hive_awaken handler, step 4 of the flip).
@@ -1256,7 +1286,7 @@ export class Evolution extends Service {
             // Surface already OPEN (or never masked — e.g. installed without
             // the dream plugins): treat as close-if-openable. Re-applying the
             // mask keeps the toggle total and idempotent.
-            this.applyStandingDreamRestriction(sessionId, inv.agent)
+            this.applyStandingRestrictions(sessionId, inv.agent)
             const nowOn = this.standingDreamRestrictions.get(sessionId)
             if (nowOn === undefined) {
               return {
@@ -1328,7 +1358,7 @@ export class Evolution extends Service {
           name: "hive_dispatch",
           description:
             "Dispatch a HIVE worker as a child agent. Address forms: 'capability/<name>' (workspace capability from the roster), 'builtin/<id>' (plugin-owned agent — currently only builtin/dreamcatcher), or bare '<name>' (= capability/<name>).\n" +
-            "ALWAYS starts a NEW instance. To CONTINUE ongoing work on an existing child, do NOT re-dispatch: send_message its durable session id (from the dispatch result, or list_agents for live instances — every child label carries its dispatch address as a prefix). New parallel work on the same capability = dispatch again.\n" +
+            "ALWAYS starts a NEW instance. To CONTINUE ongoing work on an existing child, do NOT re-dispatch: hive_send its durable session id with the next message (from the dispatch result, or hive_children for your live children — every label carries the dispatch address as a prefix). New parallel work on the same capability = dispatch again.\n" +
             "Default shape 'resident': background child — you receive its session id, its report arrives as a message, `send_message` can steer it, and it survives restarts. Shape 'one-shot': synchronous consult — the call blocks until the child finishes and its final output is returned directly as this tool's result (no resident session, nothing to steer). Rule: one-shot only for short, self-contained, result-shaped consults (dreamcatcher Recall); everything else stays resident.\n" +
             "The capability's own method (what-this-enables / triggers / protocol / boundaries) plus the HIVE standing context are composed into the child automatically — write the TASK brief only (intent over implementation); do not re-teach the capability its own job.\n" +
             "builtin/dreamcatcher is read-only by construction (mutation tools denied at spawn) and carries its full Recall/Audit method on the plugin side — the prompt need only state the job (its mode and scope), not the method.",
@@ -1539,13 +1569,96 @@ export class Evolution extends Service {
               (route ? ` Model route: ${routeLabel}.` : "") +
               (dreamNote ? ` ${dreamNote}` : "") +
               (def ? " Read-only filter applied via the start request's toolFilter field." : "") +
-              ` Continue THIS child with send_message(${String(start.childId)}) when it holds relevant context; list_agents lists your live instances; dispatch again only for fresh or parallel work.`
+              ` Continue THIS child with hive_send(session: "${String(start.childId)}", message) when it holds relevant context; hive_children lists your children with their dispatch labels; dispatch again only for fresh or parallel work.`
             )
           },
           output: TEXT_OUT,
         })
       )
     )
+
+    // ── Child steering + address book (TOKEN-ECONOMY D5-A) ────────────────────
+    // VERIFIED LIVE (dsh 0.2.0-rc.2, team profile active): the model-facing
+    // `send_message`/`list_agents` tools are TEAM-member-scoped — a subagent
+    // child ("send its id to send_message") is refused as 'active teammate
+    // not found', and list_agents shows only the team roster. The REAL
+    // parent↔child channel is the subagent service's own sendMessage/
+    // listChildren (adjacency-enforced: direct children only, and a not-live
+    // child cold-resumes from persistence). These two tools expose exactly
+    // that to the coordinator — replaceable by upstream team work later
+    // (TOKEN-ECONOMY.md D5 Phase C), not before the corridor carries it.
+    ctx.effect(() => {
+      const send = ctx.tools.register(
+        defineTool({
+          name: "hive_send",
+          description:
+            "Steer one of YOUR resident HIVE children — the durable session id a hive_dispatch result named — with one message. The child admits it at its nearest step boundary while running, starts a turn while idle, and cold-resumes from disk when not live. Direct children only (adjacency enforced by the runtime); the built-in send_message cannot reach subagent children.",
+          parameters: {
+            session: {
+              type: "string",
+              required: true,
+              description: "The child's durable session id, exactly as the hive_dispatch result printed it.",
+            },
+            message: {
+              type: "string",
+              required: true,
+              description: "The steering message: the new constraint, answer, or instruction. The child receives it as its next turn input.",
+            },
+          },
+          execute: async (args, exec) => {
+            const parent = exec.agent as Agent | undefined
+            if (!parent) throw new Error("hive_send must be called from within an agent turn (no calling agent in scope)")
+            const sessionId = String(args.session ?? "").trim()
+            if (!sessionId) throw new Error("hive_send: empty session id — pass the durable id from the hive_dispatch result (hive_children lists them)")
+            const message = String(args.message ?? "").trim()
+            if (!message) throw new Error("hive_send: empty message — say what the child should do with what it has")
+            try {
+              // SessionId is a dsh-session branded type; evolution does not
+              // depend on that package's types — the adjacency + durability
+              // guarantee is the runtime's, the cast only satisfies the claim.
+              const targetId = sessionId as unknown as Parameters<typeof this.ctx.subagents.sendMessage>[1]
+              await this.ctx.subagents.sendMessage(
+                parent,
+                targetId,
+                [{ type: "text", text: message }] as ContentBlock[],
+                { signal: exec.signal }
+              )
+            } catch (err) {
+              return `Not delivered — ${sessionId}: ${err instanceof Error ? err.message : String(err)} (hive_children lists the children you can steer).`
+            }
+            return `Message accepted for ${sessionId} — running → next step boundary; idle → new turn; was not live → cold-resumed from disk.`
+          },
+          output: TEXT_OUT,
+        })
+      )
+
+      const childrenTool = ctx.tools.register(
+        defineTool({
+          name: "hive_children",
+          description:
+            "List YOUR direct HIVE children — every resident and historical child session dispatched from this coordinator — with id, shape (resident/one-shot), and the dispatch label (always prefixed by the capability address, so list output doubles as the capability's live-instance view). The address book hive_send steers against.",
+          parameters: {},
+          execute: async (_args, exec) => {
+            const parent = exec.agent as Agent | undefined
+            if (!parent) throw new Error("hive_children must be called from within an agent turn (no calling agent in scope)")
+            const parentSessionId = String((parent.session as { id?: unknown } | undefined)?.id ?? (parent as { id?: unknown }).id ?? "")
+            if (!parentSessionId) throw new Error("hive_children: no resolvable session id on the calling agent")
+            let children
+            try {
+              const parentCatalog = parentSessionId as unknown as Parameters<typeof this.ctx.subagents.listChildren>[0]
+              children = await this.ctx.subagents.listChildren(parentCatalog, exec.signal)
+            } catch (err) {
+              return `Child catalog unavailable: ${err instanceof Error ? err.message : String(err)}`
+            }
+            if (!children || children.length === 0) return "No HIVE children yet — dispatch with hive_dispatch; the result names each child's durable session id."
+            const lines = children.map((c) => `- ${String(c.id)} — ${c.mode}${"label" in c && c.label ? ` — ${c.label}` : ""}`)
+            return [`Your HIVE children (${lines.length}):`, ...lines].join("\n")
+          },
+          output: TEXT_OUT,
+        })
+      )
+      return () => { send(); childrenTool }
+    })
   }
 
   /**
@@ -1688,25 +1801,33 @@ export class Evolution extends Service {
   private standingDreamRestrictions = new Map<string, () => void>()
 
   /**
-   * Apply (or re-apply) the standing dream restriction for an awakened
-   * session. Filtered to what THIS process registered — the same
-   * restrict()-validates-unknowns contract the dormant mask honors, so a
-   * standalone-evolution install (no dream/painpoints plugins) degrades to
-   * masking nothing rather than failing agent publication. Idempotent for
-   * one scoped world: a repeat application on the SAME world would shadow
-   * the old disposer, so the caller pattern is apply-on-publication only.
+   * Apply (or re-apply) the standing restriction for an awakened session:
+   * the DREAMTIME partition always, plus the HIVEmind mailbox partition when
+   * `hivemind: false` (TOKEN-ECONOMY D5-B). Filtered to what THIS process
+   * registered — the same restrict()-validates-unknowns contract the dormant
+   * mask honors, so a standalone-evolution install (no dream/painpoints
+   * plugins) degrades to masking nothing rather than failing agent
+   * publication. Idempotent for one scoped world: a repeat application on
+   * the SAME world would shadow the old disposer, so the caller pattern is
+   * apply-on-publication only. Returns the disposer it stored (or undefined
+   * when nothing was masked).
    */
-  private applyStandingDreamRestriction(sessionId: string, agent: Agent): void {
-    const deny = (DREAMTIME_SUMMONED_TOOLS as readonly string[]).filter((name) => {
+  private applyStandingRestrictions(sessionId: string, agent: Agent): (() => void) | undefined {
+    const standing: readonly string[] =
+      this.hivemind === false
+        ? [...DREAMTIME_SUMMONED_TOOLS, ...HIVEMIND_STANDING_TOOLS]
+        : DREAMTIME_SUMMONED_TOOLS
+    const deny = standing.filter((name) => {
       try {
         return this.ctx.tools.get(name) !== undefined
       } catch {
         return false
       }
     })
-    if (deny.length === 0) return
+    if (deny.length === 0) return undefined
     const lift = agent.ctx?.tools?.restrict({ deny })
     if (lift) this.standingDreamRestrictions.set(sessionId, lift)
+    return lift ?? undefined
   }
 
   // ── energy state ──────────────────────────────────────────────────────────

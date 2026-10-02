@@ -97,10 +97,17 @@ const agentScope = (id, header = {}) => {
   return a
 }
 
-// this composition's registered hive surface — everything else (dream /
-// hivemind / painpoints plugins) is deliberately not mounted here, so absence
-// for those names proves plugin absence, NOT the gate. Only registered+masked
-// names are gate evidence.
+// The D5-B composition's agent factory (same shape, ctx2)
+const agentScope2 = (c, id, header = {}) => {
+  const a = { id, session: { id, header }, followup: () => {} }
+  const scope = createScope(c, a, {})
+  a.ctx = scope.ctx
+  return a
+}
+
+// this composition now mounts board + dream + tools + painpoints + hivemind
+// (D4/D5 legs), so "registered+masked" names are gate evidence for BOTH the
+// dormant mask and the standing partitions that follow.
 const registeredHive = census.size > 0
   ? [...census].filter((n) => ctx.tools.get(n) !== undefined)
   : []
@@ -294,6 +301,43 @@ test("d4: /dream is awakened-only and top-level only (gate + depth guard)", asyn
   // refuses on dormancy (the depth guard is the belt-and-braces layer above it)
   assert.ok(String(childOut.text).includes("dormant") || String(childOut.text).includes("dispatched child"),
     "child /dream refused (by requireAwake or the depth guard)")
+})
+
+// ── D5-B: hivemind:false strips the mailbox from the TOP-LEVEL surface ──────
+// A separate composition (default keeps the tools — no-behavior-change).
+const FIX2 = fs.mkdtempSync(path.join(os.tmpdir(), "d5b-hivemind-"))
+fs.mkdirSync(path.join(FIX2, ".opencode/agents/capabilities"), { recursive: true })
+const ctx2 = new Context()
+new SP(ctx2, { includeHarnessIdentity: true, includeRuntimeContext: false, persona: "gate" })
+new Tools(ctx2, {})
+new Commands(ctx2, {})
+new Subagents(ctx2, {})
+const Hivemind = (await import("@hive/dsh-hivemind")).default
+ctx2.plugin(Board, { directory: FIX2 })
+ctx2.plugin(Hivemind, { directory: FIX2 })
+ctx2.plugin(Evolution, { directory: FIX2, hivemind: false })
+await new Promise((r) => setTimeout(r, 80))
+
+test("d5b: with hivemind:false the awakened top-level surface masks the 4 mailbox tools but keeps dispatch + steering", async () => {
+  const awake2 = agentScope2(ctx2, "ses_d5b_lead")
+  const awaken2 = ctx2.commands.find(undefined, "awaken")
+  const out2 = await awaken2.handler({ rawInput: "hivemind off probe", agent: awake2, commandId: "c_d5b", attachments: [], signal: AbortSignal.timeout(5000) })
+  assert.equal(out2.kind, "success")
+  for (const name of ["hive_signal", "hive_listen", "hive_sent", "hive_retire"]) {
+    assert.equal(ctx2.tools.get(name, awake2), undefined, `${name} masked on the standing surface (hivemind:false)`)
+  }
+  // Only registrations that exist in THIS composition count as standing
+  // evidence (no dream tools plugins mounted here — their absence is
+  // plugin-absence, proven in the main composition's d4 legs instead).
+  for (const name of ["hive_dispatch", "hive_send", "hive_children", "hive_board_list", "hive_board_search"]) {
+    assert.notEqual(ctx2.tools.get(name, awake2), undefined, `${name} stays standing`)
+  }
+})
+
+test("d5b: with hivemind:false the mailbox stays usable for a lineage child (skip branch)", () => {
+  const child2 = agentScope2(ctx2, "ses_d5b_child", { delegationDepth: 1 })
+  ctx2.emit("agent/created", { agent: child2, source: "startup" })
+  assert.notEqual(ctx2.tools.get("hive_signal", child2), undefined, "depth>0 child keeps the mailbox (lineage exemption)")
 })
 test("wi066: a depth>0 child still takes the skip branch — sees open AND bind — and the D5 refusal remains the runtime border", async () => {
   const child = agentScope("ses_wi066_child", { delegationDepth: 1 })
