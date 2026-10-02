@@ -242,28 +242,43 @@ sessions that turn out to be Q&A.
 
 ## 4. Implementation checklist (ordered)
 
-1. [ ] D1 tier routing: config schema, resolver (`lib/model-tiers.ts`),
+1. [x] D1 tier routing: config schema, resolver (`lib/model-tiers.ts`),
       env overrides, `hive_dispatch` integration, unit tests
       (resolution order, degrade-to-inherit, env verbatim).
-2. [ ] D2 `BuiltinAgentDef.modelTier` + dreamcatcher pins; dispatch
+2. [x] D2 `BuiltinAgentDef.modelTier` + dreamcatcher pins; dispatch
       contract test updated.
-3. [ ] D3 pointer plumbing: dreamcatcher persona pointer contract (all
+3. [x] D3 pointer plumbing: dreamcatcher persona pointer contract (all
       copies + drift test), `dream_ids` on `hive_dispatch`, code-side
       artifact composition + staleness re-flag, tests.
-4. [ ] D3.5/D9 doctrine + awaken-brief rewrite (rank-first, deferred
+4. [x] D3.5/D9 doctrine + awaken-brief rewrite (rank-first, deferred
       recall), drift-guard marker updates.
-5. [ ] D4 summon-scoped dream tools: `/dream` command + gate partition +
-      sync tests.
-6. [ ] D5-A live verification of child messaging under the team profile;
-      echo-text/doctrine correction to verified truth.
-7. [ ] D5-B hivemind config gate; doctrine contract-dependency language.
-8. [ ] D6 doctrine split + `hive_doctrine` tool.
-9. [ ] D7 description trims (board/dream/dispatch) + consult allow-list.
-10. [ ] D8 standing-report budget line.
-11. [ ] D10 usage-log skeleton; cache-order spike notes.
-12. [ ] Full suite green (`bun test` per package + typecheck), then a live
-      smoke: fresh profile boot, `/awaken`, one dispatch with `dream_ids`,
-      one dreamtime with summoned tools.
+5. [x] D4 summon-scoped dream tools: `/dream` command + gate partition +
+      sync tests. (commits 3eaed0f)
+6. [x] D5-A verified: the model-facing `send_message`/`list_agents` are
+      TEAM-member-scoped (live experiment: a spawned subagent child is
+      refused as "active teammate not found"); the real parent↔child
+      channel is SubagentRuntime.sendMessage/listChildren. `hive_send` +
+      `hive_children` expose it; echoes + doctrine teach the truth.
+      (commit 763de8f)
+7. [x] D5-B hivemind config gate (`hivemind: false` masks the 4 mailbox
+      tools top-level only; default true); sync + runtime legs.
+8. [x] D6 doctrine split: 178-line standing core + 3 chapters via
+      `hive_doctrine` (evolution / contracts / commands).
+9. [x] D7 description diet (board 7801→5758 chars, dream tools, dispatch,
+      per the agent-experience rules) + one-shot allow-list
+      (`childToolFilterFor`, dreamcatcher Recall sees only the 4 read tools).
+10. [x] D8 standing-report budget (outcome + next-move findings + retrieval
+      pointers, ~40 lines).
+11. [x] D10 usage-log skeleton (`.opencode/hive-usage.jsonl`, fire-and-forget;
+      dispatch lines both shapes, settle lines for one-shot). Named residual:
+      resident settles are host-side until a settle hook exists — the reader
+      and the cache-order spike (§D10) stay open, deliberately small.
+12. [x] Full suite green (`pnpm -r test`, node --test per package — 10
+      packages, 0 failures) + tsc clean. Live smoke (fresh profile boot,
+      /awaken, one dispatch with dream_ids, one dreamtime) deferred to the
+      first session on the dsh branch — the D5 send-message-reality claim is
+      the one part already live-verified, from this session's own DSH
+      experiment.
 
 ## 5. Explicitly out of scope (this branch)
 
