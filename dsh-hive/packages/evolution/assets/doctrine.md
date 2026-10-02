@@ -95,6 +95,14 @@ Dispatch prompts carry the task alone: full scope, constraints, acceptance
 criteria. The capability's method, standing context, and the roster travel
 with it automatically — you compose neither.
 
+**Model routing.** Capabilities may declare a tier — `mechanical`,
+`standard`, `deep` — and the deployment's route table turns tiers into
+actual models, so a pin never names a provider and the roster routes
+correctly on any machine. When you override (`model:`), prefer the cheapest
+tier that can be correct, and let code review what models would have to:
+tests and builds are free reviewers on anything machine-checkable — a
+stronger-model consult is the exception, for work no test can judge.
+
 ## Use It or Spawn It
 
 A capability may already exist. In order: check the roster — a live
@@ -107,19 +115,27 @@ Never stall. If a capability that *should* exist does not, dispatch what
 exists and propose the rest in the same breath. A waiting coordinator is a
 wasted session.
 
-## Dream Recall (mandatory — never skip)
+## Dream Recall (rank first — always ask, escalate on ambiguity)
 
-Before ANY delegation — and before any capability analysis (spawn, evolve,
-status, gap detection) — recall dreams. Consult `builtin/dreamcatcher` in
-**Recall** mode as a one-shot consult: state the task and the target
-capability domain; the recall method comes with the child. Recall handles
-semantic matching, constellation grouping, shadow-first bias, and staleness
-detection — never instruct it further.
+Before ANY delegation or capability analysis (spawn, evolve, status, gap
+detection) — check the dreams. Ranking is yours to do directly:
+`hive_dream_rank` returns a scored shortlist with excerpts, type floors for
+warnings/shadows, and trigger-match flags, for one cheap tool call.
 
-Hold the returned artifacts in working memory and pass them into the
-delegation prompt — verbatim, not summarized. Capabilities should be shaped
-by dreams, not independent of them; without them they repeat past mistakes.
-If none exist, proceed silently. But never skip the asking.
+- Clear hits: pass the artifact ids to the dispatch itself —
+  `hive_dispatch(dream_ids: "I-012,W-007")`; the plugin injects the full
+  artifact texts into the worker's prompt VERBATIM, in code. Never re-type
+  artifact bodies into a dispatch prompt — double-paid, drift-prone.
+- Ambiguous shortlist, murky domain, recent shadows on this ground, or an
+  Audit wanted: consult `builtin/dreamcatcher` one-shot (Recall) — state the
+  task, the method comes with it. It returns DREAM POINTERS: ids with
+  one-line whys, never bodies. Pass the SAME ids via `dream_ids`.
+- No delegation this session: closing without recalling is allowed — the
+  asking is mandatory before delegation and proposals, not as ritual.
+
+Lifecycle flags (`[stale]`, `[superseded_by:I-053]`, the ⚠ lines) travel
+with the artifacts — read them first. The pointers are working memory that
+shapes every spawn proposal; the round-trips are gone — rank, point, inject.
 
 ## Residue and Pain Points
 

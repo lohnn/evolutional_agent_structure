@@ -97,7 +97,11 @@ test("dreamcatcher builtin: full persona, read-only filter, both shapes, residen
     "## Mode: Audit",
     "hive_dream_rank",
     "hive_dream_detect_duplicates",
-    "DREAM RECALL",
+    // TOKEN-ECONOMY D3: the output contract is DREAM POINTERS — ids + one-line
+    // whys, never artifact bodies; the seam transports content in code.
+    "DREAM POINTERS",
+    "pointers, not bodies",
+    "dream_ids",
     "DREAM AUDIT",
     "shadow-first bias",
     "coverage stage",

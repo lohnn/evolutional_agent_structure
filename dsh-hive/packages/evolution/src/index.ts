@@ -50,6 +50,19 @@ import { autoRegister } from "@hive/dsh-board/lib/board-transitions"
 import { parseCapabilityPersona, renderAgentCordisYml, type CapabilityPersona } from "./lib/persona.js"
 import { resolveCapabilityMaterial } from "./lib/material.js"
 import {
+  resolveModelRoute,
+  readPresetModelSpec,
+  MODEL_TIERS,
+  type ModelTier,
+  type ModelRouteTable,
+} from "./lib/model-tiers.js"
+import {
+  resolveDreamArtifacts,
+  composeDreamArtifactBlock,
+  describeDreamInjection,
+  type DreamArchiveLike,
+} from "./lib/dream-inject.js"
+import {
   composeEcosystemSnapshot,
   composePostCompactionContext,
   POST_COMPACTION_DREAM_LIMIT,
@@ -272,6 +285,12 @@ const AWAKEN_SPAWN_PARAMETERS: ParameterSchemaSpec = {
           type: "string",
           description: "One-line description of what the capability owns and when it activates.",
         },
+        model_tier: {
+          type: "string",
+          description:
+            `Optional model tier: ${MODEL_TIERS.join(" | ")}. Portable metadata for how much model the capability's work needs — ` +
+            "the deployment's route table (modelRoutes / HIVE_MODEL_TIER_*) turns it into an actual model. Omit to inherit the session's model.",
+        },
         persona: {
           type: "object",
           additionalProperties: false,
@@ -299,6 +318,12 @@ const AWAKEN_SPAWN_PARAMETERS: ParameterSchemaSpec = {
  * shape, one validator: parseCapabilityPersona).
  */
 const SPAWN_PARAMETERS: ParameterSchemaSpec = {
+  model_tier: {
+    type: "string",
+    description:
+      `Optional model tier for the new capability: ${MODEL_TIERS.join(" | ")}. Portable metadata recorded in preset.yml; ` +
+      "the deployment's route table (modelRoutes / HIVE_MODEL_TIER_*) turns it into an actual model. Omit to inherit the session's model.",
+  },
   persona: {
     type: "object",
     additionalProperties: false,
@@ -353,7 +378,8 @@ export interface SummonOutcome {
  */
 const CANONICAL_SPAWN_ENTRY =
   "canonical entry shape is { name: string, description: string, persona?: { enables: string, triggers: string, " +
-  "protocol?: string, selfModification?: string, boundaries?: string, history?: string } } — " +
+  "protocol?: string, selfModification?: string, boundaries?: string, history?: string }, " +
+  `model_tier?: ${MODEL_TIERS.map((t) => `"${t}"`).join(" | ")} } — ` +
   "`enables` + `triggers` are REQUIRED whenever a persona is given"
 
 /**
@@ -396,18 +422,55 @@ export class Evolution extends Service {
      * dsh's authoring API.
      */
     capabilitiesTrust: z.string().default("user"),
+    /**
+     * TOKEN-ECONOMY D1 — the deployment's tier→route table. Presets and
+     * built-ins declare a TIER (`mechanical` | `standard` | `deep`), never
+     * a provider: which providers a machine may use for what is a property
+     * of the machine (the work-only vs personal provider split lives HERE),
+     * so the same preset roster routes correctly everywhere. Values are
+     * `<provider>/<model-id>` or bare model ids on the session's provider;
+     * empty = no route for that tier (dispatch degrades to inherit).
+     * `HIVE_MODEL_TIER_<TIER>` / `HIVE_MODEL_<CAPABILITY>` env vars override
+     * verbatim (lib/model-tiers.ts).
+     */
+    modelRoutes: z
+      .object({
+        mechanical: z.string().default(""),
+        standard: z.string().default(""),
+        deep: z.string().default(""),
+      })
+      .default({ mechanical: "", standard: "", deep: "" }),
   })
 
   readonly directory: string
   readonly capabilitiesPath: string
+  /** D1 — the parsed deployment tier→route table ("" entries dropped). */
+  readonly modelRoutes: ModelRouteTable
 
-  constructor(ctx: import("@deepseek-ai/cordis").Context, config: { directory: string; capabilitiesPath?: string; capabilitiesTrust: string }) {
+  constructor(
+    ctx: import("@deepseek-ai/cordis").Context,
+    config: {
+      directory: string
+      capabilitiesPath?: string
+      capabilitiesTrust: string
+      modelRoutes?: { mechanical?: string; standard?: string; deep?: string }
+    }
+  ) {
     super(ctx, "evolution")
     this.directory = config.directory
     this.capabilitiesPath =
       (config.capabilitiesPath ?? "") !== ""
         ? (config.capabilitiesPath as string)
         : path.join(config.directory, ".opencode/agents/capabilities")
+    // Collapse the schema's defaulted "" entries into absent ones — the
+    // resolver treats absent and empty identically (degrade to inherit),
+    // but a clean table makes the [model] log line honest.
+    const mr = config.modelRoutes ?? {}
+    this.modelRoutes = {
+      ...(mr.mechanical ? { mechanical: mr.mechanical } : {}),
+      ...(mr.standard ? { standard: mr.standard } : {}),
+      ...(mr.deep ? { deep: mr.deep } : {}),
+    }
 
     // ── Roster injection (spike 0.2) ────────────────────────────────────────
     // Order 50: after harness identity (-100) and deployment persona (0),
@@ -789,9 +852,25 @@ export class Evolution extends Service {
                 // name is this command's argument, not a tool-arg — so it is
                 // recorded as a terminal, summon-spending outcome.
                 (args): SummonOutcome => {
+                  const rec = (args ?? {}) as { persona?: unknown; model_tier?: unknown }
+                  // D1: optional tier — same validation grammar as the awaken
+                  // batch's per-entry field (refuse correctably on nonsense;
+                  // absent inherits).
+                  let modelTier: ModelTier | undefined
+                  if (rec.model_tier !== undefined && rec.model_tier !== null && rec.model_tier !== "") {
+                    if (typeof rec.model_tier !== "string" || !(MODEL_TIERS as readonly string[]).includes(rec.model_tier)) {
+                      return {
+                        consumed: false,
+                        text:
+                          `✗ refused (payload): model_tier must be one of ${MODEL_TIERS.join(", ")} — never a model route ` +
+                          `(routes belong to the deployment's modelRoutes table). Nothing was manifested.`,
+                      }
+                    }
+                    modelTier = rec.model_tier as ModelTier
+                  }
                   let persona: CapabilityPersona | undefined
                   try {
-                    persona = parseCapabilityPersona(((args ?? {}) as { persona?: unknown }).persona)
+                    persona = parseCapabilityPersona(rec.persona)
                   } catch (err) {
                     return {
                       consumed: false,
@@ -804,10 +883,10 @@ export class Evolution extends Service {
                     }
                   }
                   try {
-                    const dir = this.spawn(name, description, persona)
+                    const dir = this.spawn(name, description, persona, modelTier)
                     return {
                       consumed: true,
-                      text: `Capability \`${name}\` manifested at ${dir} (energy 50). Dispatch it with hive_dispatch (capability "${name}").`,
+                      text: `Capability \`${name}\` manifested at ${dir} (energy 50${modelTier ? `, tier ${modelTier}` : ""}). Dispatch it with hive_dispatch (capability "${name}").`,
                     }
                   } catch (err) {
                     return {
@@ -1158,8 +1237,13 @@ export class Evolution extends Service {
             model: {
               type: "string",
               description:
-                'Optional model override for the child, as "<provider>/<model-id>" — everything before the first "/" is the provider route name, and the model id may itself contain slashes (e.g. "berget/zai-org/GLM-5.3-Flash", "berget/Qwen/Qwen3.8-27B-FP8"). ' +
-                'A value without "/" is a bare model id on this session\'s own provider. Leave unset to inherit the session\'s model.',
+                'Optional model route for the child, as "<provider>/<model-id>" (everything before the first "/" is the provider; the model id may contain slashes, e.g. "berget/zai-org/GLM-5.3-Flash"); a value without "/" is a bare model id on this session\'s own provider. ' +
+                "Leave unset to use the capability's declared tier via the deployment's route table (cheapest tier that can be correct) — or inherit when it declares none.",
+            },
+            dream_ids: {
+              type: "string",
+              description:
+                'Artifact ids to inject into the child\'s prompt VERBATIM (code-side; not re-typed): "I-012, W-007, SNG-003". These are the DREAM POINTERS lines the dreamcatcher returned (or ids you picked from hive_dream_rank) — the plugin reads the archive and appends the full artifact texts, so the worker gets the content and your context keeps only the pointers.',
             },
             label: {
               type: "string",
@@ -1213,19 +1297,77 @@ export class Evolution extends Service {
               }
               persona = composeDispatchPersona(target.id, { material })
             }
-            const agentOptions = args.model ? parseModelSpec(args.model) : undefined
+            // ── Model routing (TOKEN-ECONOMY D1/D2) ──────────────────────────
+            // A loud failure for an explicit but empty call arg stays (it was
+            // parseModelSpec's throw): nothing was dispatched yet, so refusing
+            // is the honest outcome. Everything else DEGRADES to inherit — a
+            // missing tier, an unset route table, an unreadable preset, an
+            // unknown tier value in preset.yml are all "no route" outcomes,
+            // never errors and never a guessed provider (the OpenCode rule).
+            if (args.model !== undefined && String(args.model).trim() === "") {
+              throw new Error(`hive_dispatch: empty model override — pass "<provider>/<model-id>" or a bare "<model-id>"`)
+            }
+            const presetSpec = def ? undefined : readPresetModelSpec(path.join(this.capabilitiesPath, target.id))
+            const route = resolveModelRoute({
+              capabilityId: target.id,
+              callModel: args.model ? String(args.model) : undefined,
+              tier: def ? def.modelTier?.[shape] : presetSpec?.tier,
+              presetPin: presetSpec?.pin,
+              table: this.modelRoutes,
+            })
+            const agentOptions = route
+              ? route.provider !== undefined
+                ? { provider: route.provider, model: route.model }
+                : { model: route.model }
+              : undefined
+            // The OpenCode `[model]` diagnostic convention: the first line to
+            // read when a dispatch misbehaves on a machine whose provider set
+            // nobody documented. Logged per resolution, not cached.
+            const routeLabel = route ? `${route.provider ? `${route.provider}/` : ""}${route.model} (${route.source})` : "inherit"
+            this.ctx.logger.info?.(`[model] ${target.id}: ${routeLabel}`)
             // The durable label always carries the dispatch address as its
             // prefix (see composeDispatchLabel) — list_agents has no other
             // capability-identity field, so a custom orchestrator label must
             // never erase which capability a child belongs to.
             const address = target.kind === "builtin" ? `builtin/${target.id}` : `capability/${target.id}`
 
+            // ── Dream artifact injection (TOKEN-ECONOMY D3) ───────────────────
+            // The dreamcatcher now returns DREAM POINTERS (ids + one-line whys).
+            // This seam transports the artifact TEXT in code: ids resolve
+            // against the mounted dream-archive service (structural handle —
+            // no cross-package import; standalone installs degrade to a direct
+            // filesystem probe) and the verbatim artifacts are appended to the
+            // child's task prompt. The coordinator never re-types artifact
+            // bodies; misses and lifecycle flags are reported in the result.
+            // A dispatch without dream_ids is byte-identical to pre-D3 behavior.
+            const archive = (this.ctx as { dreamArchive?: DreamArchiveLike }).dreamArchive
+            const dreamResolutions = resolveDreamArtifacts(this.directory, args.dream_ids ? String(args.dream_ids) : undefined, archive)
+            const dreamBlock = composeDreamArtifactBlock(dreamResolutions)
+            const dreamNote = describeDreamInjection(dreamResolutions)
+            if (dreamResolutions.some((r) => r.ok) && archive?.recordSurfacedEvent) {
+              // Best-effort surfacing telemetry — the archive treats it as a
+              // write-only side channel that never feeds ranking.
+              try {
+                archive.recordSurfacedEvent(
+                  String((parent.session as { id?: unknown } | undefined)?.id ?? (parent as { id?: unknown }).id ?? "unknown"),
+                  "hive_dispatch",
+                  String(args.dream_ids),
+                  dreamResolutions.filter((r) => r.ok).map((r) => r.normalized),
+                  dreamResolutions.length
+                )
+              } catch {
+                // telemetry must never gate a dispatch
+              }
+            }
+            // The child's task prompt: the brief + (resolved dream artifacts).
+            const taskPrompt = dreamBlock ? `${String(args.prompt)}\n\n${dreamBlock}` : String(args.prompt)
+
             if (shape === "one-shot") {
               const def2 = def!
               const run = await this.ctx.subagents.start("spawn", {
                 parent,
                 label: composeDispatchLabel(address, args.label, "one-shot"),
-                prompt: [{ type: "text", text: args.prompt }] as ContentBlock[],
+                prompt: [{ type: "text", text: taskPrompt }] as ContentBlock[],
                 persona: def2.persona,
                 toolFilter: { deny: [...def2.toolFilter.deny] },
                 ...(agentOptions ? { agentOptions } : {}),
@@ -1242,10 +1384,15 @@ export class Evolution extends Service {
                 .map((b) => (b.type === "text" ? b.text : ""))
                 .join("\n")
                 .trim()
+              // One-shot consults return the child's output as the result —
+              // the injection note rides ONLY when it carries an actionable
+              // problem (a miss the coordinator must fix); a clean injection
+              // would just burn result tokens on confirmation.
+              const oneShotNote = dreamNote && dreamResolutions.some((r) => !r.ok) ? `[dream injection: ${dreamNote}]\n` : ""
               if (result.stopReason !== "completed") {
-                return `[one-shot ended: ${result.stopReason}${result.diagnostic ? ` — ${result.diagnostic}` : ""}]\n${text}`
+                return `${oneShotNote}[one-shot ended: ${result.stopReason}${result.diagnostic ? ` — ${result.diagnostic}` : ""}]\n${text}`
               }
-              return text || "(child produced no output)"
+              return `${oneShotNote}${text || "(child produced no output)"}`
             }
 
             const start = await this.ctx.subagents.startContinuable({
@@ -1253,7 +1400,7 @@ export class Evolution extends Service {
               label: composeDispatchLabel(address, args.label),
               request: {
                 parent,
-                prompt: [{ type: "text", text: args.prompt }] as ContentBlock[],
+                prompt: [{ type: "text", text: taskPrompt }] as ContentBlock[],
                 persona,
                 // I-070: read-only enforcement stays caller-side — passed in
                 // as the request's `toolFilter`, applied as a scoped
@@ -1269,7 +1416,8 @@ export class Evolution extends Service {
             this.markUsed(target.id, String(start.childId))
             return (
               `Dispatched ${target.kind === "builtin" ? `builtin/${target.id}` : `capability/${target.id}`} as a resident continuable child (session ${String(start.childId)}).` +
-              (agentOptions ? ` Model override: ${args.model}.` : "") +
+              (route ? ` Model route: ${routeLabel}.` : "") +
+              (dreamNote ? ` ${dreamNote}` : "") +
               (def ? " Read-only filter applied via the start request's toolFilter field." : "") +
               ` Continue THIS child with send_message(${String(start.childId)}) when it holds relevant context; list_agents lists your live instances; dispatch again only for fresh or parallel work.`
             )
@@ -1492,7 +1640,7 @@ export class Evolution extends Service {
    * NO-PERSONA path is byte-identical to the pre-T2 output (pinned by test):
    * a minimal two-line spawn stays valid.
    */
-  spawn = (name: string, description: string, persona?: CapabilityPersona): string => {
+  spawn = (name: string, description: string, persona?: CapabilityPersona, modelTier?: ModelTier): string => {
     if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) {
       throw new Error(`invalid capability name "${name}" (lowercase letters, digits, dashes only)`)
     }
@@ -1508,6 +1656,10 @@ export class Evolution extends Service {
         `name: ${name}`,
         `description: ${description}`,
         `order: 10`,
+        // D1: the tier is PORTABLE metadata — a name for "how much model this
+        // capability needs", never a provider/route. The deployment's
+        // modelRoutes table (or its env overrides) turns it into a route.
+        ...(modelTier ? [`model_tier: ${modelTier}`] : []),
         ``,
       ].join("\n"),
       "utf8"
@@ -1593,7 +1745,7 @@ export class Evolution extends Service {
     const lines: string[] = []
     let manifested = 0
     for (let i = 0; i < list.length; i++) {
-      const rec = (list[i] ?? {}) as { name?: unknown; description?: unknown; persona?: unknown }
+      const rec = (list[i] ?? {}) as { name?: unknown; description?: unknown; persona?: unknown; model_tier?: unknown }
       const name = typeof rec.name === "string" ? rec.name : ""
       // E3: every ✗ line names its entry even when the entry itself is
       // nameless (index identifies it; the echo names only what exists).
@@ -1606,10 +1758,23 @@ export class Evolution extends Service {
         if (typeof rec.description !== "string" || rec.description === "") {
           throw new Error(`missing required field \`description\` (received ${rec.description === undefined ? "nothing" : typeof rec.description})`)
         }
+        // D1: optional — absent inherits; a present-but-unknown tier REFUSES
+        // correctably (the model re-authors the entry, the summon stays armed
+        // since nothing manifested).
+        let modelTier: ModelTier | undefined
+        if (rec.model_tier !== undefined && rec.model_tier !== null && rec.model_tier !== "") {
+          if (typeof rec.model_tier !== "string") {
+            throw new Error(`field \`model_tier\` must be one of: ${MODEL_TIERS.join(", ")} — never a model route (routes belong to the deployment's modelRoutes table)`)
+          }
+          if (!(MODEL_TIERS as readonly string[]).includes(rec.model_tier)) {
+            throw new Error(`unknown model_tier "${rec.model_tier}" — tiers: ${MODEL_TIERS.join(", ")}; never a model route (routes belong to the deployment's modelRoutes table)`)
+          }
+          modelTier = rec.model_tier as ModelTier
+        }
         const persona = parseCapabilityPersona(rec.persona)
-        const dir = this.spawn(name, rec.description, persona)
+        const dir = this.spawn(name, rec.description, persona, modelTier)
         manifested++
-        lines.push(`  ✓ manifested at ${dir} (energy 50)`)
+        lines.push(`  ✓ manifested at ${dir} (energy 50${modelTier ? `, tier ${modelTier}` : ""})`)
       } catch (err) {
         lines.push(`  ✗ refused (${where}): ${err instanceof Error ? err.message : String(err)} — ${CANONICAL_SPAWN_ENTRY}`)
       }
@@ -1706,6 +1871,14 @@ export interface BuiltinAgentDef {
   shapes: readonly [DispatchShape, ...DispatchShape[]]
   /** When to pick which shape — surfaced in the dispatch contract. */
   shapeGuidance: string
+  /**
+   * TOKEN-ECONOMY D2 — the built-in's declared model TIER per shape (never a
+   * provider/route: the deployment's `modelRoutes` table owns that mapping).
+   * A shape with no entry inherits the session's model. Overridable per call
+   * (`model:` arg) and per machine (`HIVE_MODEL_<ID>`, e.g.
+   * HIVE_MODEL_DREAMCATCHER).
+   */
+  modelTier?: Partial<Record<DispatchShape, ModelTier>>
 }
 
 /**
@@ -1724,6 +1897,11 @@ export const BUILTIN_AGENTS: Record<string, BuiltinAgentDef> = {
       "resident (default) for Recall-integrated task work and Audit scans — audit runs minutes over the whole " +
       "archive and its findings arrive as a report message; one-shot for Recall consults — short, read-only, " +
       "and the dossier returns inline as this tool's result",
+    // D2: Recall is a lexical-rank + regroup task — mechanical tier routes it
+    // to the cheapest correct model via the deployment's table; Audit reads the
+    // whole archive for contradictions — one step up. Override: `model:` arg
+    // or HIVE_MODEL_DREAMCATCHER (wins over both tiers).
+    modelTier: { "one-shot": "mechanical", resident: "standard" },
   },
 }
 
@@ -1857,6 +2035,18 @@ export default Evolution
 export { readHiveState, writeHiveState, markCapabilityUsed, tickEnergy, getCapabilitiesSummary }
 export { CAPABILITY_STANDING }
 export { resolveCapabilityMaterial } from "./lib/material.js"
+// TOKEN-ECONOMY D1: the tier-routing surface — exported for the dispatch
+// tests and for any future consumer that needs to resolve routes without
+// booting the service.
+export {
+  capabilityEnvName,
+  tierEnvName,
+  splitRoute,
+  resolveModelRoute,
+  readPresetModelSpec,
+  MODEL_TIERS,
+} from "./lib/model-tiers.js"
+export type { ModelTier, ModelRouteTable, ModelRouteSource, ResolvedModelRoute } from "./lib/model-tiers.js"
 // Re-exported for the tests (and consumers) so fixture presets render through
 // the SAME writer the plugin ships — no copy-pasted yml shape to drift.
 export { renderAgentCordisYml } from "./lib/persona.js"

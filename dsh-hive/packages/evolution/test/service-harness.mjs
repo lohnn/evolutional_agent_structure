@@ -8,6 +8,7 @@ import Evolution from "@hive/dsh-evolution"
 // status-dossier REUSE check compares the summoned tool's output against this
 // exact function's output (a reimplementation would drift from the dossier).
 import { composeEcosystemSnapshot } from "@hive/dsh-evolution/lib/snapshot"
+import { readPresetModelSpec } from "@hive/dsh-evolution/lib/model-tiers"
 import assert from "node:assert/strict"
 import fs from "fs"
 import os from "os"
@@ -675,6 +676,36 @@ check("dissolve.roster", !ctx.evolution.buildRoster().includes("beta"), "roster 
   const srcPath = path.join(HERE, "..", "src", "index.ts") // HERE = this test's dir; the package root is one up
   const srcText = fs.readFileSync(srcPath, "utf8")
   check("b5.stub-gone", !srcText.includes("board auto-register skipped") && srcText.includes("autoRegister"), "the B1 stub line is deleted; the real seam call took slot (4)")
+
+  // ── D1 (TOKEN-ECONOMY): tier routing, spawn side ──────────────────────────
+  // Runs LAST by design: it manifests probe capabilities, and every roster-
+  // sensitive assertion above must have already read the roster it expected.
+  check("d1.empty-table-default", JSON.stringify(ctx.evolution.modelRoutes) === "{}", "modelRoutes defaults collapse to an empty table (absent entries dropped, no phantom routes)")
+  const tdir = ctx.evolution.spawn("tier-probe", "D1 tier probe capability", undefined, "mechanical")
+  const tYaml = fs.readFileSync(path.join(tdir, "preset.yml"), "utf8")
+  check("d1.spawn-tier-line", tYaml.includes("model_tier: mechanical"), "spawn() writes the declared tier into preset.yml")
+  const tspec = readPresetModelSpec(path.join(tdir))
+  check("d1.spec-roundtrip", tspec.tier === "mechanical" && tspec.pin === undefined, "readPresetModelSpec round-trips the spawn-written tier")
+  const noTierSpec = readPresetModelSpec(path.join(synth, ".opencode/agents/capabilities"))
+  check("d1.spec-missing-file", JSON.stringify(noTierSpec) === "{}", "a preset-dir-less read degrades to {} (inherit)")
+  const refusedTier = ctx.evolution.spawnBatch({ capabilities: [{ name: "tier-refused", description: "x", model_tier: "turbo-ultra" }] })
+  check(
+    "d1.batch-refuses-unknown-tier",
+    refusedTier.consumed === false && refusedTier.text.includes("unknown model_tier") && !fs.existsSync(path.join(synth, ".opencode/agents/capabilities/tier-refused")),
+    "spawnBatch refuses an unknown tier correctably: nothing manifested, summon stays armed"
+  )
+  const tiered = ctx.evolution.spawnBatch({ capabilities: [{ name: "tier-batched", description: "x", model_tier: "deep" }] })
+  check(
+    "d1.batch-threads-tier",
+    tiered.consumed === true && fs.readFileSync(path.join(synth, ".opencode/agents/capabilities/tier-batched/preset.yml"), "utf8").includes("model_tier: deep"),
+    "spawnBatch threads the tier through spawn()"
+  )
+  const untired = ctx.evolution.spawnBatch({ capabilities: [{ name: "tier-absent", description: "x" }] })
+  check(
+    "d1.batch-omits-tier-line",
+    untired.consumed === true && !fs.readFileSync(path.join(synth, ".opencode/agents/capabilities/tier-absent/preset.yml"), "utf8").includes("model_tier"),
+    "an entry without model_tier writes no tier line (byte-compat with the pre-D1 spawn output)"
+  )
 }
 
 fs.rmSync(synth, { recursive: true, force: true })
