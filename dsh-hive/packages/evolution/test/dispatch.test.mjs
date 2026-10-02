@@ -335,6 +335,27 @@ test("spawn-time: a reserved built-in name can never be manifested", () => {
   assert.doesNotThrow(() => assertCapabilityNameUsable("fitd26-admin-ui"))
 })
 
+// TOKEN-ECONOMY D7-b: the one-shot consult allow list. A one-shot consult
+// only ever needs the dream READ tools — everything else (the full base
+// harness surface) is standing waste on a 2-4 turn consult.
+test("dreamcatcher oneShotAllow: the 4 dream read tools; childToolFilterFor maps shape -> filter", async () => {
+  const { BUILTIN_AGENTS, childToolFilterFor } = await import("../dist/index.js")
+  const def = BUILTIN_AGENTS.dreamcatcher
+  assert.deepEqual(
+    [...(def.oneShotAllow ?? [])].sort(),
+    ["hive_dream_detect_duplicates", "hive_dream_list", "hive_dream_query", "hive_dream_rank"].sort()
+  )
+  // one-shot + declared allow => ALLOW filter (everything else removed)
+  assert.deepEqual(childToolFilterFor(def, "one-shot"), { allow: [...def.oneShotAllow] })
+  // resident always carries the canonical I-070 deny filter
+  const resident = childToolFilterFor(def, "resident")
+  assert.deepEqual([...resident.deny].sort(), [...def.toolFilter.deny].sort())
+  assert.deepEqual([...resident.deny].sort(), [...DREAMCATCHER_READ_ONLY_TOOL_FILTER.deny].sort())
+  // no def => no filter (capability children keep the full surface)
+  assert.equal(childToolFilterFor(undefined, "one-shot"), undefined)
+  assert.equal(childToolFilterFor(undefined, "resident"), undefined)
+})
+
 test("dreamcatcher read-only toolFilter deny list is intact", () => {
   assert.deepEqual([...DREAMCATCHER_READ_ONLY_TOOL_FILTER.deny].sort(), [
     "hive_dream_artifact_create",

@@ -1,4 +1,5 @@
 import fs from "fs"
+import path from "path"
 
 /**
  * Plugin-shipped prompt assets, read at module load. These markdown files
@@ -61,3 +62,25 @@ export const REAWAKEN_BRIEF = fs
 export const CAPABILITY_STANDING = fs
   .readFileSync(new URL("../assets/capability-standing.md", import.meta.url), "utf8")
   .trimEnd()
+
+/**
+ * TOKEN-ECONOMY D6 — the doctrine CHAPTERS. The standing core (doctrine.md)
+ * keeps only what the coordinator needs every turn; the sections needed when
+ * DOING an evolution pass, dispatching parallel contracts, or guiding the
+ * user to a command ride here, fetched by `hive_doctrine(topic)` at the
+ * moment they're needed (~650 tokens/turn off the standing surface; the
+ * chapter only enters context when its work begins).
+ */
+export const DOCTRINE_CHAPTERS: Record<string, string> = {
+  evolution: fs
+    .readFileSync(new URL("../assets/doctrine-chapters/evolution.md", import.meta.url), "utf8")
+    .trimEnd(),
+  contracts: fs
+    .readFileSync(new URL("../assets/doctrine-chapters/contracts.md", import.meta.url), "utf8")
+    .trimEnd(),
+  commands: fs
+    .readFileSync(new URL("../assets/doctrine-chapters/commands.md", import.meta.url), "utf8")
+    .trimEnd(),
+}
+
+export const DOCTRINE_CHAPTER_TOPICS = Object.keys(DOCTRINE_CHAPTERS)

@@ -44,7 +44,7 @@ import path from "path"
 import { createMessage, type ContentBlock } from "@deepseek-ai/dsh-llm"
 import { defineTool, type ParameterSchemaSpec } from "@deepseek-ai/dsh-tools"
 import type { Agent } from "@deepseek-ai/dsh-agent"
-import { COORDINATOR_DOCTRINE, DORMANT_NOTICE, AWAKEN_BRIEF, REAWAKEN_BRIEF, CAPABILITY_STANDING } from "./assets.js"
+import { COORDINATOR_DOCTRINE, DORMANT_NOTICE, AWAKEN_BRIEF, REAWAKEN_BRIEF, CAPABILITY_STANDING, DOCTRINE_CHAPTERS, DOCTRINE_CHAPTER_TOPICS } from "./assets.js"
 import { recordAwakened, isAwakened, decideGate } from "./lib/sessions.js"
 import { autoRegister } from "@hive/dsh-board/lib/board-transitions"
 import { parseCapabilityPersona, renderAgentCordisYml, type CapabilityPersona } from "./lib/persona.js"
@@ -214,6 +214,7 @@ export const HIVE_TOOL_NAMES = [
   "hive_dispatch",
   "hive_send",
   "hive_children",
+  "hive_doctrine",
 ] as const
 
 /**
@@ -444,6 +445,9 @@ export function fillBrief(template: string, vars: { dossier: string; summonName:
     .replaceAll("{{ summon_name }}", vars.summonName)
 }
 
+import { UsageLog } from "./usage-log.js"
+export { UsageLog } from "./usage-log.js"
+
 export class Evolution extends Service {
   static inject = ["tools", "systemPrompt", "commands", "subagents"]
   static Config = z.object({
@@ -506,6 +510,8 @@ export class Evolution extends Service {
   readonly modelRoutes: ModelRouteTable
   /** D5-B — whether the HIVEmind mailbox stays on the coordinator's standing surface. */
   readonly hivemind: boolean
+  /** D10 — the append-only usage ledger (fire-and-forget). */
+  readonly usageLog: UsageLog
 
   constructor(
     ctx: import("@deepseek-ai/cordis").Context,
@@ -524,6 +530,7 @@ export class Evolution extends Service {
         ? (config.capabilitiesPath as string)
         : path.join(config.directory, ".opencode/agents/capabilities")
     this.hivemind = config.hivemind !== false
+    this.usageLog = new UsageLog(config.directory)
     // Collapse the schema's defaulted "" entries into absent ones — the
     // resolver treats absent and empty identically (degrade to inherit),
     // but a clean table makes the [model] log line honest.
@@ -1357,11 +1364,11 @@ export class Evolution extends Service {
         defineTool({
           name: "hive_dispatch",
           description:
-            "Dispatch a HIVE worker as a child agent. Address forms: 'capability/<name>' (workspace capability from the roster), 'builtin/<id>' (plugin-owned agent — currently only builtin/dreamcatcher), or bare '<name>' (= capability/<name>).\n" +
-            "ALWAYS starts a NEW instance. To CONTINUE ongoing work on an existing child, do NOT re-dispatch: hive_send its durable session id with the next message (from the dispatch result, or hive_children for your live children — every label carries the dispatch address as a prefix). New parallel work on the same capability = dispatch again.\n" +
-            "Default shape 'resident': background child — you receive its session id, its report arrives as a message, `send_message` can steer it, and it survives restarts. Shape 'one-shot': synchronous consult — the call blocks until the child finishes and its final output is returned directly as this tool's result (no resident session, nothing to steer). Rule: one-shot only for short, self-contained, result-shaped consults (dreamcatcher Recall); everything else stays resident.\n" +
-            "The capability's own method (what-this-enables / triggers / protocol / boundaries) plus the HIVE standing context are composed into the child automatically — write the TASK brief only (intent over implementation); do not re-teach the capability its own job.\n" +
-            "builtin/dreamcatcher is read-only by construction (mutation tools denied at spawn) and carries its full Recall/Audit method on the plugin side — the prompt need only state the job (its mode and scope), not the method.",
+            "Dispatch a HIVE worker as a child agent (address forms on the `capability` parameter).\n" +
+            "ALWAYS starts a NEW instance. To CONTINUE ongoing work with a child, do NOT re-dispatch: hive_send its durable session id (from the dispatch result, or hive_children for your live children). New parallel work on the same capability = dispatch again.\n" +
+            "Shapes: 'resident' (default) — background child; its report arrives as a message and it survives restarts. 'one-shot' — synchronous consult; the result returns inline as this tool's output. One-shot only for short, self-contained, result-shaped consults (dreamcatcher Recall); everything else stays resident.\n" +
+            "The capability's own method plus the HIVE standing context are composed into the child automatically — write the TASK brief only (intent over implementation); do not re-teach the capability its own job.\n" +
+            "builtin/dreamcatcher is read-only by construction and carries its Recall/Audit method on the plugin side — the prompt need only state the job (mode and scope), not the method.",
           parameters: {
             capability: {
               type: "string",
@@ -1373,16 +1380,13 @@ export class Evolution extends Service {
               type: "string",
               required: true,
               description:
-                "The task for the child. For builtin/dreamcatcher, state mode and scope (e.g. 'Mode: Recall — what the archive knows about X' or 'Mode: Audit') — " +
-                "the recall/audit method itself comes with the child. For capabilities, the complete task brief: full scope, constraints, and acceptance criteria.",
+                "The task for the child. For builtin/dreamcatcher: mode and scope only. For capabilities: the complete task brief — full scope, constraints, acceptance criteria, current state, user decisions.",
             },
             shape: {
               type: "string",
               description:
-                "'resident' (default) — background child; its report arrives as a message and send_message can steer it later. " +
-                "'one-shot' — synchronous consult; the result returns inline as this tool's output. " +
-                "Guidance: dreamcatcher Recall is the canonical one-shot; Audit (minutes over the whole archive) stays resident. " +
-                "Capability dispatches are always resident (workers are steerable services, not calls).",
+                "'resident' (default) — background child; its report arrives as a message and hive_send steers it later. " +
+                "'one-shot' — synchronous consult; the result returns inline. dreamcatcher Recall is the canonical one-shot; Audit stays resident; capability dispatches are always resident (workers are services, not calls).",
             },
             model: {
               type: "string",
@@ -1399,8 +1403,7 @@ export class Evolution extends Service {
               type: "string",
               description:
                 "Human-readable suffix for the child's durable label — the dispatch ADDRESS is always its prefix " +
-                "(e.g. 'capability/fitd26-admin-ui · my-task', 'builtin/dreamcatcher (one-shot) · checks'), so " +
-                "list_agents always identifies which capability a child belongs to. Omit for the plain address.",
+                "(e.g. 'capability/fitd26-admin-ui · my-task'), so hive_children always identifies which capability a child belongs to. Omit for the plain address.",
             },
           },
           execute: async (args, exec) => {
@@ -1514,12 +1517,15 @@ export class Evolution extends Service {
 
             if (shape === "one-shot") {
               const def2 = def!
+              // D10 usage skeleton: call + settle stay observable plugin-side
+              const usageT0 = Date.now()
+              this.usageLog.append({ kind: "dispatch", shape, address, label: args.label ?? "", model: agentOptions?.model ?? null, routeSource: route?.source ?? "inherit" })
               const run = await this.ctx.subagents.start("spawn", {
                 parent,
                 label: composeDispatchLabel(address, args.label, "one-shot"),
                 prompt: [{ type: "text", text: taskPrompt }] as ContentBlock[],
                 persona: def2.persona,
-                toolFilter: { deny: [...def2.toolFilter.deny] },
+                toolFilter: childToolFilterFor(def2, "one-shot"),
                 ...(agentOptions ? { agentOptions } : {}),
                 signal: exec.signal,
               })
@@ -1538,6 +1544,7 @@ export class Evolution extends Service {
               // the injection note rides ONLY when it carries an actionable
               // problem (a miss the coordinator must fix); a clean injection
               // would just burn result tokens on confirmation.
+              this.usageLog.append({ kind: "settle", shape: "one-shot", address, ms: Date.now() - usageT0, outcome: result.stopReason })
               const oneShotNote = dreamNote && dreamResolutions.some((r) => !r.ok) ? `[dream injection: ${dreamNote}]\n` : ""
               if (result.stopReason !== "completed") {
                 return `${oneShotNote}[one-shot ended: ${result.stopReason}${result.diagnostic ? ` — ${result.diagnostic}` : ""}]\n${text}`
@@ -1545,6 +1552,7 @@ export class Evolution extends Service {
               return `${oneShotNote}${text || "(child produced no output)"}`
             }
 
+            this.usageLog.append({ kind: "dispatch", shape, address, label: args.label ?? "", model: agentOptions?.model ?? null, routeSource: route?.source ?? "inherit" })
             const start = await this.ctx.subagents.startContinuable({
               provider: "spawn",
               label: composeDispatchLabel(address, args.label),
@@ -1555,8 +1563,9 @@ export class Evolution extends Service {
                 // I-070: read-only enforcement stays caller-side — passed in
                 // as the request's `toolFilter`, applied as a scoped
                 // tools.restrict() in the child's creation window. Built-ins
-                // carry the canonical filter from BUILTIN_AGENTS.
-                ...(def ? { toolFilter: { deny: [...def.toolFilter.deny] } } : {}),
+                // carry the canonical filter from BUILTIN_AGENTS (resident:
+                // deny; one-shot consults may carry the D7 allow list).
+                ...(def ? { toolFilter: childToolFilterFor(def, shape) } : {}),
                 // Orchestrator-chosen model route (AgentOptions: provider? +
                 // model; dsh merges it over the parent's route child-side).
                 ...(agentOptions ? { agentOptions } : {}),
@@ -1658,6 +1667,39 @@ export class Evolution extends Service {
         })
       )
       return () => { send(); childrenTool }
+    })
+
+    // ── hive_doctrine (TOKEN-ECONOMY D6) ──────────────────────────────────────
+    // The standing doctrine keeps only the every-turn core; the chapters
+    // (evolution lifecycle+energy, contracts, commands) fetch on demand.
+    // Census tool: the dormant mask hides it automatically; awakened
+    // coordinators (and lineage children — harmless, read-only prose) see it.
+    ctx.effect(() => {
+      const doctrine = ctx.tools.register(
+        defineTool({
+          name: "hive_doctrine",
+          description:
+            "Fetch one HIVE doctrine chapter on demand. Topics: " +
+            'evolution (the lifecycle operations + the energy table, for gap/evolve analysis), contracts (the synapse + contract-ownership method for parallel dispatches), commands (the user-command reference). The standing core already carries the summaries — fetch a chapter when its WORK begins, not before.',
+          parameters: {
+            topic: {
+              type: "string",
+              required: true,
+              description: `Which chapter: ${DOCTRINE_CHAPTER_TOPICS.map((t) => `"${t}"`).join(" | ")}.`,
+            },
+          },
+          execute: async (args) => {
+            const topic = String(args.topic ?? "").trim().toLowerCase()
+            const chapter = DOCTRINE_CHAPTERS[topic]
+            if (!chapter) {
+              return `No chapter "${topic}". Chapters: ${DOCTRINE_CHAPTER_TOPICS.map((t) => `"${t}"`).join(", ")}.`
+            }
+            return chapter
+          },
+          output: TEXT_OUT,
+        })
+      )
+      return () => doctrine()
     })
   }
 
@@ -2151,7 +2193,32 @@ export interface BuiltinAgentDef {
    * HIVE_MODEL_DREAMCATCHER).
    */
   modelTier?: Partial<Record<DispatchShape, ModelTier>>
+  /**
+   * TOKEN-ECONOMY D7 — the one-shot consult's ALLOW list. A one-shot consult
+   * only ever needs a handful of read tools; carrying the full base harness
+   * surface for a 2-4 turn consult is pure standing waste. When set, the
+   * one-shot spawn passes `{ allow: [...] }` (ToolRestriction supports
+   * allow: everything else is removed) instead of the deny filter. The
+   * resident shape ignores it.
+   */
+  oneShotAllow?: readonly string[]
 }
+
+/**
+ * Pure TOKEN-ECONOMY D7 helper: the toolFilter the start request carries for
+ * this built-in + shape. Allow wins on one-shot when the def declares it;
+ * deny (the I-070 caller-side restriction) is the fallback everywhere else.
+ * Exported for the contract tests.
+ */
+export const childToolFilterFor = (
+  def: BuiltinAgentDef | undefined,
+  shape: DispatchShape
+): { allow: readonly string[] } | { deny: readonly string[] } | undefined =>
+  def === undefined
+    ? undefined
+    : shape === "one-shot" && def.oneShotAllow
+      ? { allow: [...def.oneShotAllow] }
+      : { deny: [...def.toolFilter.deny] }
 
 /**
  * The plugin-owned built-ins. One table row is the whole cost of adding the
@@ -2174,6 +2241,15 @@ export const BUILTIN_AGENTS: Record<string, BuiltinAgentDef> = {
     // whole archive for contradictions — one step up. Override: `model:` arg
     // or HIVE_MODEL_DREAMCATCHER (wins over both tiers).
     modelTier: { "one-shot": "mechanical", resident: "standard" },
+    // D7: the one-shot Recall consult sees ONLY the dream read tools — not the
+    // base harness surface (the persona needs nothing else; the dispatch seam
+    // carries dream artifacts in via dream_ids).
+    oneShotAllow: [
+      "hive_dream_rank",
+      "hive_dream_query",
+      "hive_dream_list",
+      "hive_dream_detect_duplicates",
+    ],
   },
 }
 
