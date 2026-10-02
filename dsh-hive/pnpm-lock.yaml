@@ -111,6 +111,15 @@ importers:
       '@deepseek-ai/dsh-tools':
         specifier: 0.2.0-rc.2
         version: 0.2.0-rc.2(34e581271325766b244192fdb0a1d55a)
+      '@hive/dsh-dream-archive':
+        specifier: workspace:*
+        version: link:../dream-archive
+      '@hive/dsh-painpoints':
+        specifier: workspace:*
+        version: link:../painpoints
+      '@hive/dsh-tools':
+        specifier: workspace:*
+        version: link:../tools
       '@types/node':
         specifier: ^22.0.0
         version: 22.20.1

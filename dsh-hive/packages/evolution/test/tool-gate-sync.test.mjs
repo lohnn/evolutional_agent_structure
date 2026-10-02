@@ -77,6 +77,14 @@ function collectOpenSurface() {
   return new Set([...indexSrc.slice(start, end).matchAll(/"(hive_[a-z0-9_]+)"/g)].map((m) => m[1]))
 }
 
+function collectDreamtimePartition() {
+  const indexSrc = fs.readFileSync(path.join(PKG, "src", "index.ts"), "utf8")
+  const start = indexSrc.indexOf("export const DREAMTIME_SUMMONED_TOOLS")
+  assert.ok(start >= 0, "DREAMTIME_SUMMONED_TOOLS must exist in evolution src (TOKEN-ECONOMY D4)")
+  const end = indexSrc.indexOf("]", start)
+  return new Set([...indexSrc.slice(start, end).matchAll(/"(hive_[a-z0-9_]+)"/g)].map((m) => m[1]))
+}
+
 function collectBoardCohortTools() {
   const names = new Set()
   walkTs(path.join(MONOREPO, "packages", "board", "src"), (file) => {
@@ -162,4 +170,44 @@ test("lifecycle summons stay turn-scoped (never globally registered, gated by re
     "hive_status",
     "hive_tick",
   ])
+})
+
+// TOKEN-ECONOMY D4: the dreamtime partition — the tools that live OFF the
+// standing awakened surface (restricted by the gate + the /dream toggle).
+// Pinned: exact membership, ⊆ census, disjoint from the dormant OPEN surface
+// (always-open and summon-only cannot coexist), and the standing surface the
+// partition defines still covers the rank-first recall step (rank/query/list
+// stay standing — the doctrine's Dream Recall section depends on them).
+test("dreamtime partition == the 8 dream-session machinery tools (exact)", () => {
+  const part = collectDreamtimePartition()
+  assert.deepEqual(
+    [...part].sort(),
+    [
+      "hive_dream_artifact_create",
+      "hive_dream_begin",
+      "hive_dream_complete",
+      "hive_dream_detect_duplicates",
+      "hive_dream_harvest",
+      "hive_dream_mark_stale",
+      "hive_dream_supersede",
+      "hive_painpoints_harvest",
+    ],
+    `DREAMTIME_SUMMONED_TOOLS drifted — got [${[...part].sort().join(", ")}]. Touching the partition is a TOKEN-ECONOMY D4 decision.`
+  )
+})
+
+test("dreamtime partition ⊆ census and disjoint from the dormant open surface", () => {
+  const part = collectDreamtimePartition()
+  const census = collectDenyMask()
+  const open = collectOpenSurface()
+  const notCensused = [...part].filter((n) => !census.has(n))
+  const overlap = [...part].filter((n) => open.has(n))
+  assert.deepEqual({ notCensused, overlap }, { notCensused: [], overlap: [] },
+    `dreamtime partition out of sync — not in HIVE_TOOL_NAMES: [${notCensused}], also on the dormant OPEN surface: [${overlap}]`)
+  // The mid-session dream tools stay standing — the rank-first recall (D3.5)
+  // names them in the doctrine; if they ever join the partition, doctrine and
+  // partition must change in the same commit.
+  for (const standing of ["hive_dream_rank", "hive_dream_query", "hive_dream_list", "hive_dream_residue", "hive_note_painpoint", "hive_painpoints_list"]) {
+    assert.ok(!part.has(standing), `${standing} must stay on the standing surface (rank-first recall + residue/painpoint at bite time)`)
+  }
 })

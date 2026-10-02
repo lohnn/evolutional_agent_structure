@@ -76,7 +76,17 @@ await new Promise((r) => setTimeout(r, 50))
 // deny filter can see them (W-088) and so "masked" vs "not installed" is
 // distinguishable. Both plugins share the SAME tmp workspace (the gate's
 // ledger and the board's store co-locate by directory, as in production).
+// TOKEN-ECONOMY D4 leg: the dream + painpoints cohort is mounted too, so the
+// standing dream-surface mask and the /dream toggle are provable against
+// registrations that really exist (absence-by-restriction, not absence-by-
+// not-installed).
 ctx.plugin(Board, { directory: FIX })
+const DreamArchive = (await import("@hive/dsh-dream-archive")).default
+const HiveDreamTools = (await import("@hive/dsh-tools")).default
+const Painpoints = (await import("@hive/dsh-painpoints")).default
+ctx.plugin(DreamArchive, { directory: FIX })
+ctx.plugin(HiveDreamTools)
+ctx.plugin(Painpoints, { directory: FIX })
 ctx.plugin(Evolution, { directory: FIX })
 await new Promise((r) => setTimeout(r, 80))
 
@@ -189,6 +199,102 @@ test("wi066: /awaken flips the session and bind resolves on its scope again", as
 })
 
 // ── children: skip branch untouched; bind present-but-refusing (D5 intact) ──
+const dreamCmd = ctx.commands.find(undefined, "dream")
+const dreamCmdFollowups = []
+const PARTITION = [
+  "hive_dream_begin",
+  "hive_dream_complete",
+  "hive_dream_artifact_create",
+  "hive_dream_harvest",
+  "hive_dream_supersede",
+  "hive_dream_mark_stale",
+  "hive_dream_detect_duplicates",
+  "hive_painpoints_harvest",
+]
+const STANDING_DREAM = ["hive_dream_rank", "hive_dream_query", "hive_dream_list", "hive_dream_residue", "hive_note_painpoint", "hive_painpoints_list"]
+
+test("d4: the awakened standing surface holds the mid-session dream tools but NOT the dreamtime partition", () => {
+  for (const name of STANDING_DREAM) {
+    assert.notEqual(ctx.tools.get(name, dormant), undefined, `${name} stays standing after /awaken (rank-first recall + bite-time capture)`)
+  }
+  for (const name of PARTITION) {
+    assert.equal(ctx.tools.get(name, dormant), undefined, `${name} restricted from the awakened standing surface (D4)`)
+  }
+})
+
+test("d4: /dream opens the surface — the partition resolves on the same scope, doctrine told to run dreamtime", async () => {
+  assert.ok(dreamCmd, "/dream registered")
+  dreamCmdFollowups.length = 0
+  dormant.followup = (m) => dreamCmdFollowups.push(m) // the /awaken test rebound it; rebind for this leg
+  const out = await dreamCmd.handler({
+    rawInput: "",
+    agent: dormant,
+    commandId: "c_wi066_dream_open",
+    attachments: [],
+    signal: AbortSignal.timeout(5000),
+  })
+  assert.equal(out.kind, "success", `/dream open succeeded (${String(out.text).slice(0, 80)})`)
+  assert.match(String(out.text), /OPEN/)
+  for (const name of PARTITION) {
+    assert.notEqual(ctx.tools.get(name, dormant), undefined, `${name} live after /dream (surface open)`)
+  }
+  assert.strictEqual(dreamCmdFollowups.length, 1, "exactly one wake followup")
+  assert.match(dreamCmdFollowups[0].content[0].text, /dreamtime/)
+  assert.match(dreamCmdFollowups[0].content[0].text, /\/dream again/)
+  // the standing mid-session tools never flicker
+  for (const name of STANDING_DREAM) {
+    assert.notEqual(ctx.tools.get(name, dormant), undefined, `${name} unaffected by the toggle`)
+  }
+})
+
+test("d4: /dream closes the surface again — the partition re-restricts, rank keeps standing", async () => {
+  const out = await dreamCmd.handler({
+    rawInput: "",
+    agent: dormant,
+    commandId: "c_wi066_dream_close",
+    attachments: [],
+    signal: AbortSignal.timeout(5000),
+  })
+  assert.equal(out.kind, "success")
+  assert.match(String(out.text), /CLOSED/)
+  for (const name of PARTITION) {
+    assert.equal(ctx.tools.get(name, dormant), undefined, `${name} restricted again after /dream closes the surface`)
+  }
+  for (const name of STANDING_DREAM) {
+    assert.notEqual(ctx.tools.get(name, dormant), undefined, `${name} still standing`)
+  }
+})
+
+test("d4: /dream is awakened-only and top-level only (gate + depth guard)", async () => {
+  const dormantProbe = agentScope("ses_wi066_dream_dormant", {})
+  ctx.emit("agent/created", { agent: dormantProbe, source: "startup" })
+  const outDormant = await dreamCmd.handler({
+    rawInput: "",
+    agent: dormantProbe,
+    commandId: "c_wi066_dream_dormant",
+    attachments: [],
+    signal: AbortSignal.timeout(5000),
+  })
+  // requireAwake refuses a dormant session with the scripted /awaken move
+  assert.ok(String(outDormant.text).includes("dormant") || String(outDormant.text).includes("/awaken"), "dormant /dream refused with the /awaken pointer")
+  const child = agentScope("ses_wi066_dream_child", { delegationDepth: 1 })
+  const childLedger = JSON.parse(fs.readFileSync(path.join(FIX, ".opencode/agents/hive-sessions.json"), "utf8"))
+  // a depth>0 child is exempt from the gate by lineage (skip branch) — /dream's
+  // OWN depth guard is the border for it (an awakened-ledger child is the edge
+  // the doctrinal refusal covers)
+  assert.ok(childLedger && typeof childLedger === "object")
+  const childOut = await dreamCmd.handler({
+    rawInput: "",
+    agent: child,
+    commandId: "c_wi066_dream_child",
+    attachments: [],
+    signal: AbortSignal.timeout(5000),
+  })
+  // the child is neither in the awakened registry nor a coordinator: requireAwake
+  // refuses on dormancy (the depth guard is the belt-and-braces layer above it)
+  assert.ok(String(childOut.text).includes("dormant") || String(childOut.text).includes("dispatched child"),
+    "child /dream refused (by requireAwake or the depth guard)")
+})
 test("wi066: a depth>0 child still takes the skip branch — sees open AND bind — and the D5 refusal remains the runtime border", async () => {
   const child = agentScope("ses_wi066_child", { delegationDepth: 1 })
   ctx.emit("agent/created", { agent: child, source: "startup" })

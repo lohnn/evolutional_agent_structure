@@ -262,6 +262,38 @@ export const HIVE_DORMANT_OPEN_TOOLS = [
 ] as const
 
 /**
+ * TOKEN-ECONOMY D4 — the summon-scoped DREAMTIME partition. These tools the
+ * AWAKENED coordinator does not carry standing: they are the dream-session
+ * machinery (the dreamtime skill's begin/harvest/compress/complete loop plus
+ * the audit-fix mutations and the painpoint harvest), needed only DURING a
+ * dream. A standing restriction (D2 of the token economy: same proven
+ * `tools.restrict` seam the dormant gate uses) removes them from the
+ * awakened coordinator's per-turn surface (~5–6K tokens/turn); the user runs
+ * `/dream` to lift it for the dream session and `/dream` again to re-apply.
+ *
+ * Mid-session tools stay standing (deliberately OUTSIDE this list):
+ * hive_dream_rank + hive_dream_query (the rank-first recall step the doctrine
+ * owns), hive_dream_list (overview), hive_dream_residue (capabilities record
+ * it; the coordinator's children need it live), hive_note_painpoint +
+ * hive_painpoints_list (friction captured at bite time / review).
+ *
+ * Properties the guard test pins: every name here IS in HIVE_TOOL_NAMES, and
+ * none of them is in HIVE_DORMANT_OPEN_TOOLS (always-open and summon-only
+ * cannot coexist — the standing mask subtracts this list AFTER the dormant
+ * open list).
+ */
+export const DREAMTIME_SUMMONED_TOOLS = [
+  "hive_dream_begin",
+  "hive_dream_complete",
+  "hive_dream_artifact_create",
+  "hive_dream_harvest",
+  "hive_dream_supersede",
+  "hive_dream_mark_stale",
+  "hive_dream_detect_duplicates",
+  "hive_painpoints_harvest",
+] as const
+
+/**
  * Parameter schema for the turn-scoped `hive_awaken_spawn` batch tool. The
  * optional `persona` object is verified by `parseCapabilityPersona` at execute
  * time (whose error text is model-actionable); the schema keeps the shape
@@ -596,6 +628,15 @@ export class Evolution extends Service {
             order: 55,
             text: () => COORDINATOR_DOCTRINE,
           })
+          // ── Standing dream-surface restriction (TOKEN-ECONOMY D4) ──────────
+          // The dreamtime partition vanishes from the standing surface; the
+          // user's /dream toggles it (see the command below). Applied on every
+          // publication — including the flip (the /awaken handler calls the
+          // same helper, since an awakened agent's post-flip publication only
+          // happens on the next resume) and including a cold-resume MID-dream
+          // (the surface re-masks: re-run /dream; a documented edge, the
+          // dream state is safe on disk).
+          this.applyStandingDreamRestriction(sessionId, agent)
           // ── Compaction seam (T6) ────────────────────────────────────────────
           // dsh publishes no standalone compaction event; a session that was
           // just summarized RE-PUBLISHES through this same event with
@@ -674,7 +715,7 @@ export class Evolution extends Service {
     ctx.on("agent/disposed", (payload) => {
       const sessionId = String(payload.agent?.session?.id ?? payload.agent?.id ?? "")
       if (!sessionId) return
-      for (const map of [this.gateRestrictions, this.dormantSections]) {
+      for (const map of [this.gateRestrictions, this.dormantSections, this.standingDreamRestrictions]) {
         const disposer = map.get(sessionId)
         if (disposer === undefined) continue
         try {
@@ -1065,6 +1106,11 @@ export class Evolution extends Service {
             order: 55,
             text: () => COORDINATOR_DOCTRINE,
           })
+          // (3b) Standing dream-surface mask (TOKEN-ECONOMY D4) — the same
+          //     restriction the gate applies on every publication, applied
+          //     here too because the flip does not republish the agent: the
+          //     DREAMTIME partition pops onto the surface only via /dream.
+          this.applyStandingDreamRestriction(sessionId, agent)
           // (4) Board auto-register — the EXACT junction where the OpenCode
           //     plugin called autoRegister() for the new coordinator
           //     (src/tools.ts hive_awaken handler, step 4 of the flip).
@@ -1181,7 +1227,81 @@ export class Evolution extends Service {
         },
       })
 
-      return () => { d1(); d2(); d3(); d4(); d5(); d6() }
+      // ── /dream (TOKEN-ECONOMY D4) ──────────────────────────────────────────
+      // The dream-surface TOGGLE for the awakened coordinator. The dreamtime
+      // partition (DREAMTIME_SUMMONED_TOOLS) is RESTRICTED from the standing
+      // surface (the gate and the flip apply it); /dream lifts it for the
+      // dream session and /dream again re-applies. Commands are model-
+      // invisible (W-048), so the toggle stays user-owned — the followup
+      // carries the exact "run /dream again to close" instruction the
+      // coordinator relays when the dream completes.
+      const d7 = ctx.commands.register({
+        name: "dream",
+        description: "Open (or close) the dream surface: lift (or re-apply) the standing restriction over the dreamtime tools for this awakened session.",
+        handler: (inv) => {
+          const gate = requireAwake(inv)
+          if (gate) return gate
+          // Top-level only (same guarantee the flip enforces — a child is a
+          // lineage participant and never a coordinator surface owner).
+          const depth = (inv.agent as { session?: { header?: { delegationDepth?: unknown } } } | undefined)?.session?.header?.delegationDepth
+          if (typeof depth === "number" && depth > 0) {
+            return {
+              kind: "error" as const,
+              text: "/dream belongs to the top-level coordinator session — this is a dispatched child (lineage participant, D2).",
+            }
+          }
+          const sessionId = String(inv.agent.session?.id ?? inv.agent.id)
+          const restrictOn = this.standingDreamRestrictions.get(sessionId)
+          if (restrictOn === undefined) {
+            // Surface already OPEN (or never masked — e.g. installed without
+            // the dream plugins): treat as close-if-openable. Re-applying the
+            // mask keeps the toggle total and idempotent.
+            this.applyStandingDreamRestriction(sessionId, inv.agent)
+            const nowOn = this.standingDreamRestrictions.get(sessionId)
+            if (nowOn === undefined) {
+              return {
+                kind: "success" as const,
+                text: "/dream: the standing dream mask is not in effect for this session (no restriction to re-apply — install without the dream plugins?), nothing changed. The dream tools are already usable if present.",
+              }
+            }
+            return {
+              kind: "success" as const,
+              text: "/dream: dream surface CLOSED — the dreamtime tools are restricted again from the standing surface. The dream session is archive-side: state on disk, nothing lost.",
+            }
+          }
+          // OPEN: lift the standing restriction; the dreamtime tools become
+          // resolvable on this session's scope.
+          try {
+            restrictOn()
+          } catch {
+            // a scoped world that already unwound — the lift is then a no-op
+          }
+          this.standingDreamRestrictions.delete(sessionId)
+          inv.agent?.followup?.(
+            createMessage({
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text:
+                    `[HIVE /dream] The dream surface is OPEN for this session. The dreamtime tools are live now: ` +
+                    `hive_dream_begin, hive_dream_harvest, hive_dream_artifact_create, hive_dream_complete, ` +
+                    `hive_dream_supersede, hive_dream_mark_stale, hive_dream_detect_duplicates, hive_painpoints_harvest. ` +
+                    `Run dreamtime (the dreamtime skill) now. When the dream closes — hive_dream_complete called — ` +
+                    `finish up and tell the user to run /dream again so the standing surface sheds these tools.`,
+                },
+              ],
+              source: { kind: "user" },
+            })
+          )
+          return {
+            kind: "success" as const,
+            text: "/dream: dream surface OPEN — the dreamtime tools are live for this session and the coordinator has been told to run dreamtime. Run /dream again after the dream closes to shed the surface.",
+          }
+        },
+      })
+
+      return () => { d1(); d2(); d3(); d4(); d5(); d6(); d7() }
     })
 
     // ── Capability dispatch (the Phase-5 seam) ────────────────────────────────
@@ -1557,6 +1677,37 @@ export class Evolution extends Service {
 
   private gateRestrictions = new Map<string, () => void>()
   private dormantSections = new Map<string, () => void>()
+
+  // ── standing dream-surface mask (TOKEN-ECONOMY D4) ────────────────────────
+  // Keyed by session id like the rest. HOLDING a disposer here means "the
+  // dreamtime partition is currently RESTRICTED on this session"; /dream
+  // pops and calls it to open the surface, and /dream again re-applies. The
+  // gate re-applies on every publication of an awakened session (fresh
+  // scoped world), so a mid-dream cold-resume re-masks — rerun /dream; the
+  // dream state lives on disk. agent/disposed cleans up like the others.
+  private standingDreamRestrictions = new Map<string, () => void>()
+
+  /**
+   * Apply (or re-apply) the standing dream restriction for an awakened
+   * session. Filtered to what THIS process registered — the same
+   * restrict()-validates-unknowns contract the dormant mask honors, so a
+   * standalone-evolution install (no dream/painpoints plugins) degrades to
+   * masking nothing rather than failing agent publication. Idempotent for
+   * one scoped world: a repeat application on the SAME world would shadow
+   * the old disposer, so the caller pattern is apply-on-publication only.
+   */
+  private applyStandingDreamRestriction(sessionId: string, agent: Agent): void {
+    const deny = (DREAMTIME_SUMMONED_TOOLS as readonly string[]).filter((name) => {
+      try {
+        return this.ctx.tools.get(name) !== undefined
+      } catch {
+        return false
+      }
+    })
+    if (deny.length === 0) return
+    const lift = agent.ctx?.tools?.restrict({ deny })
+    if (lift) this.standingDreamRestrictions.set(sessionId, lift)
+  }
 
   // ── energy state ──────────────────────────────────────────────────────────
 

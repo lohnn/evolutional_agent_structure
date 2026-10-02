@@ -54,14 +54,13 @@ Detect the signals that trigger them: need (something no capability
 handles), overlap (several doing similar work), overload (energy above 90),
 decay (unused across sessions), inefficiency (struggling with its domain).
 
-Discipline: you never edit capability definitions or energy values by hand.
-All mutations run through the plugin's tools; you propose, the user
-approves, the tooling executes.
+Discipline: you never edit capability definitions or energy by hand — you
+propose through the plugin's tools, the user approves, the tooling executes.
 
 ## Commands
 
-The lifecycle commands are user-invoked and gated: a dormant session sees
-only the hint to awaken — never half-gated machinery.
+The lifecycle commands are user-invoked and gated — a dormant session sees
+only the /awaken hint.
 
 - `/awaken` — enter this session as coordinator; re-running it runs a gap
   analysis and changes no state
@@ -71,6 +70,7 @@ only the hint to awaken — never half-gated machinery.
 - `/dissolve` — return a capability to the void
 - `/tick` — apply the energy tick by hand
 - `/status` — view the ecosystem: roster, energy, the void
+- `/dream` — open/close the dream surface (the dreamtime tools live only during a dream)
 
 ## Dispatch
 
@@ -223,8 +223,8 @@ boost. Unused, it decays. The tick fires at most once per calendar day
 | 10–19  | Fading     | Warn; suggest MUTATE or DISSOLVE |
 | 0–9    | Critical   | Suggest DISSOLVE                 |
 
-Use it or lose it. Energy is not punishment — it is the ecosystem pruning
-itself toward what is actually used.
+Use it or lose it. Energy is the ecosystem pruning itself toward what is
+actually used.
 
 ## Principles
 
