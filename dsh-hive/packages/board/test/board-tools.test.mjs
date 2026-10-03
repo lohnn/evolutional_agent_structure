@@ -127,7 +127,8 @@ test("b4 gate-sync runtime leg: every HIVE_TOOL_NAMES entry resolves via ctx.too
   )
   const block = evoSrc.slice(evoSrc.indexOf("export const HIVE_TOOL_NAMES"), evoSrc.indexOf("]", evoSrc.indexOf("export const HIVE_TOOL_NAMES")))
   const names = [...block.matchAll(/"(hive_[a-z0-9_]+)"/g)].map((m) => m[1])
-  assert.equal(names.length, 27, `census 27, got ${names.length}`)
+  // 27 baseline + D5 (hive_send, hive_children) + D6 (hive_doctrine) = 30
+  assert.equal(names.length, 30, `census 30, got ${names.length}`)
   // The deny-mask filter in evolution does HIVE_TOOL_NAMES.filter(n =>
   // ctx.tools.get(n) !== undefined). In THIS harness the board cohort is
   // registered: all 8 board names must SURVIVE that filter (never hidden),

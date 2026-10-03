@@ -309,13 +309,10 @@ export class Board extends Service {
       defineTool({
         name: "hive_board_list",
         description:
-          "Enumerate the hive-board: the INDEX of work items — id, status, priority, owner, recency, spec SIZE, tags and title, one line each. " +
-          "NEVER returns spec bodies, and that is the point: the entire board indexes to a few thousand tokens, so this call is always affordable and its cost is predictable before you make it. The `body` column is the spec's size, so you can see what reading one would cost before you ask for it. " +
-          'Defaults to status="live" — backlog + todo + in_progress. DONE items are EXCLUDED by default (most of a mature board is finished work); pass status="all" to include them. ' +
-          "This is the tool for 'what is on the board right now'. Reach for hive_board_search instead when you have WORDS rather than a filter (it also spans done items), and hive_board_read when you already know the ids and need the actual spec text. " +
-          'It is ALSO how you find corruption. Every call checks the SCHEMA §3 invariants on every matched item, counts violations in the header and marks each violating row "⚠" with the invariant it breaks — no filter or flag needed, and the count spans everything matched, not just the rows `limit` rendered. Illegal states genuinely reach disk (WI-065 proved it), so this answers "which items are in an illegal state" board-wide. Detection only: nothing is repaired, and a clean board shows no marker at all. Note the check is a floor, not an audit — three of the schema\'s six invariants, two of them in weakened form, so no ⚠ means "breaks none of the three cheap per-item rules", not "schema-clean". ' +
-          "Reads take no lock and no snapshot: writes are atomic per file, so nothing you see is ever half-written, but a long listing may observe one item before and another after a concurrent write.",
-        parameters: {
+          "Enumerate the hive-board: the INDEX of work items — id, status, priority, owner, recency, spec SIZE, tags and title, one line each; never spec bodies. The whole board indexes to a few thousand tokens, so this call is always affordable. " +
+          'Defaults to status=live (backlog + todo + in_progress); pass status=all for done items. Reach for hive_board_search when you have WORDS rather than a filter (it also spans done), and hive_board_read when you know the ids and need the actual spec text. ' +
+          'Every call also checks the schema invariants on every matched item and marks violating rows "⚠" with the broken invariant — detection only, nothing repaired; no ⚠ means none of the checked invariants break, not full schema-cleanliness. A long listing may observe one item before and another after a concurrent write. ',
+parameters: {
           status: {
             type: "string",
             enum: [...STATUS_FILTERS],
@@ -347,15 +344,14 @@ export class Board extends Service {
       defineTool({
         name: "hive_board_search",
         description:
-          "Find work items by free text: a RANKED shortlist with scores and a matching excerpt from each spec. Spans EVERY status including done — solved work is often the most valuable thing to find, and it is invisible to hive_board_list's default. " +
-          "USE THIS BEFORE FILING ANYTHING NEW. The board has no delete path, so a duplicate item is expensive to unpick afterwards; two minutes here is the cheapest moment to discover the work already exists. " +
-          "It ranks, it does not judge: scores are lexical token overlap (query coverage plus a title boost), so a high score means 'shares vocabulary', not 'is the same work', and a low score does not prove unrelated. There is deliberately no duplicate verdict and no threshold — a cutoff was measured on a real board and fired on 0 of 2346 pairs while missing genuine re-files, so the ordering is handed to you and the judgement stays yours. " +
+          "Find work items by free text: a RANKED shortlist (score + a matching excerpt from each spec), spanning EVERY status including done. RUN THIS BEFORE FILING ANYTHING NEW — the board has no delete path, and done items are invisible to hive_board_list\'s default. " +
+          "Scores are lexical token overlap: a high score means \'shares vocabulary\', not \'the same work\', and a low score does not prove unrelated — the ordering is handed to you, the judgement stays yours. " +
           "Bounded by k (default " +
           DEFAULT_K +
           ", ceiling " +
           MAX_K +
-          "), excerpt only. Follow up with hive_board_read for the full spec of anything that looks close.",
-        parameters: {
+          "), excerpt only. Follow up with hive_board_read for the full spec of anything that looks close. ",
+parameters: {
           query: reqStr(
             "Free text describing the work you are looking for — the words you would use to explain it, not a filter expression. Tokens are lowercased, punctuation-stripped, and 1–2 character words are dropped (so db/id/ui/os do not survive; give the ranker a longer word too)."
           ),
@@ -379,17 +375,14 @@ export class Board extends Service {
       defineTool({
         name: "hive_board_read",
         description:
-          "Read the FULL spec of named work items: the complete body, plus tags/dates/ownership, the append-only history, and `subtasks` and `todo_mirror` shown SEPARATELY — they have the same shape but different write classes (an author-written plan whose loss is unrecoverable, versus a rebuildable mirror of the owning session's live todos). " +
-          "This is the expensive one, and explicitly so. Spec bodies run from empty to ~12 KB, so it takes named ids rather than a filter and is bounded by a byte budget (default " +
+          "Read the FULL spec of named work items: complete body, tags/dates/ownership, the append-only history, and `subtasks` and `todo_mirror` shown SEPARATELY (author-written plan versus machine-written mirror). The expensive read: bodies run to ~12 KB, so it takes named ids rather than a filter — discover them with hive_board_list or hive_board_search first — and is bounded by a byte budget (default " +
           DEFAULT_MAX_BYTES +
           " bytes, ceiling " +
           MAX_MAX_BYTES +
-          "). Discover ids with hive_board_list or hive_board_search first. " +
-          "Nothing disappears quietly: an id with no item on the board is reported by name, and an item the budget could not fit is reported by name as deferred — never dropped. " +
-          "Use this instead of opening .opencode/board/WI-*.md by hand: this is the same parser the writers use, so what you read is what the board stores. " +
-          'If the item violates a SCHEMA §3 invariant, that is stated as a "⚠ ILLEGAL" line directly under its status — the record is real and in a forbidden state, not a parse error. Reported, never repaired. ' +
-          "One honest limitation: reading several items is NOT a cross-item snapshot. No lock is taken (a read must never be able to make a concurrent write fail), and while each file is written atomically so no single item is ever torn, a multi-item read may observe one item before and another after a concurrent write.",
-        parameters: {
+          "). " +
+          "Unknown ids are reported by name, and items the budget could not fit are named as deferred — never dropped. " +
+          'If the item violates a schema invariant, that is stated as a "⚠ ILLEGAL" line directly under its status — reported, never repaired. A multi-item read is not a cross-item snapshot: a concurrent write may be observed between two items. ',
+parameters: {
           ids: reqStr(
             'Work item ids, comma or space separated, e.g. "WI-012,WI-031". Zero-padding and case are forgiven (wi-3 → WI-003); anything that is not id-shaped is refused rather than guessed at.'
           ),
@@ -469,8 +462,7 @@ export class Board extends Service {
         name: "hive_board_create",
         description:
           "File a work item on the hive-board. " +
-          "Returns a full receipt of what was stored — the new id plus title, status, priority, tags, body size, subtask count and next steps — so you never need to open the file to confirm the write. " +
-          "Use this instead of writing a WI-*.md file by hand: it allocates the next id atomically under the board lock, timestamps it, and opens the item's append-only history with an entry recording its creation — nothing to look up, no existing item to copy. " +
+          "Returns a receipt of what was stored — the new id plus title, status, priority, tags, body size, subtask count and next steps — so you never need to open the file to confirm the write. Use this instead of writing a WI-*.md file by hand: the next id is allocated atomically, the item is timestamped, and its append-only history opens with a creation entry. " +
           "New items are UN-OWNED: captured, with no session working them yet. Ownership comes later — your coordinator takes it with hive_board_bind. " +
           // ⚠️ LOAD-BEARING POINTER (WI-068). This tool's premise is "you never
           // need to open an existing item" — and opening existing items WAS the

@@ -18,6 +18,12 @@ the outcome — the first sentence answers "what happened" or "what did you
 find" — supporting detail after. This governs the final report, not your
 notes along the way.
 
+And it is not free: the coordinator pays for every report it holds, again.
+Budget it — the outcome, the findings that change the coordinator's next
+move, and file paths or ids for retrieving the rest. A report that must
+grow past ~40 lines should genuinely be that long; when it is, say at the
+top what the three most important lines are.
+
 ## Contracts in Parallel Work
 
 You may run beside peer capabilities building the same feature from another
