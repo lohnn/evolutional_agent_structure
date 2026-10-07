@@ -119,6 +119,48 @@ tokens, deterministic). Dispatch cheap → run the machine-checkable gate →
 only escalate to a strong-model review consult when the task has no
 machine-checkable criterion. Model review is the exception, not the pattern.
 
+Example route tables (reviewer follow-up after the Kimi K3 audit: the
+resolver ships with NO table, so out of the box every dispatch inherits —
+the savings a deployment gets are exactly the table it configures). Copy
+and edit; the model id is whatever the provider's catalog calls it:
+
+Real Berget catalog ids (verified locally — copy only verified rows; a
+route that names a model the provider lacks falls back to INHERIT, which is
+a silent saving-loss, not an error):
+
+```json
+{
+  "modelRoutes": {
+    "mechanical": "berget/zai-org/GLM-5.3-Flash",
+    "standard":   "berget/Qwen/Qwen3.8-27B-FP8",
+    "deep":       "berget/zai-org/GLM-5.2"
+  }
+}
+```
+
+Two-machine example (the constraint that shaped this design): the work
+machine has ONE provider, the personal machine another — the pins in the
+preset name tiers, only these tables name models.
+
+```js
+// work machine (providers/models as your office policy pins them)
+{ mechanical: "<work>/<fast-coder>", standard: "<work>/<workhorse>", deep: "<work>/<frontier>" }
+// personal machine (Berget, ids as cataloged)
+{ mechanical: "berget/zai-org/GLM-5.3-Flash", standard: "berget/moonshotai/Kimi-K3", deep: "berget/zai-org/GLM-5.2" }
+```
+
+Per-deployment overrides without touching the profile (env, takes
+precedence over the table; a capability pin beats everything but the call
+arg):
+
+```bash
+HIVE_MODEL_TIER_MECHANICAL=berget/zai-org/GLM-5.3-Flash   # a whole tier
+HIVE_MODEL_DREAMCATCHER=openrouter/moonshotai/kimi-k3     # one capability, exact
+```
+
+Leave a tier's route empty (or unset the env) and dispatches at that tier
+inherit the session's model — safe, never a guessed provider.
+
 ### D2 — Dreamcatcher runs at `mechanical`/`standard` tier by default
 
 `BuiltinAgentDef` gains `modelTier`; dreamcatcher's Recall pins
