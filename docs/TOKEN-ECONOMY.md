@@ -151,7 +151,7 @@ personal-riding capabilities are exceptions, pinned by env, not the table
 ```json
 {
   "modelRoutes": {
-    "mechanical": "github-copilot/gpt-5.4-mini",
+    "mechanical": "github-copilot/gpt-6-luna",
     "standard":   "github-copilot/claude-sonnet-5.5",
     "deep":       "github-copilot/claude-opus-5.5"
   }
@@ -178,6 +178,12 @@ Leave a tier's route empty (or unset the env) and dispatches at that tier
 inherit the session's model — safe, never a guessed provider. Tables are
 per-deployment config (profile config or shell env), never repo content —
 nothing machine-specific belongs in the roster or presets.
+
+The single-valued table is deliberate for this PR: it is the simplest
+portable contract, and per-capability env pins bridge multi-provider
+machines. The real fix for those machines — tiers resolving from the
+provider that hosts the COORDINATOR's model — is a resolver-contract change
+followed up separately (WI-081), not bolted onto this branch.
 
 ### D2 — Dreamcatcher runs at `mechanical`/`standard` tier by default
 
