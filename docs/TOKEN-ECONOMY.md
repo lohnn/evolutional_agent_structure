@@ -121,12 +121,16 @@ machine-checkable criterion. Model review is the exception, not the pattern.
 
 Example route tables (reviewer follow-up after the Kimi K3 audit: the
 resolver ships with NO table, so out of the box every dispatch inherits —
-the savings a deployment gets are exactly the table it configures). Copy
-and edit; the model id is whatever the provider's catalog calls it:
+the savings a deployment gets are exactly the table it configures).
 
-Real Berget catalog ids (verified locally — copy only verified rows; a
-route that names a model the provider lacks falls back to INHERIT, which is
-a silent saving-loss, not an error):
+The sharing contract is the whole point of tiers: the roster, the presets
+and the doctrine are IDENTICAL on every machine — only the per-machine
+table (and env pins) name providers and models. A table copied from one
+machine to another never errors: a row naming a model the local provider
+lacks degrades to INHERIT — a silent saving-loss, worth a one-off check,
+never a broken dispatch.
+
+**Personal machine** (Berget only — ids verified against the local catalog):
 
 ```json
 {
@@ -138,15 +142,27 @@ a silent saving-loss, not an error):
 }
 ```
 
-Two-machine example (the constraint that shaped this design): the work
-machine has ONE provider, the personal machine another — the pins in the
-preset name tiers, only these tables name models.
+**Work machine** — copilot for work, Berget still present for personal
+projects. The TIER table is single-valued, so it points at the provider
+that owns most of this machine's dispatches (copilot for a work machine);
+personal-riding capabilities are exceptions, pinned by env, not the table
+(both ids verified in the catalog):
 
-```js
-// work machine (providers/models as your office policy pins them)
-{ mechanical: "<work>/<fast-coder>", standard: "<work>/<workhorse>", deep: "<work>/<frontier>" }
-// personal machine (Berget, ids as cataloged)
-{ mechanical: "berget/zai-org/GLM-5.3-Flash", standard: "berget/moonshotai/Kimi-K3", deep: "berget/zai-org/GLM-5.2" }
+```json
+{
+  "modelRoutes": {
+    "mechanical": "github-copilot/gpt-5.4-mini",
+    "standard":   "github-copilot/claude-sonnet-5.5",
+    "deep":       "github-copilot/claude-opus-5.5"
+  }
+}
+```
+
+```bash
+# on the work machine: exceptions ride Berget, one pin per capability
+HIVE_MODEL_DREAMCATCHER=berget/moonshotai/Kimi-K3
+# on the personal machine: a capability borrowed from copilot
+HIVE_MODEL_FITD26_ADMIN_UI=github-copilot/claude-sonnet-5.5
 ```
 
 Per-deployment overrides without touching the profile (env, takes
@@ -155,11 +171,13 @@ arg):
 
 ```bash
 HIVE_MODEL_TIER_MECHANICAL=berget/zai-org/GLM-5.3-Flash   # a whole tier
-HIVE_MODEL_DREAMCATCHER=openrouter/moonshotai/kimi-k3     # one capability, exact
+HIVE_MODEL_DREAMCATCHER=github-copilot/kimi-k3            # one capability, exact
 ```
 
 Leave a tier's route empty (or unset the env) and dispatches at that tier
-inherit the session's model — safe, never a guessed provider.
+inherit the session's model — safe, never a guessed provider. Tables are
+per-deployment config (profile config or shell env), never repo content —
+nothing machine-specific belongs in the roster or presets.
 
 ### D2 — Dreamcatcher runs at `mechanical`/`standard` tier by default
 
