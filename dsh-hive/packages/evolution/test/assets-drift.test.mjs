@@ -47,12 +47,35 @@ for (const [path, marker, name] of [
   })
 }
 
-// Doctrine bound: settled empirically at first authoring; hard ceiling guards
-// runaway growth. Tonality (D5, near-full port) outweighs a length guess.
-test("doctrine line count stays within settled bounds (100-240)", () => {
+// Doctrine bound: TOKEN-ECONOMY D6 split the doctrine into a standing CORE
+// (identity, dispatch, dream recall — the every-turn context) and on-demand
+// CHAPTERS (doctrine-chapters/*.md, fetched via hive_doctrine). The core
+// bound is now deliberately tight — runaway growth is the failure mode this
+// guard exists for; chapters have their own bounds below.
+test("doctrine core line count stays within its D6 bounds (120-175)", () => {
   const count = lineCount(readAsset(DOCTRINE_PATH))
-  assert.ok(count >= 100, "doctrine too short for a standing section")
-  assert.ok(count <= 240, "doctrine too long — runaway growth")
+  assert.ok(count >= 120, "doctrine core too short — standing context lost?")
+  assert.ok(count <= 175, "doctrine core too long — the D6 split regressed?")
+})
+
+// The chapters: bounded, marker-pinned, and NOT merged back into the core.
+const CHAPTERS = ["evolution", "contracts", "commands"]
+test("doctrine chapters exist, are bounded, end with their exact marker", () => {
+  for (const name of CHAPTERS) {
+    const content = readAsset(fileURLToPath(new URL(`../assets/doctrine-chapters/${name}.md`, import.meta.url)))
+    const count = lineCount(content)
+    assert.ok(count >= 12, `chapter ${name} too short`)
+    assert.ok(count <= 80, `chapter ${name} too long — runaway growth (${count})`)
+    assert.equal(lastLine(content), `<!-- hive:doctrine-chapter:${name} v1 -->`, `chapter ${name} marker`)
+    assert.ok(!content.includes("{{"), `chapter ${name} has unresolved placeholders`)
+  }
+})
+
+test("the core summarizes what the chapters carry (pointer lines present)", () => {
+  const core = readAsset(DOCTRINE_PATH)
+  for (const topic of CHAPTERS) {
+    assert.ok(core.includes(`hive_doctrine("${topic}")`), `core must point at the ${topic} chapter`)
+  }
 })
 
 test("dormant explainer stays within its compact bounds (8-25 lines)", () => {

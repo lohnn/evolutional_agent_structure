@@ -18,9 +18,11 @@ coordinator doctrine already; no new state enters the ecosystem here.
    spawn, mutate (respec the persona), or dissolve (return to the void). Do
    NOT re-propose what already lives: the roster is the standing answer to
    "what exists"; proposals are only for what is missing or wrong.
-5. Surface remembered dreams if they bear on the gaps (a dreamcatcher Recall
-   consult is allowed but not mandated here — the awakening ritual already
-   ran once).
+5. Surface remembered dreams before judging gaps — rank first
+   (`hive_dream_rank` against the archive you already carry). Pass matched
+   artifact ids onward via `dream_ids` in any dispatch; a one-shot
+   dreamcatcher consult is only for an ambiguous shortlist. The awakening
+   ritual already ran once — this is a cheap refresh, not a re-run.
 
 Close with the state of the collective, then stop talking. The user decides
 which proposals become moves.

@@ -24,6 +24,18 @@ Use this skill when:
 
 ## Workflow
 
+### 0. Summon the dream surface (the /dream toggle)
+
+The dreamtime tools are not on the coordinator's standing toolset — they are
+restricted until a dream session opens them (TOKEN-ECONOMY D4: the standing
+surface stays lean). If `hive_dream_begin` is not in your toolset, the dream
+surface is closed: tell the user to run `/dream` (a single command — the
+plugin lifts the restriction for this session). The surface closes ITSELF
+when `hive_dream_complete` runs — the dreamtime tools shed automatically, no
+second `/dream` keystroke; `/dream` remains the manual release (and re-open).
+If the tools ARE already live (surface open from an earlier dream), skip this
+step.
+
 ### 1. Assess Readiness
 
 Check for dream readiness signals:
@@ -216,6 +228,8 @@ hive_dream_complete(
 ```
 
 The tool stamps `exit_time` and `status: COMPLETE`, links the artifact ids into the DRM arrays (bucketing by id prefix automatically), validates each artifact file exists, and atomically moves `dreams/active/DRM-NNN.yaml` to `dreams/history/DRM-NNN.yaml`. If any id is not found on disk it is warned but does not block completion. If the dream was begun with `pre_compaction: true`, completion leaves the session's board item untouched (still `in_progress` — work continues); otherwise completion promotes the owned item to done as usual.
+
+`hive_dream_complete` itself closes the surface: the session's dreamtime tools re-mask automatically on completion (the standing coordinator toolset sheds them — they cost tokens every turn while live), so there is nothing to tell the user. `/dream` remains available as the manual release, or to open the surface again for another dream.
 
 Harvested journals are already archived under `dreams/raw/.harvested/` by `hive_dream_harvest` — no manual cleanup needed. If a capability is re-awoken after the dream, it appends fresh deltas to a clean journal, which the next dream harvests.
 

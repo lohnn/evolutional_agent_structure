@@ -233,14 +233,10 @@ export function apply(ctx: DreamToolsCtx) {
     defineTool({
       name: "hive_dream_query",
       description:
-        "Query the permanent dream artifact archive. Returns full artifact content when the filtered result set is small (≤20), " +
-        "or a summary index (ID + excerpt) when large. " +
-        "Use this to surface relevant learnings before delegating to a capability, or as feedstock for dreamcatcher Recall. " +
-        "Server-side filters reduce context load; semantic relevance judgment stays with the calling agent. " +
-        "All filters are optional — omitting all returns the full archive (likely index mode at 86+ artifacts). " +
-        "IMPORTANT: domain_tags only exists on insights and songlines. Warnings and shadows carry NO tags, so any query with a domain_tags filter excludes ALL warnings and shadows. " +
-        "To gather everything on a topic, run TWO queries: (1) domain_tags='<topic>' for tagged insights/songlines, then (2) a separate untagged query (e.g. types='warning,shadow' with no domain_tags) and judge relevance from content. " +
-        "An empty result from a tag-filtered warning/shadow query means 'tags don't apply', NOT 'no relevant artifacts exist'. " +
+        "Query the permanent dream artifact archive. Full artifact content when the filtered result set is small (≤20), else a summary index (ID + excerpt). " +
+        "Use it to surface relevant learnings before delegating, or as feedstock for dreamcatcher Recall; server-side filters reduce context load, relevance judgment stays with the caller. " +
+        "All filters are optional — omitting all returns the full archive. " +
+        "domain_tags only exists on insights and songlines: gathering everything on a topic takes TWO queries (tagged, then types='warning,shadow' untagged — an empty tag-filtered warning/shadow result means 'tags don't apply', not 'nothing relevant exists'). " +
         "EXACT FETCH: pass ids='I-012,W-007' to retrieve specific artifacts in full — the companion to hive_dream_rank's shortlist. When ids is set, all other filters are ignored and full content is always returned.",
       parameters: {
         types: str("Comma-separated artifact types to include: insight,warning,songline,shadow. Default: all."),
@@ -351,15 +347,10 @@ export function apply(ctx: DreamToolsCtx) {
     defineTool({
       name: "hive_dream_rank",
       description:
-        "Rank dream artifacts against a free-text query and return a top-k shortlist (id, type, score, ~200-char excerpt). " +
-        "The scale-safe entry point for Recall: instead of reading the whole archive, get a ranked shortlist, judge it semantically, " +
-        "then pull full content for promising entries with hive_dream_query(ids: ...). " +
-        "All four types are ranked uniformly by content (no tag asymmetry). " +
-        "Guarantees: shadows and warnings get reserved slots in the shortlist (shadow-first bias survives top-k), and warnings/shadows " +
-        "whose trigger_conditions literally overlap the query are always included (flag: trigger-match). " +
-        "Entries carry lifecycle flags (stale, superseded_by:X) so staleness is visible at shortlist level. " +
-        "This is a pre-filter: scores are lexical (token backend), not semantic truth — relevance judgment stays with you. " +
-        "A low score does not prove irrelevance; a high score does not prove relevance.",
+        "Rank dream artifacts against a free-text query and return a top-k shortlist (id, type, score, ~200-char excerpt, lifecycle flags like [stale]/[superseded_by:X]). " +
+        "The scale-safe entry point for Recall: rank, judge the shortlist semantically, then pull full content for promising entries with hive_dream_query(ids: ...). " +
+        "Guarantees: shadows and warnings get reserved slots (shadow-first bias survives top-k), and warnings/shadows whose trigger_conditions literally overlap the query are always included (flag: trigger-match). " +
+        "Scores are lexical, not semantic truth — a high score means shares vocabulary; relevance judgment stays with you.",
       parameters: {
         query: reqStr("Free-text description of the task/topic to rank against (e.g. 'concurrent file writes in plugin journals')"),
         k: num("Shortlist size (default 30). If k >= archive size, everything is returned ranked."),
@@ -559,6 +550,30 @@ export function apply(ctx: DreamToolsCtx) {
             log("error", "[dream_complete] board promote failed", { err: err instanceof Error ? err.message : String(err), dreamId, caller })
           }
         }
+        // ── Dream-surface auto-close (D4 UX refinement, post-smoke) ──────────
+        // The dream is COMPLETE — the summon-scoped tools have no purpose
+        // left, so the coordinator's standing dreamtime partition re-masks
+        // NOW, without a second /dream keystroke. Last and best-effort: the
+        // dream has already completed and archived above. The listener side
+        // lives in @hive/dsh-evolution (which owns the surface state) and the
+        // pair is pinned by evolution's event-catalog guard; /dream's close
+        // branch stays as the manual release.
+        try {
+          const { sessionID } = resolveCaller(exec)
+          // Custom plugin-internal event (the evolution side listens and
+          // re-masks the session surface): not in the runtime Events keyof
+          // map, so the emit binds through a cast — the pair is pinned by
+          // evolution's event-catalog guard.
+          ;(ctx as unknown as { emit: (event: string, payload: unknown) => void }).emit(
+            "hive/dream-complete",
+            sessionID,
+          )
+          lines.push("  Surface: the dreamtime partition sheds on this session automatically (dream surface closed; /dream remains the manual release and re-open).")
+        } catch (err: unknown) {
+          log("info", "[dream_complete] surface auto-close event not delivered", {
+            err: err instanceof Error ? err.message : String(err),
+          })
+        }
         return lines.join("\n")
       },
     }),
@@ -677,15 +692,10 @@ export function apply(ctx: DreamToolsCtx) {
     defineTool({
       name: "hive_dream_detect_duplicates",
       description:
-        "Scan the artifact archive and return candidate pairs within a similarity band, using cheap heuristics: " +
-        "domain-tag Jaccard overlap + content-token Jaccard overlap. " +
-        "Two bands, two jobs: the HIGH band (threshold ~0.6+) surfaces near-duplicate candidates (merge/supersede); " +
-        "the MID band (threshold ~0.30, max_threshold ~0.60) is the contradiction-hunting zone — same topic, different words, possibly different stance. " +
-        "Each pair carries divergence annotations: conf_delta (|confidence difference|) and dream_distance (DRM-ordinal gap) — " +
-        "a high-similarity pair with divergent confidence or a large dream gap is prime supersession/contradiction territory. " +
-        "This is a pre-filter only — divergent CLAIMS are not heuristically detectable; semantic judgment (duplicate vs contradiction vs unrelated) " +
-        "and the final merge/supersede decision stay with dreamcatcher and dreamtime. " +
-        "A high score means textual/tag similarity, not guaranteed duplication.",
+        "Scan the artifact archive for candidate pairs within a similarity band (tag + content-token Jaccard). " +
+        "Two bands: HIGH (threshold ~0.6+) = near-duplicate candidates (merge/supersede); MID (threshold ~0.30, max_threshold ~0.60) = the contradiction-hunting zone — same topic, different words. " +
+        "Pairs carry conf_delta and dream_distance annotations: high similarity with divergent confidence or a large dream gap is prime supersession/contradiction territory. " +
+        "A pre-filter only — the duplicate/contradiction/unrelated judgment and the final merge/supersede decision stay with dreamcatcher and dreamtime.",
       parameters: {
         threshold: num("Minimum similarity score 0.0–1.0 to report (default 0.35). Lower = more candidates, higher = fewer but stronger matches."),
         max_threshold: num("Maximum similarity score to report (default 1.0). Set threshold=0.30, max_threshold=0.60 to isolate the mid-band for contradiction hunting."),
