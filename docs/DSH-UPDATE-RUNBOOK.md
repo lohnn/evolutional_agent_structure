@@ -72,6 +72,16 @@ Way A (git) re-resolves by moving ref — unaffected.
 - **Way B (offline)**: copy `dsh-hive-dist/` to the machine; the updater's
   tarball mode then pins by name — which is exactly why the reversion rule
   matters.
+- **The catalog synchronizer travels with the updater now**: the
+  `berget-refresh` plugin runs its **daily Berget model sync** by spawning
+  `~/.dsh/hive-kit/berget-models-sync.mjs` (fixed path, plugin-side). Current
+  updater versions stage it from `dsh-hive-dist/` (copy-if-different); a
+  machine updated before that staging landed — or by a hand copy — is missing
+  it, which silently freezes the model catalog (context windows, vision
+  flags, effort maps). Proof of life on any machine: run the synchronizer by
+  hand (`node ~/.dsh/hive-kit/berget-models-sync.mjs --dry`) and expect
+  `already up to date (no diff)`; after the next `dsh-web` boot, look for
+  `~/.dsh/berget-catalog-sync.json` (the daily success marker).
 
 ## Rollback caveats
 

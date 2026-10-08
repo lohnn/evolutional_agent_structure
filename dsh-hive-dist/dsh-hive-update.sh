@@ -157,6 +157,21 @@ done
 install -m 0644 "$KIT/.pnpmfile.cjs" "$PROFILE/.pnpmfile.cjs" || die "cannot refresh profile .pnpmfile.cjs"
 log "profile: refreshed managed .pnpmfile.cjs"
 
+# Catalog synchronizer: the berget-refresh credential plugin spawns this daily
+# from ~/.dsh/hive-kit (PR #24 contract; the spawn path is fixed in the plugin).
+# Installer-owned like .pnpmfile.cjs — refresh whenever the dist copy changes.
+# copy-if-different keeps self-hosted kit dirs (KIT == ~/.dsh/hive-kit) quiet.
+HIVE_KIT_DIR="${HOME}/.dsh/hive-kit"
+if [ -f "$KIT/berget-models-sync.mjs" ]; then
+  mkdir -p "$HIVE_KIT_DIR"
+  if ! cmp -s "$KIT/berget-models-sync.mjs" "$HIVE_KIT_DIR/berget-models-sync.mjs"; then
+    install -m 0755 "$KIT/berget-models-sync.mjs" "$HIVE_KIT_DIR/berget-models-sync.mjs"
+    log "hive-kit: refreshed berget-models-sync.mjs (daily Berget catalog sync)"
+  fi
+else
+  warn "dsh-hive-dist is missing berget-models-sync.mjs — the daily Berget catalog sync cannot run (PR #24 contract)"
+fi
+
 ensure_setting() { # file, line, marker-grep
   if ! grep -qF "$3" "$1" 2>/dev/null; then
     printf '\n# dsh-hive-update: required by the git-hosted @hive cohort\n%s\n' "$2" >>"$1"
