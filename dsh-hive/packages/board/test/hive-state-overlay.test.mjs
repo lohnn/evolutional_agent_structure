@@ -1,7 +1,8 @@
-// WI-083 — the HIVE-state overlay: unit tests for the client view projection
-// (src/lib/hive-state-view.ts, compiled to dist) plus byte-level guards on the
-// EMITTED bundle (the I-192/A7 pattern: string literals that must survive
-// minification, and absence of anything that would break the dock contract).
+// WI-083 (v1.1) — the HIVE-state overlay: unit tests for the client view
+// projection (src/lib/hive-state-view.ts, compiled to dist) plus byte-level
+// guards on the EMITTED bundle (the I-192/A7 pattern: string literals that
+// must survive minification, and absence of anything that would break the
+// dock contract or leak ambient rows back in).
 import { readFileSync } from "node:fs"
 import path from "node:path"
 import assert from "node:assert/strict"
@@ -9,7 +10,10 @@ import test from "node:test"
 import {
   buildTimeline,
   childrenInFlight,
-  pillState,
+  childrenKnown,
+  currentStage,
+  isSelfRunning,
+  durationSince,
   fmtTime,
   relTime,
   HIVE_STATE_URL,
@@ -26,27 +30,33 @@ const PAYLOAD = {
   id: "session-abc",
   idBare: "abc",
   workspace: "studio",
-  hive: { isCoordinator: true, agent: "dsh-hive-plugins", awakenedAt: "2026-10-08T16:00:00.000Z", lastAwakenInput: "run it" },
+  hive: { isCoordinator: true, agent: "standard", awakenedAt: "2026-10-08T16:00:00.000Z", lastAwakenInput: "run it" },
   goal: { objective: "ship the overlay", status: "active", roundsStarted: 3, paused: false, disabled: false, createdAt: "2026-10-08T16:30:00.000Z", updatedAt: "2026-10-08T17:00:00.000Z" },
   usageMarks: [{ capability: "dsh-hive-plugins", timestamp: "2026-10-08T16:55:41.199Z" }],
   dreamEvents: [{ ts: "2026-10-08T16:56:00.000Z", tool: "rank" }],
-  dreamAmbient: {
-    activeCount: 1,
-    active: [{ dreamId: "DRM-090", entryTime: "2026-10-08T15:00:00.000Z" }],
-    recent: [{ dreamId: "DRM-057", entryTime: "2026-10-08T10:19:27.971Z", exitTime: "2026-10-08T10:19:40.112Z", status: "COMPLETE" }],
-  },
-  lastTick: "2026-10-08T08:13:25.983Z",
+  children: [
+    { id: "session-c1", mode: "continuable", label: "wi-083-state-overlay", createdAtMs: 1791460000000, capability: "dsh-hive-plugins" },
+  ],
+  childrenTotal: 1,
+  live: true,
+  agents: [{ id: "session-abc", status: "running" }],
+  runningAgents: 1,
 }
 
-test("buildTimeline: every payload record becomes exactly one real event", () => {
+test("buildTimeline: every session-scoped record becomes exactly one real event", () => {
   const events = buildTimeline(PAYLOAD)
   const kinds = events.map((e) => e.kind)
-  assert.deepEqual([...kinds].sort(), ["awaken", "dream", "dream", "dream", "goal", "tick", "used"])
+  assert.deepEqual([...kinds].sort(), ["awaken", "dispatched", "dream", "goal", "registered"])
   const awaken = events.find((e) => e.kind === "awaken")
-  assert.match(awaken.text, /awakened as dsh-hive-plugins/)
+  assert.match(awaken.text, /awakened as standard/)
   assert.match(awaken.text, /"run it"/)
   const goal = events.find((e) => e.kind === "goal")
   assert.match(goal.text, /round 3/)
+  const dispatched = events.find((e) => e.kind === "dispatched")
+  assert.match(dispatched.text, /wi-083-state-overlay/)
+  assert.match(dispatched.text, /dsh-hive-plugins/)
+  assert.match(dispatched.text, /\(continuable\)/)
+  assert.equal(new Date(dispatched.ts).toISOString(), new Date(1791460000000).toISOString())
 })
 
 test("buildTimeline: events sort descending by ts", () => {
@@ -56,47 +66,70 @@ test("buildTimeline: events sort descending by ts", () => {
   assert.deepEqual(times, sorted)
 })
 
-test("buildTimeline: workspace-level facts are flagged ambient, session rows are not", () => {
-  const events = buildTimeline(PAYLOAD)
-  // ambient = workspace-level (DRM files, energy tick) — never attributed
-  for (const e of events.filter((x) => x.ambient === true)) {
-    assert.ok(["dream", "tick"].includes(e.kind), `ambient row has a workspace kind: ${e.kind}`)
-    assert.ok(e.text.includes("(workspace)"), `ambient row says so: ${e.text}`)
+test("buildTimeline: NO workspace-ambient rows ever (v1.1 scope)", () => {
+  const events = buildTimeline({
+    ...PAYLOAD,
+    // legacy v1 fields may still arrive from a not-yet-bounced route — ignored
+    lastTick: "2026-10-08T08:13:25.983Z",
+  })
+  for (const e of events) {
+    assert.ok(!e.text.includes("(workspace)"), `no ambient text: ${e.text}`)
+    assert.ok(e.kind !== "tick", "no energy-tick rows")
   }
-  // the session's OWN dream-telemetry rows stay session-attributed (not ambient)
-  const own = events.find((e) => e.kind === "dream" && e.ambient === undefined)
-  assert.ok(own, "the session's dream-telemetry row is present and NOT ambient")
-  assert.match(own.text, /dream archive rank/)
-  assert.equal(events.find((e) => e.kind === "tick").text.includes("(workspace)"), true)
+  assert.equal(buildTimeline(undefined).length, 0)
+  // absent coordinator fields render nothing fabricated
+  assert.equal(buildTimeline({ ok: true }).find((e) => e.kind === "awaken"), undefined)
 })
 
-test("buildTimeline: absent coordinator fields render nothing fabricated", () => {
-  const events = buildTimeline({ ok: true, hive: { isCoordinator: false } })
-  assert.equal(events.find((e) => e.kind === "awaken"), undefined)
-  assert.equal(events.length, 0)
-  assert.deepEqual(buildTimeline(undefined), [])
-})
-
-test("childrenInFlight: only running rows parented to the selected session", () => {
+test("childrenInFlight / childrenKnown: partition by running, parents only", () => {
   const list = {
     byId: {
       me: { id: "me", running: true },
-      kid1: { id: "kid1", parentId: "me", running: true },
+      kid1: { id: "kid1", parentId: "me", running: true, displayTitle: "kiwi" },
       kid2: { id: "kid2", parentId: "me", running: false },
       kid3: { id: "kid3", parentId: "other", running: true },
     },
   }
-  const kids = childrenInFlight(list, "me")
-  assert.deepEqual(kids.map((k) => k.id), ["kid1"])
+  assert.deepEqual(childrenInFlight(list, "me").map((k) => k.id), ["kid1"])
+  assert.deepEqual(childrenKnown(list, "me").map((k) => k.id), ["kid1", "kid2"])
   assert.deepEqual(childrenInFlight(undefined, "me"), [])
+  assert.deepEqual(childrenKnown(undefined, "me"), [])
 })
 
-test("pillState: dormant→awakened→working in that precedence, honest unknown", () => {
-  assert.deepEqual(pillState(undefined, undefined), { word: "…", tone: "unknown" })
-  assert.deepEqual(pillState({ ok: true }, undefined), { word: "ambient", tone: "ambient" })
-  assert.deepEqual(pillState({ ok: true, hive: { isCoordinator: true } }, undefined), { word: "awakened", tone: "hive" })
-  assert.deepEqual(pillState({ ok: true, hive: { isCoordinator: true } }, true), { word: "working", tone: "hive" })
-  assert.deepEqual(pillState({ ok: true, hive: { isCoordinator: false } }, true), { word: "working", tone: "ambient" })
+test("currentStage: page truth OR host truth flips working; done when not live", () => {
+  // working by page
+  assert.equal(currentStage({ payload: PAYLOAD, routeReachable: true, pageRunning: true }).stage, "working")
+  assert.equal(currentStage({ payload: PAYLOAD, routeReachable: true, pageRunning: true }).tone, "live")
+  // working by HOST truth while the page store is stale (the v1 defect)
+  assert.equal(currentStage({ payload: PAYLOAD, routeReachable: true, pageRunning: false }).stage, "working")
+  assert.equal(isSelfRunning(PAYLOAD), true)
+  // DURABLE facts win over liveness: a restarted host disposes agents without
+  // ending sessions — live:false alone must NEVER read done (v1.1 defect fix)
+  assert.equal(currentStage({ payload: { ...PAYLOAD, live: false, agents: [] }, routeReachable: true, pageRunning: false }).stage, "awakened")
+  // no route (pending bounce) + page idle → honest page-side stage
+  assert.equal(currentStage({ payload: undefined, routeReachable: false, pageRunning: false }).stage, "dormant")
+  assert.equal(currentStage({ payload: undefined, routeReachable: false, pageRunning: true }).stage, "working")
+  // awakened coordinator, idle
+  assert.equal(currentStage({ payload: { ...PAYLOAD, live: true, agents: [{ id: "session-abc", status: "idle" }] }, routeReachable: true, pageRunning: false }).stage, "awakened")
+  // plain registered child (mark, not coordinator; its agent is still
+  // registered on the host — continuable residents stay live between turns)
+  const child = {
+    ok: true,
+    hive: { isCoordinator: false },
+    usageMarks: [{ capability: "c", timestamp: "2026-10-08T16:55:41.199Z" }],
+    live: true,
+    agents: [{ id: "session-c1", status: "idle" }],
+  }
+  assert.equal(currentStage({ payload: child, routeReachable: true, pageRunning: false }).stage, "registered")
+})
+
+test("durationSince: honest relative strings, blank when unobserved", () => {
+  const now = Date.now()
+  assert.equal(durationSince(new Date(now - 60_000).toISOString(), now), "1m")
+  assert.equal(durationSince(new Date(now - 7_200_000).toISOString(), now), "2h")
+  assert.equal(durationSince(undefined, now), "")
+  assert.equal(durationSince("not-a-date", now), "")
+  assert.equal(durationSince(new Date(now + 60_000).toISOString(), now), "") // future = unknown
 })
 
 test("time stamps: fmt falls back to the raw value for junk input", () => {
@@ -121,8 +154,12 @@ test("emitted client.js: WI-083 overlay rides the board bundle", () => {
   assert.ok(CLIENT.includes("hvs-timeline-panel"), "panel mount id present")
   assert.ok(CLIENT.includes("data-slot-hive-state"), "selected-session binding marker present")
   assert.ok(CLIENT.includes("useSessions"), "the global standard-seat hook is consumed")
-  // the W-099 discipline: the page must APPLY state — the poll cadence marker
-  assert.ok(CLIENT.includes("observed live"), "observed-run marker present (timeline moves, not a frozen soak)")
+  // v1.1 lifecycle-story markers (the W-099 discipline: the page must APPLY state)
+  assert.ok(CLIENT.includes("(observed)"), "observed-lifecycle marker present")
+  assert.ok(CLIENT.includes("now: "), "current-stage header line present")
+  assert.ok(CLIENT.includes("latest signal "), "latest-signal header line present")
+  assert.ok(CLIENT.includes("child returned — "), "child-return milestone present")
+  assert.ok(CLIENT.includes("in progress — enter time not observed"), "honest unobserved-enter fallback present")
 })
 
 test("emitted client.js: overlay styling is token-only (no hex colors)", () => {
@@ -131,4 +168,10 @@ test("emitted client.js: overlay styling is token-only (no hex colors)", () => {
   const cssEnd = CLIENT.indexOf("hvs-flag", cssStart)
   const css = CLIENT.slice(cssStart, cssEnd)
   assert.doesNotMatch(css, /#[0-9a-fA-F]{3,8}\b/, "no hex color literals in overlay CSS — theme tokens only")
+})
+
+test("emitted client.js: ambient rows can never come back (v1.1 scope pin)", () => {
+  assert.ok(!CLIENT.includes("dreamAmbient"), "legacy ambient payload reads gone from the bundle")
+  assert.ok(!CLIENT.includes("energy tick"), "no energy-tick row text in the bundle")
+  assert.ok(!CLIENT.includes("(workspace)"), "no ambient labeling in the bundle")
 })

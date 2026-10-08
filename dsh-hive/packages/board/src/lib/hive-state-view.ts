@@ -1,7 +1,7 @@
 /**
- * hive-state-view.ts — WI-083 client view logic for the HIVE-state overlay
- * (dock pill + expandable timeline), shared by the BUNDLED websrc module and
- * the node --test suite.
+ * hive-state-view.ts — WI-083 (v1.1) client view logic for the HIVE-state
+ * overlay (dock pill + expandable LIFECYCLE timeline), shared by the bundled
+ * websrc module and the node --test suite.
  *
  * NODE-FREE ON PURPOSE (I-192 class): this file compiles BOTH to dist (the
  * unit-testable lib face) and INTO the board client bundle (bun bundles the
@@ -11,12 +11,23 @@
  * @hive/dsh-evolution/lib/hive-state — this module is the CLIENT-side
  * projection of that payload.
  *
- * Everything the timeline shows is REAL state from the read-only route
- * `/api/hive-state/session` (@hive/dsh-evolution): the awaken ledger,
- * markUsed activity marks, per-session dream telemetry, ambient DRM files,
- * the live goal, and the agents registry projection — plus the page-local
- * `useSessions` standard-provision facts (running state, title, children)
- * and observed running flips, labeled `(observed live)`.
+ * v1.1 (user decisions):
+ *   - SESSION-ONLY scope: the workspace-level ambient rows v1 carried
+ *     (dream DRM runs, energy ticks) are GONE from the timeline — no ambient
+ *     section, no tagged compromise. Only this session's own records render.
+ *   - LIFECYCLE story: rows are stage transitions (registered → awakened
+ *     (tier) → working ⇄ idle → … → done) plus the milestones the session
+ *     actually produced (goal rounds, children dispatched, its own
+ *     dream-archive consults). Entering timestamp per row; duration-so-far
+ *     on the stage currently active; the current stage stays in the header.
+ *   - LIVE truth: the route carries the durable children catalog (with REAL
+ *     dispatch timestamps) and a host-truth `live`/agents projection so the
+ *     stage tone flips on server facts even when the page store is stale.
+ *
+ * Everything shown is REAL state from the read-only route
+ * `/api/hive-state/session` (@hive/dsh-evolution) plus page-local live
+ * facts from the `useSessions` standard provision (running state, title,
+ * children rows) and page-observed flips, labeled `(observed)`.
  */
 
 export const HIVE_STATE_URL = "/api/hive-state/session"
@@ -42,16 +53,22 @@ export interface HiveStatePayload {
   goalReason?: string
   usageMarks?: Array<{ capability: string; timestamp: string }>
   dreamEvents?: Array<{ ts: string; tool: string }>
-  dreamAmbient?: {
-    activeCount?: number
-    active?: Array<{ dreamId: string; entryTime: string }>
-    recent?: Array<{ dreamId: string; entryTime: string; exitTime: string | null; status: string }>
-  }
-  lastTick?: string | null
+  children?: ChildEntryView[]
+  childrenTotal?: number
   runningAgents?: number
   agents?: Array<{ id: string; status: string }>
-  usageTotal?: number
-  dreamEventTotal?: number
+  /** Host truth: is the SELECTED session live on this host right now? */
+  live?: boolean
+}
+
+export interface ChildEntryView {
+  id: string
+  mode: string
+  label?: string
+  /** Catalog creation time = the real dispatch timestamp (ms epoch). */
+  createdAtMs: number
+  /** The capability the child was dispatched as, when a mark exists. */
+  capability?: string
 }
 
 export interface SessionRowLike {
@@ -72,9 +89,7 @@ export interface TimelineEvent {
   ts: string | null
   kind: string
   text: string
-  /** Workspace-level fact (dreams, ticks) — never attributed to the session. */
-  ambient?: boolean
-  /** Page-local observation (W-099 discipline: the timeline MUST MOVE). */
+  /** Page-local observation — honest window labeling, never a durable claim. */
   observed?: boolean
 }
 
@@ -87,7 +102,20 @@ export function childrenInFlight(list: SessionListLike | undefined, sessionId: s
   return out
 }
 
-/** Merge every REAL record the payload carries into one descend-sorted timeline. */
+/** Rows whose parent is the selected session (children the panel knows of). */
+export function childrenKnown(list: SessionListLike | undefined, sessionId: string): SessionRowLike[] {
+  const out: SessionRowLike[] = []
+  for (const row of Object.values(list?.byId ?? {})) {
+    if (row && row.parentId === sessionId) out.push(row)
+  }
+  return out
+}
+
+/**
+ * The session-scoped REAL events of one payload: awaken transition, its
+ * dispatch/registration marks, its own dream-archive consults, and its
+ * children dispatches (durable catalog ✕ mark join — REAL timestamps).
+ */
 export function buildTimeline(p: HiveStatePayload | undefined): TimelineEvent[] {
   if (!p) return []
   const events: TimelineEvent[] = []
@@ -96,36 +124,74 @@ export function buildTimeline(p: HiveStatePayload | undefined): TimelineEvent[] 
     const input = hive.lastAwakenInput ? ` — "${hive.lastAwakenInput}"` : ""
     events.push({ ts: hive.awakenedAt ?? null, kind: "awaken", text: `awakened as ${hive.agent ?? "unknown"}${input}` })
   }
+  for (const m of p.usageMarks ?? []) {
+    events.push({ ts: m.timestamp, kind: "registered", text: `registered — dispatched as ${m.capability}` })
+  }
+  for (const d of p.dreamEvents ?? []) events.push({ ts: d.ts, kind: "dream", text: `dream archive ${d.tool}` })
+  for (const c of p.children ?? []) {
+    const asWhom = c.capability ? ` as ${c.capability}` : ""
+    const label = c.label ? ` — "${c.label}"` : ""
+    events.push({
+      ts: c.createdAtMs ? new Date(c.createdAtMs).toISOString() : null,
+      kind: "dispatched",
+      text: `child dispatched${asWhom}${label} (${c.mode})`,
+    })
+  }
   if (p.goal?.createdAt) {
     const rounds = typeof p.goal.roundsStarted === "number" ? `, round ${p.goal.roundsStarted}` : ""
     events.push({ ts: p.goal.createdAt, kind: "goal", text: `goal set · ${String(p.goal.status ?? "")}${rounds}` })
   }
-  for (const m of p.usageMarks ?? []) events.push({ ts: m.timestamp, kind: "used", text: `activity marked: ${m.capability}` })
-  for (const d of p.dreamEvents ?? []) events.push({ ts: d.ts, kind: "dream", text: `dream archive ${d.tool}` })
-  for (const a of p.dreamAmbient?.active ?? [])
-    events.push({ ts: a.entryTime, kind: "dream", text: `dream ${a.dreamId} became active (workspace)`, ambient: true })
-  for (const r of p.dreamAmbient?.recent ?? []) {
-    const done = r.exitTime ? "" : " — completed"
-    events.push({
-      ts: r.entryTime,
-      kind: "dream",
-      text: `dream ${r.dreamId} started · ${String(r.status ?? "").toLowerCase()}${done} (workspace)`,
-      ambient: true,
-    })
-  }
-  if (p.lastTick) events.push({ ts: p.lastTick, kind: "tick", text: "energy tick (workspace)", ambient: true })
   return events.sort((a, b) => new Date(b.ts || 0).getTime() - new Date(a.ts || 0).getTime())
 }
 
-/** Pill headline state: the honest one-word verdict for the selected session. */
-export function pillState(
-  p: HiveStatePayload | undefined,
-  running: boolean | undefined,
-): { word: string; tone: "hive" | "ambient" | "unknown" } {
-  if (p === undefined) return { word: "…", tone: "unknown" }
-  if (running === true) return { word: "working", tone: p.hive?.isCoordinator === true ? "hive" : "ambient" }
-  if (p.hive?.isCoordinator === true) return { word: "awakened", tone: "hive" }
-  return { word: "ambient", tone: "ambient" }
+/** The honest current stage of the selected session. */
+export type Stage = "working" | "idle" | "awakened" | "registered" | "dormant" | "done"
+
+export function currentStage(params: {
+  payload: HiveStatePayload | undefined
+  routeReachable: boolean
+  pageRunning: boolean | undefined
+}): { stage: Stage; tone: "live" | "hive" | "ambient" | "unknown" } {
+  const { payload, routeReachable, pageRunning } = params
+  const hive = payload?.hive?.isCoordinator === true
+  // Working = page truth OR host truth (either flip must move the tone).
+  const running = pageRunning === true || (routeReachable && isSelfRunning(payload))
+  if (running) return { stage: "working", tone: "live" }
+  // DURABLE hive facts win over process liveness: a host restart disposes
+  // every agent object without ending a single session, so `live:false`
+  // alone can never mean "done" (observed live 2026-10-08 — the panel of a
+  // pre-restart coordinator read done right after its host rebooted).
+  // `done` is an OBSERVED milestone only (row removal / explicit end).
+  if (payload === undefined) return { stage: "dormant", tone: "unknown" }
+  if (hive) return { stage: "awakened", tone: "hive" }
+  if ((payload.usageMarks?.length ?? 0) > 0) return { stage: "registered", tone: "ambient" }
+  if (payload.live === true) return { stage: "idle", tone: "ambient" }
+  return { stage: "dormant", tone: "ambient" }
+}
+
+/** Host-registry truth for THIS session's running state. */
+export function isSelfRunning(p: HiveStatePayload | undefined): boolean {
+  if (!p) return false
+  const bare = p.idBare
+  for (const row of p.agents ?? []) {
+    if (row.id === p.id || bareIdOf(row.id) === bare) return row.status === "running"
+  }
+  return false
+}
+
+function bareIdOf(id: string): string {
+  return id.startsWith("session-") ? id.slice("session-".length) : id
+}
+
+/** "Working for 12m" style duration-so-far for the active stage. */
+export function durationSince(ts: string | null | undefined, nowMs: number): string {
+  if (!ts) return ""
+  const ms = nowMs - new Date(ts).getTime()
+  if (!isFinite(ms) || ms < 0) return ""
+  if (ms < 45_000) return "seconds"
+  if (ms < 3_600_000) return `${Math.max(1, Math.round(ms / 60_000))}m`
+  if (ms < 86_400_000) return `${Math.round(ms / 3_600_000)}h`
+  return `${Math.round(ms / 86_400_000)}d`
 }
 
 /** "2026-10-08 16:55" style stamp (UTC, tabular). */

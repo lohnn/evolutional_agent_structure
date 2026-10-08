@@ -1,21 +1,35 @@
 /**
- * WI-083 — HIVE-state overlay (client half): a timeline of the SELECTED
- * session's HIVE facts, rendered INTO the live web composer dock.
+ * WI-083 (v1.1) — HIVE-state overlay (client half): a LIFECYCLE story of the
+ * SELECTED session — stage transitions + milestones — rendered INTO the live
+ * web composer dock.
  *
  * Data contract (all real, read-only — no mocks):
  *   - Host route: GET /api/hive-state/session?id=<sessionId> (shipped in
- *     @hive/dsh-evolution; awaken ledger + usage marks + dream telemetry +
- *     ambient dreams + lastTick, plus LIVE goal/agent facts). Until the host
- *     half's route is live (next dsh-web bounce), the poll fails and the pill
- *     says so honestly — it never invents rows.
+ *     @hive/dsh-evolution): awaken ledger, this session's usage/dispatch
+ *     marks, its own dream telemetry, the DURABLE children catalog (real
+ *     dispatch timestamps), live goal rounds and the host agents projection
+ *     (+ the host-truth `live` flag). Until the host half's route is live
+ *     (next dsh-web bounce), the poll fails and the pill says so honestly.
  *   - SELECTED session: the dock occupant is a `session`-scope standard-prop
  *     consumer — the framework hands `sessionId` and re-mounts on selection
- *     change (the conversation renders the dock only while a session is
- *     bound; conversation.composer.dock is list-kind, session-scope — the
+ *     change (conversation.composer.dock is list-kind, session-scope — the
  *     chat package's StatsPills precedent).
- *   - LIVE session facts: the global `useSessions` standard hook (ui-session's
- *     root provision) gives the selected row's running state, title, and the
- *     children list — re-rendered live by the page's session store.
+ *   - LIVE page facts: the global `useSessions` standard hook gives the
+ *     selected row's running state, title, updatedAt and the children rows —
+ *     re-rendered live by the page's session store.
+ *
+ * v1.1 (user decisions):
+ *   - SESSION-ONLY scope: workspace-level ambient facts (dream DRM runs,
+ *     energy ticks) are NOT shown — the timeline is this session's story.
+ *   - Rows are stage transitions (registered → awakened (tier) → working ⇄
+ *     idle → … → done) plus milestones (children dispatched/returned, goal
+ *     rounds, dream consults). Entering timestamp per row; duration-so-far
+ *     on the ACTIVE stage (a 1 s tick keeps it honest); the current stage
+ *     also lives in the header line.
+ *   - LIVE truth: the stage tone flips on page running OR host route truth
+ *     (route `live`/agents projection), so a stale page store can never
+ *     certify a frozen idle while the session works (W-099 applied to this
+ *     panel's own live section).
  *
  * Disciplines honored:
  *   - React-free at import time (W-044): the wrapper passes the runtime
@@ -29,11 +43,20 @@
  *   - Console-clean: fetch failures degrade to pill text, never uncaught
  *     rejections.
  *
- * The pure projection logic (buildTimeline / childrenInFlight / pillState /
- * time stamps) lives in ../src/lib/hive-state-view.ts — bundled here AND
- * unit-tested from dist. This file is DOM + wiring only.
+ * The pure projection logic (buildTimeline / currentStage / childrenInFlight /
+ * durationSince / time stamps) lives in ../src/lib/hive-state-view.ts —
+ * bundled here AND unit-tested from dist. This file is DOM + wiring only.
  */
-import { buildTimeline, childrenInFlight, fmtTime, pillState, relTime, HIVE_STATE_URL } from "../src/lib/hive-state-view.js"
+import {
+  buildTimeline,
+  childrenInFlight,
+  childrenKnown,
+  currentStage,
+  durationSince,
+  fmtTime,
+  relTime,
+  HIVE_STATE_URL,
+} from "../src/lib/hive-state-view.js"
 import type { HiveStatePayload, SessionRowLike, SessionListLike, TimelineEvent } from "../src/lib/hive-state-view.js"
 
 async function fetchHiveState(sessionId: string): Promise<HiveStatePayload> {
@@ -59,7 +82,7 @@ export const HIVE_STATE_CSS = `
 .hvs-pill .hvs-badge{flex:0 0 auto;font-size:10px;color:var(--dsw-alias-label-tertiary)}
 @keyframes hvs-pulse{0%,100%{opacity:1}50%{opacity:.35}}
 @media (prefers-reduced-motion: reduce){.hvs-pill[data-tone="live"] .hvs-dot{animation:none}}
-.hvs-panel{position:fixed;z-index:10000;width:420px;max-width:calc(100vw - 24px);
+.hvs-panel{position:fixed;z-index:10000;width:440px;max-width:calc(100vw - 24px);
   max-height:60vh;display:flex;flex-direction:column;overflow:hidden;
   border:1px solid var(--dsw-alias-border-l2);border-radius:10px;
   background:var(--dsw-alias-tooltip-bg);color:var(--dsw-alias-label-primary);
@@ -71,6 +94,12 @@ export const HIVE_STATE_CSS = `
 .hvs-panel .hvs-close{flex:0 0 auto;border:0;background:transparent;cursor:pointer;
   color:var(--dsw-alias-label-tertiary);font-size:13px;padding:2px 6px;border-radius:6px}
 .hvs-panel .hvs-close:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}
+.hvs-panel .hvs-stage{padding:7px 10px;display:flex;align-items:baseline;gap:8px;
+  border-bottom:1px solid var(--dsw-alias-border-l1);font-size:12px}
+.hvs-panel .hvs-stage .hvs-now{font-weight:600;color:var(--dsw-alias-label-primary)}
+.hvs-panel[data-live="1"] .hvs-stage .hvs-now{color:var(--dsw-alias-state-success-primary)}
+.hvs-panel .hvs-stage .hvs-dur{color:var(--dsw-alias-state-business-primary);font-variant-numeric:tabular-nums}
+.hvs-panel .hvs-stage .hvs-sig{margin-left:auto;color:var(--dsw-alias-label-tertiary);font-size:10.5px}
 .hvs-panel .hvs-meta{padding:6px 10px;display:flex;flex-direction:column;gap:4px;
   border-bottom:1px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-secondary)}
 .hvs-panel .hvs-meta b{color:var(--dsw-alias-label-primary);font-weight:600}
@@ -81,10 +110,14 @@ export const HIVE_STATE_CSS = `
   font-variant-numeric:tabular-nums}
 .hvs-panel .hvs-g{flex:0 0 auto;width:12px;text-align:center;color:var(--dsw-alias-state-business-tertiary)}
 .hvs-panel .hvs-g[data-kind="dream"]{color:var(--dsw-alias-state-warn-primary)}
-.hvs-panel .hvs-g[data-kind="tick"]{color:var(--dsw-alias-label-dimmed)}
-.hvs-panel .hvs-g[data-kind="used"]{color:var(--dsw-alias-label-tertiary)}
+.hvs-panel .hvs-g[data-kind="returned"]{color:var(--dsw-alias-state-success-secondary)}
+.hvs-panel .hvs-g[data-kind="dispatched"]{color:var(--dsw-alias-state-business-primary)}
+.hvs-panel .hvs-g[data-kind="goal"]{color:var(--dsw-alias-label-primary)}
+.hvs-panel .hvs-g[data-kind="idle"]{color:var(--dsw-alias-label-dimmed)}
 .hvs-panel .hvs-text{color:var(--dsw-alias-label-secondary);overflow-wrap:anywhere}
-.hvs-panel .hvs-ambient .hvs-text{color:var(--dsw-alias-label-tertiary)}
+.hvs-panel .hvs-row.hvs-current .hvs-text{color:var(--dsw-alias-label-primary);font-weight:600}
+.hvs-panel .hvs-dur{flex:0 0 auto;font-size:10px;color:var(--dsw-alias-state-business-primary);
+  font-variant-numeric:tabular-nums}
 .hvs-panel .hvs-observed .hvs-text{color:var(--dsw-alias-state-success-secondary)}
 .hvs-panel .hvs-empty{color:var(--dsw-alias-label-tertiary);padding:6px 0}
 .hvs-panel .hvs-foot{padding:5px 10px 7px;border-top:1px solid var(--dsw-alias-border-l1);
@@ -106,11 +139,14 @@ const PANEL_ID = "hvs-timeline-panel"
 
 const KIND_GLYPH: Record<string, string> = {
   awaken: "◈",
+  registered: "◇",
+  working: "▶",
+  idle: "⏸",
+  done: "■",
+  dispatched: "⇗",
+  returned: "⇙",
   goal: "◎",
-  used: "•",
   dream: "☾",
-  tick: "⚡",
-  live: "▶",
 }
 
 /**
@@ -144,7 +180,11 @@ export function makeHiveStateDock(ReactArg: {
     const [fetchFailed, setFetchFailed] = React.useState<boolean>(false)
     const [open, setOpen] = React.useState<boolean>(false)
     const [eventNotes, setEventNotes] = React.useState<TimelineEvent[]>([])
+    const [nowTick, setNowTick] = React.useState<number>(Date.now())
     const runningRef = React.useRef<boolean | undefined>(undefined)
+    const goalRef = React.useRef<string>("")
+    const childRunRef = React.useRef<Map<string, boolean>>(new Map())
+    const rowSeenRef = React.useRef<boolean>(false)
     const pillRef = React.useRef<HTMLElement | null>(null)
 
     // LIVE session facts from the session store (global standard seat).
@@ -153,21 +193,65 @@ export function makeHiveStateDock(ReactArg: {
     const row = sessionId ? rowList[sessionId] : undefined
     const running = row ? row.running === true : undefined
     const kids = childrenInFlight(list, sessionId)
+    const kidsAll = childrenKnown(list, sessionId)
 
-    // Observe running transitions while mounted (W-099: the timeline MOVES).
+    // Observe REAL transitions while mounted (W-099: the story must move).
     React.useEffect(() => {
       const prev = runningRef.current
       if (prev !== undefined && prev !== running) {
         const note: TimelineEvent = {
           ts: new Date().toISOString(),
-          kind: "live",
-          text: prev === false && running === true ? "turn started (observed live)" : "turn ended (observed live)",
+          kind: running ? "working" : "idle",
+          text: running ? "working — turn started (observed)" : "idle — turn ended (observed)",
           observed: true,
         }
-        setEventNotes((notes: TimelineEvent[]) => [note, ...notes].slice(0, 20))
+        setEventNotes((notes: TimelineEvent[]) => [note, ...notes].slice(0, 40))
       }
       runningRef.current = running
-    }, [running])
+      // children running-flips → "returned" milestones (not durably stamped)
+      for (const c of kidsAll) {
+        const was = childRunRef.current.get(c.id)
+        if (was === true && c.running !== true) {
+          const note: TimelineEvent = {
+            ts: new Date().toISOString(),
+            kind: "returned",
+            text: `child returned — ${String(c.displayTitle ?? c.title ?? c.id).slice(0, 40)} (observed)`,
+            observed: true,
+          }
+          setEventNotes((notes: TimelineEvent[]) => [note, ...notes].slice(0, 40))
+        }
+        childRunRef.current.set(c.id, c.running === true)
+      }
+      // goal changes → milestones (rounds + status are current-state only)
+      const g = data?.goal
+      if (g) {
+        const sig = `${g.roundsStarted ?? "?"}/${g.status ?? "?"}`
+        if (goalRef.current !== "" && goalRef.current !== sig) {
+          const note: TimelineEvent = {
+            ts: g.updatedAt ?? new Date().toISOString(),
+            kind: "goal",
+            text: `goal → round ${g.roundsStarted ?? "—"} · ${g.status ?? ""} (observed)`,
+            observed: true,
+          }
+          setEventNotes((notes: TimelineEvent[]) => [note, ...notes].slice(0, 40))
+        }
+        goalRef.current = sig
+      }
+      // the selected session itself vanishing → done (observed)
+      if (sessionId) {
+        const present = rowList[sessionId] !== undefined
+        if (rowSeenRef.current && !present) {
+          const note: TimelineEvent = {
+            ts: new Date().toISOString(),
+            kind: "done",
+            text: "done — session removed from the live session list (observed)",
+            observed: true,
+          }
+          setEventNotes((notes: TimelineEvent[]) => [note, ...notes].slice(0, 40))
+        }
+        rowSeenRef.current = present
+      }
+    }, [running, kidsAll, sessionId, rowList, data?.goal])
 
     // The poll: immediate on selection change, then every 6 s while mounted.
     React.useEffect(() => {
@@ -205,7 +289,17 @@ export function makeHiveStateDock(ReactArg: {
       const render = () => {
         if (!panel.isConnected) return
         panel.innerHTML = ""
-        drawPanel(panel, { sessionId, data, fetchFailed, row, kids, eventNotes, onClose: () => setOpen(false) })
+        drawPanel(panel, {
+          sessionId,
+          data,
+          fetchFailed,
+          row,
+          kids,
+          kidsAll,
+          eventNotes,
+          nowTick,
+          onClose: () => setOpen(false),
+        })
         const rect = pillRef.current?.getBoundingClientRect()
         if (rect) {
           const top = Math.max(8, rect.top - panel.offsetHeight - 10)
@@ -226,19 +320,21 @@ export function makeHiveStateDock(ReactArg: {
       }
       document.addEventListener("click", onDocClick, true)
       document.addEventListener("keydown", onEsc)
+      // 1 s tick: the active stage's duration-so-far stays honest
+      const tick = setInterval(() => setNowTick(Date.now()), 1000)
       return () => {
         window.removeEventListener("resize", reposition)
         window.removeEventListener("scroll", reposition, true)
         document.removeEventListener("click", onDocClick, true)
         document.removeEventListener("keydown", onEsc)
+        clearInterval(tick)
         panel.remove()
       }
-    }, [open, sessionId, data, fetchFailed, row, eventNotes])
+    }, [open, sessionId, data, fetchFailed, row, eventNotes, nowTick])
 
     if (!sessionId) return null
 
-    const state = pillState(fetchFailed ? undefined : data, running)
-    const tone = running === true ? "live" : state.tone
+    const stage = currentStage({ payload: fetchFailed ? undefined : data, routeReachable: !fetchFailed, pageRunning: running })
     const goalRounds = fetchFailed ? null : data?.goal?.roundsStarted
     const hiveBadge = fetchFailed ? "" : data?.hive?.isCoordinator === true ? "hive" : "ambient"
 
@@ -246,7 +342,7 @@ export function makeHiveStateDock(ReactArg: {
       "span",
       {
         className: "hvs-pill",
-        "data-tone": tone,
+        "data-tone": stage.tone,
         "data-slot-hive-state": sessionId,
         role: "button",
         "aria-expanded": open ? "true" : "false",
@@ -256,13 +352,37 @@ export function makeHiveStateDock(ReactArg: {
         onClick: () => setOpen((v: boolean) => !v),
         title: "HIVE state of this session (WI-083, read-only)",
       },
-      React.createElement("span", { className: "hvs-dot", "data-dot": tone }),
-      React.createElement("span", { className: "hvs-word" }, `hive · ${fetchFailed ? "route pending" : state.word}`),
+      React.createElement("span", { className: "hvs-dot", "data-dot": stage.tone }),
+      React.createElement("span", { className: "hvs-word" }, `hive · ${fetchFailed ? "route pending" : stage.stage}`),
       goalRounds ? React.createElement("span", { className: "hvs-badge" }, `r${goalRounds}`) : null,
       kids.length > 0 ? React.createElement("span", { className: "hvs-badge" }, `+${kids.length}`) : null,
       hiveBadge ? React.createElement("span", { className: "hvs-badge" }, hiveBadge) : null,
     )
   }
+}
+
+function findLatestKind(notes: TimelineEvent[], kind: string): string | null {
+  for (const n of notes) if (n.kind === kind && n.ts) return n.ts
+  return null
+}
+
+/** The latest signal stamp across the session's own story. */
+function latestSignalTs(data: HiveStatePayload | undefined, row: SessionRowLike | undefined): string | null {
+  let best: number | null = null
+  const consider = (iso: string | null | undefined) => {
+    if (!iso) return
+    const t = new Date(iso).getTime()
+    if (isFinite(t) && (best === null || t > best)) best = t
+  }
+  consider(row?.updatedAt ? new Date(row.updatedAt).toISOString() : undefined)
+  consider(data?.goal?.updatedAt)
+  consider(data?.hive?.awakenedAt)
+  consider(data?.generated)
+  for (const m of data?.usageMarks ?? []) consider(m.timestamp)
+  for (const d of data?.dreamEvents ?? []) consider(d.ts)
+  for (const c of data?.children ?? []) consider(c.createdAtMs ? new Date(c.createdAtMs).toISOString() : null)
+  if (row?.updatedAt && (best === null || row.updatedAt > best)) best = row.updatedAt
+  return best === null ? null : new Date(best).toISOString()
 }
 
 /** Full panel draw — DOM/textContent only, data-derived strings never in HTML. */
@@ -274,7 +394,9 @@ function drawPanel(
     fetchFailed: boolean
     row: SessionRowLike | undefined
     kids: SessionRowLike[]
+    kidsAll: SessionRowLike[]
     eventNotes: TimelineEvent[]
+    nowTick: number
     onClose: () => void
   },
 ): void {
@@ -287,6 +409,26 @@ function drawPanel(
   close.addEventListener("click", () => parts.onClose())
   head.appendChild(close)
   panel.appendChild(head)
+
+  // ── CURRENT STAGE (the header line the user asked to keep) ────────────────
+  const stage = currentStage({
+    payload: parts.fetchFailed ? undefined : parts.data,
+    routeReachable: !parts.fetchFailed,
+    pageRunning: parts.row ? parts.row.running === true : undefined,
+  })
+  const stageLine = el("div", "hvs-stage")
+  if (parts.fetchFailed) stageLine.setAttribute("data-live", "0")
+  else stageLine.setAttribute("data-live", stage.tone === "live" ? "1" : "0")
+  const now = el("span", "hvs-now", parts.fetchFailed ? "stage unknown" : `now: ${stage.stage}`)
+  stageLine.appendChild(now)
+  const workTs = findLatestKind(parts.eventNotes, "working")
+  if (stage.stage === "working") {
+    const dur = workTs ? durationSince(workTs, parts.nowTick) : ""
+    stageLine.appendChild(el("span", "hvs-dur", dur ? `${dur} so far` : "in progress — enter time not observed"))
+  }
+  const sig = latestSignalTs(parts.fetchFailed ? undefined : parts.data, parts.row)
+  stageLine.appendChild(el("span", "hvs-sig", `latest signal ${fmtTime(sig)} · ${relTime(sig)}`))
+  panel.appendChild(stageLine)
 
   const meta = el("div", "hvs-meta")
   const hive = parts.data?.hive
@@ -305,23 +447,20 @@ function drawPanel(
       document.createTextNode(` — ${hive.agent ?? "unknown"} · awakened ${fmtTime(hive.awakenedAt)} (${relTime(hive.awakenedAt)})`),
     )
   } else {
-    hiveLine.appendChild(el("span", "", "not an awakened coordinator (ambient session)"))
+    hiveLine.appendChild(el("span", "", "not an awakened coordinator"))
   }
   meta.appendChild(hiveLine)
 
-  const liveLine = el("div")
-  liveLine.appendChild(
+  const live = parts.data?.live
+  const hostLine = el("div")
+  hostLine.appendChild(
     document.createTextNode(
-      `live: ${
-        parts.row
-          ? parts.row.running
-            ? "working now"
-            : `idle — last update ${parts.row.updatedAt ? fmtTime(new Date(parts.row.updatedAt).toISOString()) : "—"}`
-          : "session row unknown"
-      }`,
+      parts.fetchFailed
+        ? "host truth: unknown (route pending)"
+        : `host truth: ${live === true ? "live on this host" : "not live on this host"} · ${parts.data?.runningAgents ?? 0} agents running`,
     ),
   )
-  meta.appendChild(liveLine)
+  meta.appendChild(hostLine)
 
   const goal = parts.data?.goal
   const goalLine = el("div")
@@ -337,37 +476,45 @@ function drawPanel(
   meta.appendChild(goalLine)
 
   const kidLine = el("div")
-  if (parts.kids.length > 0) {
-    kidLine.appendChild(document.createTextNode(`children in flight: ${parts.kids.length}`))
-    for (const k of parts.kids.slice(0, 5)) {
-      kidLine.appendChild(el("span", "", ` · ${String(k.displayTitle ?? k.id).slice(0, 28)}`))
-    }
-  } else {
-    kidLine.appendChild(el("span", "", "children in flight: none"))
+  const total = parts.data?.childrenTotal ?? parts.kidsAll.length
+  kidLine.appendChild(
+    document.createTextNode(
+      `children: ${parts.kids.length} in flight · ${total} known`,
+    ),
+  )
+  for (const k of parts.kids.slice(0, 3)) {
+    kidLine.appendChild(el("span", "", ` · ${String(k.displayTitle ?? k.id).slice(0, 24)}`))
   }
   meta.appendChild(kidLine)
   panel.appendChild(meta)
 
+  // ── LIFECYCLE ROWS (stage transitions + milestones, newest first) ─────────
   const rows = el("div", "hvs-rows")
-  const events = [...parts.eventNotes, ...buildTimeline(parts.data)].sort(
+  const events = [...parts.eventNotes, ...buildTimeline(parts.fetchFailed ? undefined : parts.data)].sort(
     (a, b) => new Date(b.ts || 0).getTime() - new Date(a.ts || 0).getTime(),
   )
   if (events.length === 0) {
-    rows.appendChild(el("div", "hvs-empty", "no HIVE records for this session yet — the ledger rows land here as they happen"))
+    rows.appendChild(el("div", "hvs-empty", "no HIVE records for this session yet — stage transitions land here as they happen"))
   } else {
     for (const ev of events.slice(0, 80)) {
-      const rowEl = el("div", `hvs-row${ev.ambient ? " hvs-ambient" : ""}${ev.observed ? " hvs-observed" : ""}`)
+      const rowEl = el("div", `hvs-row${ev.observed ? " hvs-observed" : ""}`)
       rowEl.appendChild(el("span", "hvs-t", `${fmtTime(ev.ts)}${ev.ts ? ` · ${relTime(ev.ts)}` : ""}`))
       const glyph = el("span", "hvs-g", KIND_GLYPH[ev.kind] ?? "•")
       glyph.setAttribute("data-kind", ev.kind)
       rowEl.appendChild(glyph)
       rowEl.appendChild(el("span", "hvs-text", ev.text))
+      // duration-so-far rides the ACTIVE working stage row
+      if (ev.kind === "working" && stage.stage === "working" && ev.ts === findLatestKind(parts.eventNotes, "working")) {
+        const dur = workTs ? durationSince(workTs, parts.nowTick) : ""
+        rowEl.classList.add("hvs-current")
+        rowEl.appendChild(el("span", "hvs-dur", dur ? `${dur} so far` : ""))
+      }
       rows.appendChild(rowEl)
     }
   }
   panel.appendChild(rows)
 
   const foot = el("div", "hvs-foot")
-  foot.textContent = `read-only WI-083 overlay · sources: hive-sessions.json · hive-state.json · dreams/* · snapshot ${fmtTime(parts.data?.generated)}`
+  foot.textContent = `read-only WI-083 overlay · session-scoped · sources: hive-sessions.json · hive-state.json · dream telemetry · subagent catalog · snapshot ${fmtTime(parts.data?.generated)}`
   panel.appendChild(foot)
 }

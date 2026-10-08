@@ -1,16 +1,25 @@
-// WI-083 — the HIVE-state snapshot builder + route payload shaping.
+// WI-083 (v1.1) — the HIVE-state snapshot builder + route payload shaping.
 //
 // Everything here reads LEDGER COPIES in a tmpdir (the real ledgers under
-// /workspace/.opencode are never touched). The goal/agent live facts are
-// stubbed with structural doubles (the route reads them through minimal
-// faces), so the payload contract is testable without a host boot.
+// /workspace/.opencode are never touched). The goal/agent/subagent live
+// facts are stubbed with structural doubles (the route reads them through
+// minimal faces), so the payload contract is testable without a host boot.
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import fs from "fs"
 import os from "os"
 import path from "path"
-import { bareId, buildSessionHiveSnapshot } from "@hive/dsh-evolution/lib/hive-state"
-import { readLiveFacts } from "@hive/dsh-evolution/lib/hive-state-route"
+import {
+  bareId,
+  buildSessionHiveSnapshot,
+  assembleChildren,
+} from "@hive/dsh-evolution/lib/hive-state"
+import {
+  readLiveFacts,
+  isLiveId,
+  parseSessionId,
+  fetchChildren,
+} from "@hive/dsh-evolution/lib/hive-state-route"
 
 function mkWorkspace() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "evo-hivestate-"))
@@ -27,22 +36,6 @@ function writeTelemetry(dir, idBare, rows) {
   const tel = path.join(dir, ".opencode/dreams/index/telemetry")
   fs.mkdirSync(tel, { recursive: true })
   fs.writeFileSync(path.join(tel, `${idBare}.jsonl`), rows.map((r) => JSON.stringify(r)).join("\n") + "\n")
-}
-
-function writeDream(dir, sub, dreamId, fields = {}) {
-  const d = path.join(dir, ".opencode/dreams", sub)
-  fs.mkdirSync(d, { recursive: true })
-  fs.writeFileSync(
-    path.join(d, `${dreamId}.yaml`),
-    [
-      `dream_id: ${dreamId}`,
-      'intention: "test dream"',
-      `entry_time: ${fields.entryTime ?? "2026-10-08T08:00:00.000Z"}`,
-      `exit_time: ${fields.entryTime ? fields.exitTime ?? "2026-10-08T08:10:00.000Z" : "null"}`,
-      `status: ${fields.status ?? "COMPLETE"}`,
-      "",
-    ].join("\n"),
-  )
 }
 
 test("bareId normalizes both ledger id shapes", () => {
@@ -95,7 +88,7 @@ test("dream telemetry rides the bare id and parses rows tolerantly", () => {
     { ts: "2026-10-08T08:00:00.000Z", tool: "rank" },
     { ts: "2026-10-08T08:01:00.000Z", tool: "query" },
   ])
-  fs.writeFileSync(path.join(dir, ".opencode/dreams/index/telemetry/abc123.jsonl"), "{broken\n", { flag: "a" })
+  fs.appendFileSync(path.join(dir, ".opencode/dreams/index/telemetry/abc123.jsonl"), "{broken\n")
   const snap = buildSessionHiveSnapshot(dir, "session-abc123")
   assert.equal(snap.dreamEventTotal, 2)
   assert.equal(snap.dreamEvents.length, 2)
@@ -110,48 +103,60 @@ test("events of OTHER sessions never appear (telemetry keyed by id)", () => {
   assert.equal(snap.dreamEventTotal, 0)
 })
 
-test("ambient dreams: active + recent history, 4-shape minimal parse", () => {
-  const dir = mkWorkspace()
-  writeLedgers(dir)
-  writeDream(dir, "active", "DRM-090", { status: "DREAMING", entryTime: "2026-10-08T09:00:00.000Z" })
-  writeDream(dir, "active", "DRM-091", { status: "DREAMING", entryTime: "2026-10-08T09:05:00.000Z" })
-  writeDream(dir, "history", "DRM-057", { status: "COMPLETE", entryTime: "2026-10-08T10:19:27.971Z", exitTime: "2026-10-08T10:19:40.112Z" })
-  // junk file must not crash
-  fs.mkdirSync(path.join(dir, ".opencode/dreams/history"), { recursive: true })
-  fs.writeFileSync(path.join(dir, ".opencode/dreams/history/not-a-drm.txt"), "ignore me")
-  const snap = buildSessionHiveSnapshot(dir, "session-abc123")
-  assert.equal(snap.dreamAmbient.activeCount, 2)
-  assert.deepEqual(snap.dreamAmbient.active, [
-    { dreamId: "DRM-091", entryTime: "2026-10-08T09:05:00.000Z" },
-    { dreamId: "DRM-090", entryTime: "2026-10-08T09:00:00.000Z" },
-  ])
-  assert.equal(snap.dreamAmbient.recent.length, 1)
-  assert.equal(snap.dreamAmbient.recent[0].dreamId, "DRM-057")
-  assert.equal(snap.dreamAmbient.recent[0].status, "COMPLETE")
-})
-
 test("missing ledgers degrade to empty absences (tolerant reads)", () => {
   const dir = mkWorkspace() // no .opencode at all
   const snap = buildSessionHiveSnapshot(dir, "session-abc123")
   assert.equal(snap.hive.isCoordinator, false)
   assert.equal(snap.usageTotal, 0)
   assert.equal(snap.dreamEventTotal, 0)
-  assert.equal(snap.dreamAmbient.activeCount, 0)
-  assert.equal(snap.lastTick, null)
+})
+
+test("assembleChildren joins the catalog with child marks (capability flavor)", () => {
+  const catalog = [
+    { id: "session-c1", createdAt: 1791470002000, mode: "continuable", label: "wi-083-state-overlay" },
+    { id: "session-c2", createdAt: 1791470001000, mode: "one-shot" },
+    { id: "", createdAt: 0 }, // malformed row skips, never crashes
+  ]
+  const marks = [
+    { capability: "dsh-hive-plugins", sessionId: "c1", timestamp: "2026-10-08T16:55:41.199Z" },
+    { capability: "self", sessionId: "session-parent", timestamp: "2026-10-08T16:00:00.000Z" }, // the parent's own mark — never a child
+  ]
+  const { children, total } = assembleChildren(catalog, marks, "session-parent")
+  assert.equal(total, 2)
+  // oldest dispatch first
+  assert.equal(children[0].id, "session-c2")
+  assert.equal(children[0].capability, undefined) // no mark for c2
+  assert.equal(children[1].id, "session-c1")
+  assert.equal(children[1].capability, "dsh-hive-plugins")
+  assert.equal(children[1].label, "wi-083-state-overlay")
+  assert.equal(children[1].createdAtMs, 1791470002000)
+})
+
+test("assembleChildren caps and keeps the honest total", () => {
+  const catalog = Array.from({ length: 60 }, (_, i) => ({
+    id: `session-c${i}`,
+    createdAt: 1000 + i,
+    mode: "one-shot",
+  }))
+  const { children, total } = assembleChildren(catalog, [], "session-parent", { listCap: 50 })
+  assert.equal(total, 60)
+  assert.equal(children.length, 50)
+  assert.equal(children[children.length - 1].id, "session-c59") // newest kept
 })
 
 test("readLiveFacts: goal only for a LIVE agent, honest no-live-agent reason", () => {
   const agentsLive = { get: (id) => ({ id }), list: () => [{ id: "s1", status: "running" }, { id: "s2", status: "idle" }] }
   const goals = { get: (agent) => agent && { objective: "WI-083 overlay", status: "active", roundsStarted: 3, paused: false, createdAt: 1728000000000, updatedAt: 1728000000100 } }
 
-  const live = readLiveFacts(undefined, undefined, "s1")
-  assert.equal(live.goalReason, "no-live-agent")
-  assert.equal(live.goal, null)
+  const none = readLiveFacts(undefined, undefined, "s1")
+  assert.equal(none.goalReason, "no-live-agent")
+  assert.equal(none.goal, null)
+  assert.equal(none.live, false)
 
   const withGoal = readLiveFacts(agentsLive, goals, "s1")
   assert.equal(withGoal.goalReason, undefined)
   assert.equal(withGoal.goal.roundsStarted, 3)
-  assert.equal(withGoal.goal.status, "active")
+  assert.equal(withGoal.live, true)
   assert.deepEqual(withGoal.agents, [
     { id: "s1", status: "running" },
     { id: "s2", status: "idle" },
@@ -166,10 +171,41 @@ test("readLiveFacts: goal only for a LIVE agent, honest no-live-agent reason", (
   // a get() that throws means the agent is NOT resolvable — honest degradation
   assert.equal(throwing.goalReason, "no-live-agent")
   assert.equal(throwing.goal, null)
+  assert.equal(throwing.live, false)
 })
 
 test("readLiveFacts tolerates lists that throw (agents count stays zero)", () => {
   const live = readLiveFacts({ get: () => ({ id: "s" }), list: () => { throw new Error("boom") } }, undefined, "s")
   assert.deepEqual(live.agents, [])
   assert.equal(live.runningAgents, 0)
+})
+
+test("isLiveId matches either id shape among registry rows", () => {
+  const rows = [{ id: "session-acb", status: "running" }]
+  assert.equal(isLiveId(rows, "session-acb"), true)
+  assert.equal(isLiveId(rows, "acb"), true)
+  assert.equal(isLiveId(rows, "session-other"), false)
+  assert.equal(isLiveId([], "acb"), false)
+})
+
+test("parseSessionId tolerates junk URLs and keeps well-formed ids", () => {
+  assert.equal(parseSessionId("/api/hive-state/session?id=session-abc"), "session-abc")
+  assert.equal(parseSessionId("/api/hive-state/session"), "")
+  assert.equal(parseSessionId("/api/hive-state/session?id="), "")
+})
+
+test("fetchChildren degrades on missing, throwing, sync and async services", async () => {
+  assert.deepEqual(await fetchChildren(undefined, "session-x"), [])
+  assert.deepEqual(await fetchChildren({}, "session-x"), [])
+  assert.deepEqual(
+    await fetchChildren({ listChildren: () => { throw new Error("boom") } }, "session-x"),
+    [],
+  )
+  const rows = [{ id: "session-c", createdAt: 1, mode: "one-shot" }]
+  assert.deepEqual(await fetchChildren({ listChildren: () => rows }, "session-x"), rows)
+  // async services are awaitable too
+  assert.deepEqual(
+    await fetchChildren({ listChildren: () => Promise.resolve(rows) }, "session-x"),
+    rows,
+  )
 })
