@@ -1,7 +1,15 @@
 #!/usr/bin/env node
 /**
  * berget-models-sync — keep the hand-declared `llm-pi-ai.providers.berget`
- * models block in $DSH_HOME/settings.yaml in sync with Berget's API.
+ * models block in sync with Berget's API.
+ *
+ * Config targets (0.2.x profile era, 2026-09-18): the block lives in the
+ * profile patch layer, which is where the llm-pi-ai override row is declared:
+ *   patch:   $DSH_HOME/profiles/<name>/cordis.patch.yml   (10-space models indent)
+ *   legacy:  $DSH_HOME/settings.yaml                      (6-space, pre-profile dsh)
+ * Every existing target that carries the block is rewritten in place; the
+ * block the file already uses sets the indentation (uniform +4 spaces for
+ * patch files), so hand-edits and the generated block stay congruent.
  *
  * Replaces the manual archaeology of 2026-08/09: one call refreshes ids,
  * context windows, vision capabilities, lifecycle flags, and re-sweeps the
@@ -38,7 +46,7 @@
  * settings.yaml is kept as settings.yaml.bak-<timestamp>.
  */
 
-import { readFile, writeFile, rename, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, rename, mkdir, readdir } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -46,10 +54,38 @@ import { dirname, join } from 'node:path';
 // ── config ────────────────────────────────────────────────────────────────────
 
 const API = process.env.BERGET_API_URL || 'https://api.berget.ai';
-const SETTINGS = join(homedir(), '.dsh', 'settings.yaml');
-const STATE_FILE = join(homedir(), '.dsh', 'berget-credentials.json');
+const DSH_HOME = join(homedir(), '.dsh');
+const STATE_FILE = join(DSH_HOME, 'berget-credentials.json');
 const AUTH_JSON = join(homedir(), '.local', 'share', 'opencode', 'auth.json');
-const PROBE_STATE_FILE = join(homedir(), '.dsh', 'berget-reasoning-probes.json');
+const PROBE_STATE_FILE = join(DSH_HOME, 'berget-reasoning-probes.json');
+
+/**
+ * Where the models block can live, with each shell's exact anchors.
+ * The rendered block is always built at legacy indentation and uniformly
+ * indented by `pad` extra spaces for the patch layer.
+ */
+const TARGET_ANCHORS = {
+  legacy: { start: '\n      models:\n', end: '\nagent-default-model:', pad: '' },
+  patch: { start: '\n        models:\n', end: '\n- id: agent-default-model', pad: '  ' },
+};
+
+/** Every existing config file that carries the models block, kind-tagged. */
+async function discoverTargets() {
+  const candidates = [{ path: join(DSH_HOME, 'settings.yaml'), kind: 'legacy' }];
+  try {
+    for (const n of (await readdir(join(DSH_HOME, 'profiles'))).sort()) {
+      candidates.push({ path: join(DSH_HOME, 'profiles', n, 'cordis.patch.yml'), kind: 'patch' });
+    }
+  } catch {} // no profiles dir — pre-profile dsh
+  const targets = [];
+  for (const c of candidates) {
+    let text;
+    try { text = await readFile(c.path, 'utf8'); } catch { continue; }
+    const a = TARGET_ANCHORS[c.kind];
+    if (text.includes(a.start) && text.includes(a.end)) targets.push({ ...c, ...a });
+  }
+  return targets;
+}
 
 const EFFORT_LADDER = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 // offered (picker-visible) ladder — full wire-verified set, no exotic gaps
@@ -229,7 +265,14 @@ const devLimits = modelsDev?.berget?.models ?? {};
 const ids = [...chatCtx.keys()];
 process.stderr.write(`[berget-models-sync] ${ids.length} chat models on the endpoint\n`);
 
-const settingsText = await readFile(SETTINGS, 'utf8');
+const targets = await discoverTargets();
+if (!targets.length) {
+  console.error('[berget-models-sync] no config carries a berget models block (looked in $DSH_HOME/settings.yaml and $DSH_HOME/profiles/*/cordis.patch.yml) — refusing');
+  process.exit(1);
+}
+process.stderr.write(`[berget-models-sync] targets: ${targets.map((t) => t.path.replace(DSH_HOME, '~/.dsh')).join(', ')}\n`);
+
+const settingsText = await readFile(targets[0].path, 'utf8');
 const prevModels = parsePreviousModels(settingsText);
 const probeState = (await readJson(PROBE_STATE_FILE)) ?? {};
 
@@ -327,8 +370,6 @@ for (const [id] of prevModels) {
   if (!seen.has(id)) changes.push(`- removed ${id} (absent from endpoint)`);
 }
 
-const block = lines.join('\n');
-
 // A non-200/non-400 response says nothing about the selected effort: quota,
 // temporary outages, and transport errors must be retried on a later sync.
 for (const [id, sweep] of sweeps) {
@@ -337,36 +378,45 @@ for (const [id, sweep] of sweeps) {
   }
 }
 
-// default-model safety net
-const dm = settingsText.match(/agent-default-model:\n  provider: \S+\n  model: (\S+)/);
+// default-model safety net — patch (`- id:` row) and legacy (`key:` block) shapes
+const allText = (await Promise.all(targets.map((t) => readFile(t.path, 'utf8')))).join('\n');
+const dm = allText.match(/- id: agent-default-model[\s\S]*?config:\n\s+provider: \S+\n\s+model: (\S+)/)
+  ?? allText.match(/agent-default-model:\n  provider: \S+\n  model: (\S+)/);
 const defaultModel = dm?.[1];
 const defaultLive = seen.has(defaultModel);
 
-// ── write ─────────────────────────────────────────────────────────────────────
-const cur = await readFile(SETTINGS, 'utf8');
-const start = cur.indexOf('\n      models:\n');
-const end = cur.indexOf('\nagent-default-model:');
-if (start < 0 || end < 0 || end < start) {
-  console.error('[berget-models-sync] could not locate the berget models block — refusing to write');
-  process.exit(1);
-}
+// ── write (every target that carries the block) ─────────────────────────────
+let wroteAny = false;
+for (const t of targets) {
+  const cur = await readFile(t.path, 'utf8');
+  const start = cur.indexOf(t.start);
+  const end = cur.indexOf(t.end);
+  if (start < 0 || end < 0 || end < start) {
+    console.error(`[berget-models-sync] could not locate the berget models block in ${t.path} — skipping`);
+    continue;
+  }
 
-const needle = cur.slice(start + 1, end + 1); // includes trailing newline of block
+  const blockText = (t.pad ? lines.map((l) => t.pad + l) : lines).join('\n');
+  const needle = cur.slice(start + 1, end + 1); // includes trailing newline of block
 
-if (needle === block + '\n') {
-  console.log('[berget-models-sync] settings already up to date (no diff).');
-} else {
+  if (needle === blockText + '\n') {
+    console.log(`[berget-models-sync] ${t.path.replace(DSH_HOME, '~/.dsh')} already up to date (no diff).`);
+    continue;
+  }
   if (DRY) {
-    console.log('[berget-models-sync] --dry: would rewrite the berget models block. New block:');
-    console.log(block);
+    console.log(`[berget-models-sync] --dry: would rewrite the berget models block in ${t.path.replace(DSH_HOME, '~/.dsh')}. New block:`);
+    console.log(blockText);
   } else {
-    const next = cur.slice(0, start + 1) + block + '\n' + cur.slice(end + 1);
-    const bak = `${SETTINGS}.bak-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+    const next = cur.slice(0, start + 1) + blockText + '\n' + cur.slice(end + 1);
+    const p = t.path;
+    const bak = `${p}.bak-${new Date().toISOString().replace(/[:.]/g, '-')}`;
     await writeFile(bak, cur, { mode: 0o600 });
-    await rename(await (async () => { const t = SETTINGS + '.tmp.' + process.pid; await writeFile(t, next, { mode: 0o600 }); return t; })(), SETTINGS);
-    console.log(`[berget-models-sync] wrote settings.yaml (backup: ${bak})`);
+    await rename(await (async () => { const tmp = p + '.tmp.' + process.pid; await writeFile(tmp, next, { mode: 0o600 }); return tmp; })(), p);
+    console.log(`[berget-models-sync] wrote ${p.replace(DSH_HOME, '~/.dsh')} (backup: ${bak})`);
+    wroteAny = true;
   }
 }
+if (!DRY && !wroteAny && changes.length) console.warn('[berget-models-sync] changes detected but nothing written (all targets up to date)?');
 
 if (!DRY && sweeps.size) await writeJsonAtomic(PROBE_STATE_FILE, probeState);
 
@@ -383,9 +433,14 @@ if (sweeps.size && !changes.length && !DRY) {
 function parsePreviousModels(txt) {
   const out = new Map();
   if (typeof txt !== 'string' || !txt) return out;
-  const m = txt.match(/\n      models:\n([\s\S]*?)\nagent-default-model:/);
+  // works for both shells: `\n      models:` (legacy 6) and `\n        models:` (patch 8);
+  // end anchor: `\nagent-default-model:` (legacy YAML key) or `\n- id: agent-default-model`
+  // (patch loader row — the id line has NO trailing colon, hence the [:\n] lookahead)
+  const m = txt.match(/\n( *)models:\n([\s\S]*?)\n(?:- id: )?agent-default-model(?=[:\n])/);
   if (!m) return out;
-  const entries = m[1].split(/\n(?=        - id: )/).filter((s) => s.trim());
+  const entryIndent = m[1].length + 2;
+  const entries = m[2].split(new RegExp('\n(?= {' + entryIndent + '}- id: )')).filter((s) => s.trim());
+  const effortsRe = new RegExp('^' + ' '.repeat(entryIndent + 4));
   for (const e of entries) {
     const id = (e.match(/- id: (\S+)/) ?? [])[1];
     if (!id) continue;
@@ -393,7 +448,7 @@ function parsePreviousModels(txt) {
     const maxT = Number((e.match(/maxTokens: (\d+)/) ?? [])[1]) || undefined;
     const vision = /input: \[ text, image \]/.test(e);
     const effortsRaw = e.includes('reasoningEfforts:')
-      ? e.split('reasoningEfforts:\n')[1]?.split('\n').filter((l) => /^            /.test(l)).join('\n')
+      ? e.split('reasoningEfforts:\n')[1]?.split('\n').filter((l) => effortsRe.test(l)).join('\n')
       : undefined;
     const efforts = (effortsRaw ?? '')
       .split('\n').map((l) => l.trim()).filter(Boolean)
