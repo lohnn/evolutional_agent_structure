@@ -49,6 +49,7 @@ import { recordAwakened, isAwakened, decideGate } from "./lib/sessions.js"
 import { autoRegister } from "@hive/dsh-board/lib/board-transitions"
 import { parseCapabilityPersona, renderAgentCordisYml, type CapabilityPersona } from "./lib/persona.js"
 import { resolveCapabilityMaterial } from "./lib/material.js"
+import { optionalService } from "./lib/service-optional.js"
 import {
   resolveModelRoute,
   readPresetModelSpec,
@@ -447,6 +448,7 @@ export function fillBrief(template: string, vars: { dossier: string; summonName:
 
 import { UsageLog } from "./usage-log.js"
 export { UsageLog } from "./usage-log.js"
+export { optionalService } from "./lib/service-optional.js"
 
 export class Evolution extends Service {
   static inject = ["tools", "systemPrompt", "commands", "subagents"]
@@ -1493,7 +1495,12 @@ export class Evolution extends Service {
             // child's task prompt. The coordinator never re-types artifact
             // bodies; misses and lifecycle flags are reported in the result.
             // A dispatch without dream_ids is byte-identical to pre-D3 behavior.
-            const archive = (this.ctx as { dreamArchive?: DreamArchiveLike }).dreamArchive
+            // D3 archive handle — the optional-service read. The enforcing
+            // live host refused the bare property read ("cannot get property
+            // dreamArchive without inject" — W-090's law, caught live in the
+            // token-economy smoke); optionalService reads ctx.get (no inject
+            // requirement) and degrades to undefined for the fs fallback.
+            const archive = optionalService<DreamArchiveLike>(this.ctx, "dreamArchive")
             const dreamResolutions = resolveDreamArtifacts(this.directory, args.dream_ids ? String(args.dream_ids) : undefined, archive)
             const dreamBlock = composeDreamArtifactBlock(dreamResolutions)
             const dreamNote = describeDreamInjection(dreamResolutions)
@@ -1816,9 +1823,7 @@ export class Evolution extends Service {
   postCompactionContext = (): string => {
     let pointers: PreCompactionDreamPointer[] | undefined
     try {
-      const archive = this.ctx.get("dreamArchive") as
-        | { recentPreCompactionDreams?: (limit?: number) => unknown }
-        | undefined
+      const archive = optionalService<{ recentPreCompactionDreams?: (limit?: number) => unknown }>(this.ctx, "dreamArchive")
       const recent = archive?.recentPreCompactionDreams?.(POST_COMPACTION_DREAM_LIMIT)
       if (Array.isArray(recent)) pointers = recent as PreCompactionDreamPointer[]
     } catch {
