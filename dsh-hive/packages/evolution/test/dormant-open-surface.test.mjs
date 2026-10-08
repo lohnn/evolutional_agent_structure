@@ -241,13 +241,14 @@ test("d4: /dream opens the surface — the partition resolves on the same scope,
     signal: AbortSignal.timeout(5000),
   })
   assert.equal(out.kind, "success", `/dream open succeeded (${String(out.text).slice(0, 80)})`)
-  assert.match(String(out.text), /OPEN/)
+  assert.match(String(out.text), /dream surface open/i)
   for (const name of PARTITION) {
     assert.notEqual(ctx.tools.get(name, dormant), undefined, `${name} live after /dream (surface open)`)
   }
   assert.strictEqual(dreamCmdFollowups.length, 1, "exactly one wake followup")
   assert.match(dreamCmdFollowups[0].content[0].text, /dreamtime/)
-  assert.match(dreamCmdFollowups[0].content[0].text, /hive_dream_complete closes this surface automatically/)
+  assert.match(dreamCmdFollowups[0].content[0].text, /live until the dream completes/)
+  assert.match(dreamCmdFollowups[0].content[0].text, /hive_dream_complete closes the surface/)
   // the standing mid-session tools never flicker
   for (const name of STANDING_DREAM) {
     assert.notEqual(ctx.tools.get(name, dormant), undefined, `${name} unaffected by the toggle`)

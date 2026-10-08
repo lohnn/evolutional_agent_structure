@@ -1367,9 +1367,9 @@ export class Evolution extends Service {
                 {
                   type: "text",
                   text:
-                    `[HIVE /dream] Dream surface OPEN for this session — the eight dreamtime tools are live in your ` +
-                    `toolset (the dreamtime skill carries the workflow: harvest, begin, compress, complete). ` +
-                    `hive_dream_complete closes this surface automatically; /dream is only the manual release.`,
+                    `[HIVE /dream] Dream surface open: the dreamtime tools are live until the dream completes ` +
+                    `— start with the dreamtime skill. hive_dream_complete closes the surface; ` +
+                    `/dream releases it early or summons it again.`,
                 },
               ],
               source: { kind: "user" },
@@ -1377,7 +1377,7 @@ export class Evolution extends Service {
           )
           return {
             kind: "success" as const,
-            text: "/dream: dream surface OPEN — the dreamtime tools are live for this session; hive_dream_complete sheds them automatically, /dream is the manual release.",
+            text: "/dream: dream surface open — the dreamtime tools are live until the dream completes; hive_dream_complete closes the surface, /dream releases it early or summons it again.",
           }
         },
       })
