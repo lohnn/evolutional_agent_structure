@@ -764,7 +764,42 @@ export class Evolution extends Service {
         }
         map.delete(sessionId)
       }
+      this.dreamSurfaceAgents.delete(sessionId)
     })
+
+    // ── Dream-surface auto-close (TOKEN-ECONOMY D4 UX refinement) ────────────
+    // hive_dream_complete (the tools package) emits `hive/dream-complete` when
+    // a dream completes; the summon-scoped surface has no purpose left, so the
+    // session's standing dreamtime partition re-masks NOW — no second /dream
+    // keystroke. The pair lives inside THIS plugin family, so the event
+    // catalog is pinned by cross-package source scans in
+    // test/event-catalog-guard.test.mjs (listener here ⇔ emitter in tools),
+    // never assumed to be a dsh-runtime event. Best-effort by construction:
+    // /dream stored the session's Agent at open; a resume before completion
+    // leaves no entry (the gate's re-publication re-mask is the safety net),
+    // and the /dream close branch stays the manual release.
+    // The cast is the plugin-internal contract: `hive/dream-complete` is a
+    // custom hive/* event (same family as the emits of hive/tick above), not a
+    // dsh-runtime event — the Events keyof typing is for runtime events only,
+    // and the catalog guard's cross-package pair test pins both sides.
+    ;(ctx.on as unknown as (event: string, listener: (payload: unknown) => undefined) => unknown)(
+      "hive/dream-complete",
+      (payload: unknown): undefined => {
+        try {
+          const sessionId =
+            typeof payload === "string" ? payload : String((payload as { sessionId?: unknown } | undefined)?.sessionId ?? "")
+          const agent = this.dreamSurfaceAgents.get(sessionId)
+          if (!agent) return undefined
+          this.dreamSurfaceAgents.delete(sessionId)
+          if (this.standingDreamRestrictions.get(sessionId) === undefined) {
+            this.applyStandingRestrictions(sessionId, agent)
+          }
+        } catch {
+          // the manual /dream close remains the fallback for every failure
+        }
+        return undefined
+      },
+    )
 
     // ── Commands (command-summoned lifecycle tools — the WI-037 pattern) ─────
     // dsh commands are MODEL-INVISIBLE by architecture (W-048): a handler runs
@@ -1270,10 +1305,14 @@ export class Evolution extends Service {
       // The dream-surface TOGGLE for the awakened coordinator. The dreamtime
       // partition (DREAMTIME_SUMMONED_TOOLS) is RESTRICTED from the standing
       // surface (the gate and the flip apply it); /dream lifts it for the
-      // dream session and /dream again re-applies. Commands are model-
-      // invisible (W-048), so the toggle stays user-owned — the followup
-      // carries the exact "run /dream again to close" instruction the
-      // coordinator relays when the dream completes.
+      // dream session.
+      // The surface CLOSES ITSELF when a dream completes: the tools package's
+      // hive_dream_complete emits `hive/dream-complete` and the listener below
+      // re-applies the standing mask (post-smoke UX refinement — the manual
+      // second keystroke was ceremony). /dream keeps its close branch as the
+      // manual release (and re-open for a second dream); cold-resumed
+      // mid-dream sessions rely on the gate's re-publication re-mask.
+      // Commands are model-invisible (W-048).
       const d7 = ctx.commands.register({
         name: "dream",
         description: "Open (or close) the dream surface: lift (or re-apply) the standing restriction over the dreamtime tools for this awakened session.",
@@ -1295,6 +1334,7 @@ export class Evolution extends Service {
             // Surface already OPEN (or never masked — e.g. installed without
             // the dream plugins): treat as close-if-openable. Re-applying the
             // mask keeps the toggle total and idempotent.
+            this.dreamSurfaceAgents.delete(sessionId)
             this.applyStandingRestrictions(sessionId, inv.agent)
             const nowOn = this.standingDreamRestrictions.get(sessionId)
             if (nowOn === undefined) {
@@ -1316,6 +1356,10 @@ export class Evolution extends Service {
             // a scoped world that already unwound — the lift is then a no-op
           }
           this.standingDreamRestrictions.delete(sessionId)
+          this.dreamSurfaceAgents.set(sessionId, inv.agent)
+          // Agent-experience diet: the toolset change is self-evident to the
+          // model (the tools ping), so the followup carries intent, not an
+          // inventory.
           inv.agent?.followup?.(
             createMessage({
               role: "user",
@@ -1323,11 +1367,9 @@ export class Evolution extends Service {
                 {
                   type: "text",
                   text:
-                    `[HIVE /dream] The dream surface is OPEN for this session. The dreamtime tools are live now: ` +
-                    `hive_dream_begin, hive_dream_harvest, hive_dream_artifact_create, hive_dream_complete, ` +
-                    `hive_dream_supersede, hive_dream_mark_stale, hive_dream_detect_duplicates, hive_painpoints_harvest. ` +
-                    `Run dreamtime (the dreamtime skill) now. When the dream closes — hive_dream_complete called — ` +
-                    `finish up and tell the user to run /dream again so the standing surface sheds these tools.`,
+                    `[HIVE /dream] Dream surface OPEN for this session — the eight dreamtime tools are live in your ` +
+                    `toolset (the dreamtime skill carries the workflow: harvest, begin, compress, complete). ` +
+                    `hive_dream_complete closes this surface automatically; /dream is only the manual release.`,
                 },
               ],
               source: { kind: "user" },
@@ -1335,7 +1377,7 @@ export class Evolution extends Service {
           )
           return {
             kind: "success" as const,
-            text: "/dream: dream surface OPEN — the dreamtime tools are live for this session and the coordinator has been told to run dreamtime. Run /dream again after the dream closes to shed the surface.",
+            text: "/dream: dream surface OPEN — the dreamtime tools are live for this session; hive_dream_complete sheds them automatically, /dream is the manual release.",
           }
         },
       })
@@ -1846,6 +1888,17 @@ export class Evolution extends Service {
   // scoped world), so a mid-dream cold-resume re-masks — rerun /dream; the
   // dream state lives on disk. agent/disposed cleans up like the others.
   private standingDreamRestrictions = new Map<string, () => void>()
+
+  /**
+   * Agents holding an OPEN dream surface (D4 auto-close): /dream stores the
+   * agent when it lifts the restriction, and the `hive/dream-complete` event
+   * (emitted by the tools package's hive_dream_complete) uses it to re-apply
+   * the standing mask WITHOUT a second /dream keystroke. Pruned on agent
+   * disposal and on every manual close; a resume between open and complete
+   * leaves no entry here — the gate's re-publication re-mask is the safety
+   * net, and /dream stays the manual release.
+   */
+  private dreamSurfaceAgents = new Map<string, Agent>()
 
   /**
    * Apply (or re-apply) the standing restriction for an awakened session:

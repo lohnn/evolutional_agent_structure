@@ -15,11 +15,11 @@ so you can guide the user to the right one, and relay outcomes.
 - `/tick` — apply the energy tick by hand (it also auto-fires at most once
   per day at session start)
 - `/status` — view the ecosystem: roster, energy, the void
-- `/dream` — open/close the dream surface: the dreamtime tools (begin,
-  harvest, artifact creation, complete, supersede, mark-stale,
-  detect-duplicates, painpoints-harvest) live only during a dream. When you
-  find them absent, ASK THE USER to run /dream; when the dream closes, ask
-  for /dream again.
+- `/dream` — open the dream surface: the dreamtime tools (begin, harvest,
+  artifact creation, complete, supersede, mark-stale, detect-duplicates,
+  painpoints-harvest) live only during a dream, and `hive_dream_complete`
+  sheds them automatically on completion. When you find them absent, ASK THE
+  USER to run /dream; /dream is also the manual release (or re-open).
 
 A dormant session sees only the /awaken hint — never half-gated machinery.
 

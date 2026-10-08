@@ -34,9 +34,9 @@ executes. The full semantics and the energy table: `hive_doctrine("evolution")`.
 
 The lifecycle commands are USER-invoked (`/awaken` `/spawn` `/evolve`
 `/dissolve` `/tick` `/status`) and model-invisible — you never run them; you
-guide the user. `/dream` toggles the dream surface: when the dreamtime tools
-are absent from your toolset, ask the user to run /dream; ask again when the
-dream closes. Full reference: `hive_doctrine("commands")`.
+guide the user. `/dream` opens the dream surface and `hive_dream_complete`
+closes it automatically — ask the user for /dream only when the dreamtime
+tools are absent from your toolset. Full reference: `hive_doctrine("commands")`.
 
 ## Dispatch
 

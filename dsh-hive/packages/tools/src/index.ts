@@ -550,6 +550,30 @@ export function apply(ctx: DreamToolsCtx) {
             log("error", "[dream_complete] board promote failed", { err: err instanceof Error ? err.message : String(err), dreamId, caller })
           }
         }
+        // ── Dream-surface auto-close (D4 UX refinement, post-smoke) ──────────
+        // The dream is COMPLETE — the summon-scoped tools have no purpose
+        // left, so the coordinator's standing dreamtime partition re-masks
+        // NOW, without a second /dream keystroke. Last and best-effort: the
+        // dream has already completed and archived above. The listener side
+        // lives in @hive/dsh-evolution (which owns the surface state) and the
+        // pair is pinned by evolution's event-catalog guard; /dream's close
+        // branch stays as the manual release.
+        try {
+          const { sessionID } = resolveCaller(exec)
+          // Custom plugin-internal event (the evolution side listens and
+          // re-masks the session surface): not in the runtime Events keyof
+          // map, so the emit binds through a cast — the pair is pinned by
+          // evolution's event-catalog guard.
+          ;(ctx as unknown as { emit: (event: string, payload: unknown) => void }).emit(
+            "hive/dream-complete",
+            sessionID,
+          )
+          lines.push("  Surface: the dreamtime partition sheds on this session automatically (dream surface closed; /dream remains the manual release and re-open).")
+        } catch (err: unknown) {
+          log("info", "[dream_complete] surface auto-close event not delivered", {
+            err: err instanceof Error ? err.message : String(err),
+          })
+        }
         return lines.join("\n")
       },
     }),

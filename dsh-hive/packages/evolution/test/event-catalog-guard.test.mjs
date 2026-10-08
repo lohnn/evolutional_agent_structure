@@ -47,6 +47,12 @@ const LISTENED_EVENTS_ALLOWLIST = ["agent/created", "agent/disposed"]
 // methods' `this.ctx.on(...)`.
 const LISTENER_RE = /(?<![\w.$])(?:this\.)?ctx\.on\(\s*(["'])([^"']+)\1/g
 
+// The CASTED-call form: a plugin-internal custom event is not in the runtime
+// Events keyof map, so the listener binds through a type cast —
+// `(ctx.on as unknown as FN)(<name>, ...)`. The contract still deserves
+// extraction: the cast changes the CALL SYNTAX, not the contract.
+const CASTED_LISTENER_RE = /(?<![\w.$])(?:this\.)?ctx\.on as unknown as [^\n]*?\)\(\s*(["'])([^"']+)\1/g
+
 function collectListenedEvents() {
   const relFiles = [
     "index.ts",
@@ -60,6 +66,7 @@ function collectListenedEvents() {
   for (const rel of relFiles) {
     const text = fs.readFileSync(path.join(SRC_DIR, rel), "utf8")
     for (const m of text.matchAll(LISTENER_RE)) names.add(m[2])
+    for (const m of text.matchAll(CASTED_LISTENER_RE)) names.add(m[2])
   }
   return { relFiles, names: [...names].sort() }
 }
@@ -75,7 +82,13 @@ test("every ctx.on listener name is an allowlisted dsh runtime event", () => {
     names.length >= 1,
     `no ctx.on listeners extracted from ${relFiles.join(", ")} — the extraction regex or source layout changed; fix the guard, do not delete it`
   )
-  const unexpected = names.filter((n) => !LISTENED_EVENTS_ALLOWLIST.includes(n))
+  // Plugin-INTERNAL pairs (listener here ⇔ emitter in a sibling @hive
+  // package) are exempt from the RUNTIME allowlist — but only because the
+  // pair test below pins both sides; a name in PLUGIN_INTERNAL_EVENT_PAIRS
+  // without a live emitter partner still fails this file.
+  const unexpected = names.filter(
+    (n) => !LISTENED_EVENTS_ALLOWLIST.includes(n) && !PLUGIN_INTERNAL_EVENT_PAIRS.has(n)
+  )
   assert.deepEqual(
     unexpected,
     [],
@@ -83,6 +96,38 @@ test("every ctx.on listener name is an allowlisted dsh runtime event", () => {
       `Allowlist entries must exist as published events in the dsh runtime catalog for the pinned version; ` +
       `custom ctx.emit() hive/* names never belong there (see the allowlist comment).`
   )
+})
+
+// Plugin-internal event pairs: listener name → the @hive package that must
+// emit it. These are NOT dsh runtime events (clause (b) of the allowlist
+// comment) and never belong in LISTENED_EVENTS_ALLOWLIST; instead, BOTH sides
+// of the contract are pinned by source scan here — the phantom-incident
+// protection made structural: a listener without an emitter (or an emitter
+// whose listener was removed) is a one-sided contract and fails this file.
+const PLUGIN_INTERNAL_EVENT_PAIRS = new Map([["hive/dream-complete", "../../tools/src/index.ts"]])
+
+test("plugin-internal event pairs are two-sided: every internal listener has a live emitter partner", () => {
+  const { names } = collectListenedEvents()
+  for (const [name, emitterRelPath] of PLUGIN_INTERNAL_EVENT_PAIRS) {
+    assert.ok(
+      names.includes(name),
+      `pair contract drift: "${name}" is registered as a plugin-internal pair but no listener parsed from src — remove it from PLUGIN_INTERNAL_EVENT_PAIRS or restore the listener`
+    )
+    const emitterFile = path.resolve(SRC_DIR, emitterRelPath)
+    assert.ok(fs.existsSync(emitterFile), `emitter partner file missing: ${emitterFile}`)
+    const emitterSrc = fs.readFileSync(emitterFile, "utf8")
+    // Both call forms: the plain `ctx.emit(<name>` and the casted
+    // `(... as unknown as F).emit(\n  <name>` — same contract, either syntax.
+    // Both call forms count: plain `ctx.emit(<name>` and the casted
+    // `(... as unknown as F).emit(\n  <name>` — the contract is the same.
+    const emitRe = /emit\(\s*(["'])hive\/dream-complete\1/
+    assert.ok(
+      emitRe.test(emitterSrc),
+      `one-sided contract: evolution listens on "${name}" but ${emitterRelPath} never emit()s it — ` +
+        `the auto-close (or whatever the pair drives) would sit dead live while the suite stays green, ` +
+        `the exact agent/session-start incident class this file exists to prevent`
+    )
+  }
 })
 
 test("the allowlist itself carries only runtime events, never custom hive/* emissions", () => {

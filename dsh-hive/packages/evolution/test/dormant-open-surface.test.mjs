@@ -247,7 +247,7 @@ test("d4: /dream opens the surface — the partition resolves on the same scope,
   }
   assert.strictEqual(dreamCmdFollowups.length, 1, "exactly one wake followup")
   assert.match(dreamCmdFollowups[0].content[0].text, /dreamtime/)
-  assert.match(dreamCmdFollowups[0].content[0].text, /\/dream again/)
+  assert.match(dreamCmdFollowups[0].content[0].text, /hive_dream_complete closes this surface automatically/)
   // the standing mid-session tools never flicker
   for (const name of STANDING_DREAM) {
     assert.notEqual(ctx.tools.get(name, dormant), undefined, `${name} unaffected by the toggle`)
@@ -270,6 +270,57 @@ test("d4: /dream closes the surface again — the partition re-restricts, rank k
   for (const name of STANDING_DREAM) {
     assert.notEqual(ctx.tools.get(name, dormant), undefined, `${name} still standing`)
   }
+})
+
+test("d4b: hive_dream_complete auto-closes the surface — no second /dream keystroke", async () => {
+  // The d4 close test re-masked the surface; reopen it — /dream stores the
+  // session's agent for the auto-close seam when it lifts the restriction.
+  const out = await dreamCmd.handler({
+    rawInput: "",
+    agent: dormant,
+    commandId: "c_wi066_dream_reopen",
+    attachments: [],
+    signal: AbortSignal.timeout(5000),
+  })
+  assert.equal(out.kind, "success", `reopen succeeded (${String(out.text).slice(0, 80)})`)
+  for (const name of PARTITION) {
+    assert.notEqual(ctx.tools.get(name, dormant), undefined, `${name} live again after reopen`)
+  }
+  // A REAL active dream via the dream-archive writer (the single-active
+  // invariant: exactly one), through the package's compiled lib surface.
+  fs.mkdirSync(path.join(FIX, ".opencode/dreams/active"), { recursive: true })
+  fs.mkdirSync(path.join(FIX, ".opencode/dreams/history"), { recursive: true })
+  const { beginDream } = await import("../../dream-archive/dist/lib/dream-state.js")
+  const { dreamId } = beginDream(FIX, {
+    depth: 2,
+    intention: "d4b auto-close fixture",
+    intention_type: "CONSOLIDATION",
+    entry_time: "2026-10-08T08:00:00.000Z",
+    project_context: "dormant-open-surface fixture",
+    context_signals: { contradictions: 0, repetitions_detected: false, coherence: "HIGH", threads_active: 1 },
+    retain_high: [],
+    retain_low: [],
+  })
+  const complete = ctx.tools.get("hive_dream_complete", dormant)
+  assert.ok(complete, "hive_dream_complete resolvable while the surface is open")
+  const res = String(
+    await complete.execute({ artifact_ids: "" }, { agent: dormant, signal: AbortSignal.timeout(5000) }),
+  )
+  assert.match(res, new RegExp(`Dream ${dreamId} completed`))
+  assert.match(res, /automatically/, "the completion receipt carries the auto-close surface line")
+  // THE CONTRACT: the tools shed WITHOUT a second /dream.
+  for (const name of PARTITION) {
+    assert.equal(ctx.tools.get(name, dormant), undefined, `${name} auto-shed after hive_dream_complete`)
+  }
+  // The standing surface never flickers — rescue/queries stay put.
+  for (const name of STANDING_DREAM) {
+    assert.notEqual(ctx.tools.get(name, dormant), undefined, `${name} still standing after auto-close`)
+  }
+  // Completion semantics unchanged by the seam: archived to history.
+  assert.ok(
+    fs.existsSync(path.join(FIX, ".opencode/dreams/history", `${dreamId}.yaml`)),
+    "completed dream archived to history",
+  )
 })
 
 test("d4: /dream is awakened-only and top-level only (gate + depth guard)", async () => {
