@@ -17,6 +17,7 @@ import { CSS } from "./render.js"
 import { attachEngine } from "./tab-engine.js"
 import { DRAWER_CSS } from "./item-drawer.js"
 import { startFaviconDriver } from "./icon-driver.js"
+import { HIVE_STATE_CSS, makeHiveStateDock } from "./hive-state.js"
 
 /**
  * Shell-safety overrides for the ported viewer CSS. Authored (slice 3), not a
@@ -91,11 +92,14 @@ function iconSvg(size: number): string {
  */
 ;(globalThis as unknown as Record<string, unknown>).__BOARD_ENGINE = {
   CSS,
-  CSS_OVERRIDES: CSS_OVERRIDES + DRAWER_CSS,
+  CSS_OVERRIDES: CSS_OVERRIDES + DRAWER_CSS + HIVE_STATE_CSS,
   SHELL_MARKUP,
   ICON_SVG: iconSvg,
   attachEngine,
   startFaviconDriver,
+  // (WI-083 the HIVE-state dock component factory — the wrapper registers it
+  // as a conversation.composer.dock occupant with the module-table React.)
+  makeHiveStateDock,
   // (slice 3D: the 3B stub attachSessionSurface is RESOLVED — removed. The
   // real feed shipped as payload.activity; the minify-guard asserts the feed's
   // surviving property names instead of a placeholder.)

@@ -40,9 +40,9 @@ const TARBALL_FILE = (name) => `file:${require("node:path").join(__dirname, name
 
 const TARBALLS = {
   "@hive/dsh-agents": TARBALL_FILE("hive-dsh-agents-0.0.2.tgz"),
-  "@hive/dsh-board": TARBALL_FILE("hive-dsh-board-0.1.1.tgz"),
+  "@hive/dsh-board": TARBALL_FILE("hive-dsh-board-0.1.2.tgz"),
   "@hive/dsh-dream-archive": TARBALL_FILE("hive-dsh-dream-archive-0.0.1.tgz"),
-  "@hive/dsh-evolution": TARBALL_FILE("hive-dsh-evolution-0.0.2.tgz"),
+  "@hive/dsh-evolution": TARBALL_FILE("hive-dsh-evolution-0.0.3.tgz"),
   "@hive/dsh-hivemind": TARBALL_FILE("hive-dsh-hivemind-0.0.2.tgz"),
   "@hive/dsh-painpoints": TARBALL_FILE("hive-dsh-painpoints-0.0.2.tgz"),
   "@hive/dsh-tools": TARBALL_FILE("hive-dsh-tools-0.0.2.tgz"),

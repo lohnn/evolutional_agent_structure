@@ -46,6 +46,7 @@ import { defineTool, type ParameterSchemaSpec } from "@deepseek-ai/dsh-tools"
 import type { Agent } from "@deepseek-ai/dsh-agent"
 import { COORDINATOR_DOCTRINE, DORMANT_NOTICE, AWAKEN_BRIEF, REAWAKEN_BRIEF, CAPABILITY_STANDING, DOCTRINE_CHAPTERS, DOCTRINE_CHAPTER_TOPICS } from "./assets.js"
 import { recordAwakened, isAwakened, decideGate } from "./lib/sessions.js"
+import { registerHiveStateRoute } from "./lib/hive-state-route.js"
 import { autoRegister } from "@hive/dsh-board/lib/board-transitions"
 import { parseCapabilityPersona, renderAgentCordisYml, type CapabilityPersona } from "./lib/persona.js"
 import { resolveCapabilityMaterial } from "./lib/material.js"
@@ -1750,6 +1751,15 @@ export class Evolution extends Service {
       )
       return () => doctrine()
     })
+
+    // ── WI-083 — HIVE-state overlay route (read-only) ────────────────────────
+    // `GET /api/hive-state/session?id=<sessionId>`: the awaken/usage/dream
+    // ledger replay for one session, plus live goal + agent facts where the
+    // session is live. Registration is the W-090 wait form (webless profiles
+    // degrade); the route is read-only over the ledgers evolution already
+    // owns — no new write path, no auth posture change (board-tab contract
+    // §5a precedent). See lib/hive-state.ts + lib/hive-state-route.ts.
+    registerHiveStateRoute(ctx, this.directory)
   }
 
   /**
