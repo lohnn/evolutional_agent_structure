@@ -343,14 +343,14 @@ for (const id of ids) {
   if (rich?.lifecycle_status && rich.lifecycle_status !== 'active') head.push(`          # lifecycle: ${rich.lifecycle_status}`);
   if (down) head.push('          # status.up=false at sync time — endpoint serving errors');
 
-  // efforts
+  // efforts — canonical render, never raw pass-through: re-rendering the
+  // levels parsed from the file through effortMap (with their previous
+  // outcomes as 'ok') keeps the block byte-stable across runs with probe
+  // skipping (raw text + pad would inflate the indent by 2 on every run)
   const sweep = sweeps.get(id);
   const prevLevels = prevModels.get(id)?.efforts;
-  const mapText = NO_PROBE
-    ? (prevModels.get(id)?.effortsRaw ?? undefined)
-    : sweep
-      ? effortMap(sweep, id, prevLevels)
-      : prevModels.get(id)?.effortsRaw;
+  const fromPrev = Object.fromEntries((prevLevels ?? []).map((l) => [l, 'ok']));
+  const mapText = effortMap(sweep ?? fromPrev, id, prevLevels);
   if (k.note) head.push(`          # ${k.note}`);
   if (mapText) head.push(`          reasoningEfforts:\n${mapText}`);
   if (!NO_PROBE && sweep && isConclusiveSweep(sweep) && !effortMap(sweep, id) && !k.omitAllEfforts && !k.note) {
@@ -396,7 +396,10 @@ for (const t of targets) {
     continue;
   }
 
-  const blockText = (t.pad ? lines.map((l) => t.pad + l) : lines).join('\n');
+  // pad per LINE, not per element: effort-map entries are multiline strings and
+  // pad must reach their continuation lines too (otherwise a patch-layer block
+  // renders 12/12 sibling keys → parses as reasoningEfforts: null + strays)
+  const blockText = (t.pad ? lines.flatMap((l) => l.split('\n')).map((l) => t.pad + l) : lines).join('\n');
   const needle = cur.slice(start + 1, end + 1); // includes trailing newline of block
 
   if (needle === blockText + '\n') {
