@@ -22,6 +22,7 @@ import { morph } from "./morph.js"
 import { renderBoardSection, boardControlsHtml } from "./render.js"
 import { refreshBoardControls, setupBoardControls } from "./filter.js"
 import { bindItemDrawer } from "./item-drawer.js"
+import { bindSessionOpen } from "./session-open.js"
 import { stampPanelMark } from "./icon-driver.js"
 import type { BoardState } from "./data/types.js"
 import type { WorkItem as ViewWorkItem } from "./data/workitems.js"
@@ -306,6 +307,7 @@ export function attachEngine(ctx: {
   void freshSha
   setupBoardControls() // module-singleton in filter.ts; binds once per document
   bindItemDrawer() // document-level delegation; binds once per boot (slice 3b)
+  bindSessionOpen(ctx) // WI-087 — W-090 WAIT for 'sessions'+'uiWorkspace'; never load-bearing
   if (!intervalStarted) {
     intervalStarted = true
     // 15 s cadence per the old viewer; ctx.interval comes from the 'timer'

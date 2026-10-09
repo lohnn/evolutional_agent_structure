@@ -298,6 +298,48 @@ Two build facts pinned here because they were DISCOVERED, not assumed:
     fragments survive minify.
 - The bundle route is NOT ours (clientModules owns it, §3.1).
 
+## 4b. WI-087 — the connected-session affordance (established 2026-10-09, dsh 0.2.0-rc.2 live)
+
+The drawer's "connected session" section (websrc/session-open.ts + the pure model
+src/lib/session-open.ts) IS the revisit of the slice-3b dead-`Open ↗` posture. Its route-model
+baseline is pinned here with evidence, because future slices will drag against it:
+
+- **dsh web has NO per-session URL.** The only app entry is the exact dist root `/`
+  (dsh-host-frontend-static serveStatic: index at root/configured-index only, other paths are
+  static-file lookups → 404). No client or runtime module reads `location.search`/`hash`/
+  `window.location` for app state — swept across all 498 reachable js files of the
+  0.2.0-rc.2 web-app bundle (only origin reads for account sign-in + PDF.js internals).
+  I-155's finding stays true as a URL contract; do NOT invent `?session=` links.
+- **Auth/token mechanics (W-075 refined, code-read in dsh-client-connection):** the launch
+  token is a random 32B base64url minted per activation (rotates EVERY boot); `GET /?token=`
+  is a single-use exchange → 303 `./` + a 30-day `HttpOnly SameSite=Strict Path=/` cookie
+  signed by a DURABLE secret (credential record `client-connection:browser-session`,
+  `/root/.dsh/.credentials.yaml`). Restarts therefore do NOT log cookied browsers out
+  (`services/dsh-web.toml` documents the same). Board links NEVER bake `?token=`.
+- **The in-app open seam:** the client `uiWorkspace` service (dsh-client-ui-workspace,
+  leaf of `super(ctx, "uiWorkspace")` → `ctx.reflect.provide`) exposes
+  `openSession(sessionId)` — the exact action a sidebar session-row click runs
+  (`replaceMain` → retain → persisted selection → `layout.selectPanel(null)` reveals the
+  conversation). The board grabs it in the W-090 WAIT form `ctx.inject(['sessions','uiWorkspace'], …)`
+  inside apply (never entity-load-bearing: the wait simply never fires on compositions
+  without them, and the affordance degrades). The `sessions` service
+  (dsh-api-session-controller client, `ctx.reflect.provide("sessions")`) supplies the live
+  catalog (`list` snapshot store: byId rows with `displayTitle`/`running`) — the parity
+  title source, client-side, NO host-half change (I-155's host sessionTitle/readTitle
+  surface reaches the client as these catalog rows).
+- **The two-harness discriminator:** the one shared board store carries opencode-era
+  `ses_…` owner rows AND dsh `session-…` rows. Only dsh shapes
+  (`/^(?:session-[0-9]{1,12}|session-[0-9a-zA-Z-]{4,64})$/` — both dsh-session mint styles)
+  afford; old-harness ids render NO affordance (no dead button, verified live: WI-001).
+  Absent-from-catalog ids render "not in the live session list (ended, or from the other
+  harness)" + copy-id, never an Open button.
+- **Unknown-id husbandry:** `openSession` on an unknown id would land the main panel in the
+  conversation's loading-error state — the catalog-presence check mirrors
+  `uiWorkspace.restoreSelection` and refuses first (row stays honest instead).
+- Known transient: on a COLD profile (first seconds of a fresh boot) the catalog may still
+  be loading; the row then reads "session catalog still loading" and gains the Open button
+  when the catalog arrives (subscription rebuild). Warm pages have the catalog immediately.
+
 ## 5. AUTH + EXPOSURE — new pin, decision needed (load-bearing for slice 2)
 
 Verified live, twice (loopback 4501 **and** relay 0.0.0.0:3080):

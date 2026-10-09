@@ -25,8 +25,15 @@
  *    intercepted in the same delegation and fall back to opening THIS drawer
  *    for the same item — no invented session deep-links until dsh exposes the
  *    surface (the session-stub posture of the favicon driver, mirrored here).
+ *    — WI-087 UPDATE: the DEPTH view now carries the real affordance. dsh web
+ *    still has no per-session URL, but the client `uiWorkspace.openSession`
+ *    flow (dsh 0.2.0-rc.2, the sidebar session-row click's own action) opens
+ *    the exact connected session in-app; the section below is built by
+ *    ./session-open.ts and degrades honestly (no dead Open button) when the
+ *    session is not in the live catalog or the service composition differs.
  */
 import { presentTitle, RAW_TITLE_CHIP } from "./title-pass.js"
+import { renderSessionSection } from "./session-open.js"
 
 export const ITEM_URL = "/api/hive-board/item"
 const DRAWER_ID = "hvb-drawer"
@@ -252,6 +259,14 @@ function renderItem(drawer: HTMLElement, item: NonNullable<ItemPayload["item"]>,
   if (item.dream_id) meta.appendChild(faceLine("dream", item.dream_id))
   drawer.appendChild(meta)
 
+  // WI-087 — the connected-session affordance: the exact dsh session(s)
+  // behind owner_session/group_id/released_sessions (dsh-shaped ids only),
+  // opened IN-APP via uiWorkspace.openSession when present; honestly
+  // catalog-less rows otherwise. Built by ./session-open.ts (pure model in
+  // ../src/lib/session-open.ts). onOpened closes the drawer — after a
+  // successful open the main panel is already on the session's conversation.
+  renderSessionSection(drawer, item, closeDrawer)
+
   const problems = item.problems ?? []
   if (problems.length > 0) {
     const prow = el("div", "hvb-problems")
@@ -351,4 +366,18 @@ export const DRAWER_CSS = `
 #hvb-drawer .hvb-drawer-foot{margin-top:14px}
 #hvb-drawer .meta,#hvb-drawer .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 #hvb-drawer .meta{color:#8b949e;font-size:11px}
+/* ── WI-087 connected-session affordance (same palette, drawer-scoped) ── */
+#hvb-drawer .hvb-session-open{margin:10px 0;padding:8px 10px;background:#0d1117;border:1px solid #21262d;border-radius:8px}
+#hvb-drawer .hvb-session-open .hvb-section-title{margin:0 0 6px}
+#hvb-drawer .hvb-session-row{display:flex;gap:8px;align-items:center;margin:2px 0;flex-wrap:wrap}
+#hvb-drawer .hvb-session-role{color:#8b949e;font-size:11px;flex:0 0 auto}
+#hvb-drawer .hvb-session-open-btn{background:#21262d;color:#3fb950;border:1px solid #30363d;border-radius:6px;padding:1px 8px;font-size:11px;cursor:pointer;flex:0 0 auto}
+#hvb-drawer .hvb-session-open-btn:hover{border-color:#3fb950;color:#56d364}
+#hvb-drawer .hvb-session-copy{background:#21262d;color:#8b949e;border:1px solid #30363d;border-radius:6px;padding:1px 6px;font-size:11px;cursor:pointer;flex:0 0 auto}
+#hvb-drawer .hvb-session-copy:hover{color:#e6edf3;border-color:#8b949e}
+#hvb-drawer .hvb-session-title{color:#e6edf3;font-size:11.5px;overflow-wrap:anywhere}
+#hvb-drawer .hvb-session-note{color:#8b949e;font-size:11px;overflow-wrap:anywhere}
+#hvb-drawer .hvb-session-note[data-flash="1"]{color:#3fb950}
+#hvb-drawer .hvb-session-dot{flex:0 0 auto;width:7px;height:7px;border-radius:50%;background:#3fb950}
+@media (prefers-reduced-motion: reduce){#hvb-drawer .hvb-session-dot{animation:none}}
 `
