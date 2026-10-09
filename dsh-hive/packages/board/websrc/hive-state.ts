@@ -59,6 +59,22 @@ import {
 } from "../src/lib/hive-state-view.js"
 import type { HiveStatePayload, SessionRowLike, SessionListLike, TimelineEvent } from "../src/lib/hive-state-view.js"
 
+/** The light card face from /api/hive-board/session-item (board store read). */
+export interface BoardItemCard {
+  id: string
+  title: string
+  status: string
+  priority: string
+}
+
+async function fetchItemCard(sessionId: string): Promise<BoardItemCard | null> {
+  const res = await fetch(`/api/hive-board/session-item?id=${encodeURIComponent(sessionId)}`, { cache: "no-store" })
+  if (!res.ok) throw new Error(`route ${res.status}`)
+  const body = (await res.json()) as { ok?: boolean; item?: BoardItemCard | null }
+  if (body?.ok === false) throw new Error("bad request")
+  return body.item ?? null
+}
+
 async function fetchHiveState(sessionId: string): Promise<HiveStatePayload> {
   const res = await fetch(`${HIVE_STATE_URL}?id=${encodeURIComponent(sessionId)}`, { cache: "no-store" })
   if (!res.ok) throw new Error(`route ${res.status}`)
@@ -100,6 +116,17 @@ export const HIVE_STATE_CSS = `
 .hvs-panel[data-live="1"] .hvs-stage .hvs-now{color:var(--dsw-alias-state-success-primary)}
 .hvs-panel .hvs-stage .hvs-dur{color:var(--dsw-alias-state-business-primary);font-variant-numeric:tabular-nums}
 .hvs-panel .hvs-stage .hvs-sig{margin-left:auto;color:var(--dsw-alias-label-tertiary);font-size:10.5px}
+.hvs-panel .hvs-card-wrap{padding:6px 10px;border-bottom:1px solid var(--dsw-alias-border-l1)}
+.hvs-panel .hvs-card{border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:6px 8px;cursor:pointer;
+  background:var(--dsw-alias-tooltip-key-bg)}
+.hvs-panel .hvs-card:hover{border-color:var(--dsw-alias-border-l3);background:var(--dsw-alias-interactive-bg-hover)}
+.hvs-panel .hvs-card-top{display:flex;gap:8px;align-items:baseline}
+.hvs-panel .hvs-card-id{font-weight:600;color:var(--dsw-alias-state-business-primary);font-variant-numeric:tabular-nums}
+.hvs-panel .hvs-card-status{color:var(--dsw-alias-label-secondary);font-size:10px}
+.hvs-panel .hvs-card-prio{margin-left:auto;color:var(--dsw-alias-label-tertiary);font-size:10px}
+.hvs-panel .hvs-card-title{color:var(--dsw-alias-label-primary);font-size:11.5px;margin-top:2px;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.hvs-panel .hvs-card-empty{color:var(--dsw-alias-label-dimmed);font-size:11px}
 .hvs-panel .hvs-meta{padding:6px 10px;display:flex;flex-direction:column;gap:4px;
   border-bottom:1px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-secondary)}
 .hvs-panel .hvs-meta b{color:var(--dsw-alias-label-primary);font-weight:600}
@@ -137,6 +164,38 @@ function el(tag: string, cls?: string, text?: string): HTMLElement {
 
 const PANEL_ID = "hvs-timeline-panel"
 
+/**
+ * WI-083 (v1.2) — the open flow (user priority tree, branch 1): deep-link
+ * into the "HIVE Board" tab INSIDE the dsh web UI via ctx.layout.selectPanel
+ * (the framework's cross-plugin panel-transition face — ILAYOUT documents
+ * itself as "the contract other plugins' apply worlds reach for panel
+ * transitions"), then open THAT item in the tab's REAL inspector (the same
+ * drawer the board cards use — openDrawer, one trajectory, no :4400
+ * hand-off, no duplicated spec/history rendering).
+ */
+async function openInBoardTab(pluginCtx: Record<string, unknown> | undefined, itemId: string): Promise<string> {
+  const layout = pluginCtx && (pluginCtx as { layout?: { selectPanel?: (id: string | null) => void } }).layout
+  if (layout && typeof layout.selectPanel === "function") {
+    try {
+      // The board's own main-slot key (this package's registration: 'hive-board').
+      layout.selectPanel("hive-board")
+    } catch {
+      // an unregistered main key throws — the drawer still opens below
+    }
+    // give the tab a moment to mount, so the drawer opens over the board
+    for (let i = 0; i < 40; i++) {
+      if (document.querySelector(".hvb-root")) break
+      await new Promise((r) => setTimeout(r, 60))
+    }
+  }
+  // The item inspector is the SAME drawer module the board tab uses (one
+  // bundled instance, one trajectory — the tab's cards ride bindItemDrawer
+  // delegation onto this exact openDrawer).
+  const { openDrawer } = await import("./item-drawer.js")
+  await openDrawer(itemId)
+  return "drawer"
+}
+
 const KIND_GLYPH: Record<string, string> = {
   awaken: "◈",
   registered: "◇",
@@ -153,12 +212,18 @@ const KIND_GLYPH: Record<string, string> = {
  * The dock occupant component factory. REACT is passed in by the wrapper
  * (module table — W-044); the module itself imports nothing.
  */
-export function makeHiveStateDock(ReactArg: {
-  createElement: (type: string, props?: unknown, ...children: unknown[]) => unknown
-  useEffect: (fn: () => void | (() => void), deps?: unknown[]) => void
-  useRef: (init: unknown) => { current: unknown }
-  useState: (init: unknown) => [unknown, (v: unknown | ((prev: unknown) => unknown)) => void]
-}): (props: Record<string, unknown>) => unknown {
+export function makeHiveStateDock(
+  // The plugin ctx (for the WI-083 open flow: ctx.layout.selectPanel — the
+  // framework's cross-plugin panel-transition face; guarded by the entity
+  // inject's 'layout' entry) + the module-table React (W-044).
+  pluginCtx: Record<string, unknown> | undefined,
+  ReactArg: {
+    createElement: (type: string, props?: unknown, ...children: unknown[]) => unknown
+    useEffect: (fn: () => void | (() => void), deps?: unknown[]) => void
+    useRef: (init: unknown) => { current: unknown }
+    useState: (init: unknown) => [unknown, (v: unknown | ((prev: unknown) => unknown)) => void]
+  },
+): (props: Record<string, unknown>) => unknown {
   // The runtime face: hooks come from the module table; typing stays loose —
   // this file belongs to the generated bundle path, verified by guards, not
   // by host typechecks.
@@ -179,6 +244,11 @@ export function makeHiveStateDock(ReactArg: {
     const [data, setData] = React.useState<HiveStatePayload | undefined>(undefined)
     const [fetchFailed, setFetchFailed] = React.useState<boolean>(false)
     const [open, setOpen] = React.useState<boolean>(false)
+    // v1.2 — the attached board work item (light card from the board store's
+    // read primitives, /api/hive-board/session-item).
+    const [itemCard, setItemCard] = React.useState<{ item: BoardItemCard | null; pending: boolean; error?: boolean }>({ item: null, pending: true })
+    const openRef = React.useRef<boolean>(false)
+    openRef.current = open
     const [eventNotes, setEventNotes] = React.useState<TimelineEvent[]>([])
     const [nowTick, setNowTick] = React.useState<number>(Date.now())
     const runningRef = React.useRef<boolean | undefined>(undefined)
@@ -254,6 +324,8 @@ export function makeHiveStateDock(ReactArg: {
     }, [running, kidsAll, sessionId, rowList, data?.goal])
 
     // The poll: immediate on selection change, then every 6 s while mounted.
+    // The v1.2 item card rides the same cadence ONLY while the panel is open
+    // (the pill does not need it; keeps the board-store read cadence kind).
     React.useEffect(() => {
       if (!sessionId) return
       let cancelled = false
@@ -272,13 +344,29 @@ export function makeHiveStateDock(ReactArg: {
           .finally(() => {
             if (!cancelled) timer = setTimeout(poll, 6000)
           })
+        if (!openRef.current) return
+        fetchItemCard(sessionId)
+          .then((card) => {
+            if (cancelled) return
+            setItemCard({ item: card, pending: false })
+          })
+          .catch(() => {
+            if (cancelled) return
+            setItemCard((prev) => ({ ...prev, pending: false, error: true }))
+          })
       }
       poll()
+      const onOpen = () => {
+        fetchItemCard(sessionId)
+          .then((card) => { if (!cancelled) setItemCard({ item: card, pending: false }) })
+          .catch(() => { if (!cancelled) setItemCard((prev) => ({ ...prev, pending: false, error: true })) })
+      }
+      onOpen()
       return () => {
         cancelled = true
         if (timer) clearTimeout(timer)
       }
-    }, [sessionId])
+    }, [sessionId, open])
 
     // Panel positioning: anchored to the pill, ABOVE the composer, portal to
     // document.body (drawer posture — escapes transformed panel ancestors).
@@ -298,6 +386,8 @@ export function makeHiveStateDock(ReactArg: {
           kidsAll,
           eventNotes,
           nowTick,
+          itemCard,
+          pluginCtx,
           onClose: () => setOpen(false),
         })
         const rect = pillRef.current?.getBoundingClientRect()
@@ -397,6 +487,8 @@ function drawPanel(
     kidsAll: SessionRowLike[]
     eventNotes: TimelineEvent[]
     nowTick: number
+    itemCard: { item: BoardItemCard | null; pending: boolean; error?: boolean }
+    pluginCtx: Record<string, unknown> | undefined
     onClose: () => void
   },
 ): void {
@@ -429,6 +521,36 @@ function drawPanel(
   const sig = latestSignalTs(parts.fetchFailed ? undefined : parts.data, parts.row)
   stageLine.appendChild(el("span", "hvs-sig", `latest signal ${fmtTime(sig)} · ${relTime(sig)}`))
   panel.appendChild(stageLine)
+
+  // ── ATTACHED BOARD WORK ITEM (v1.2): slim card, tap opens the item in the
+  // HIVE Board tab (selectPanel deep-link + the tab's own drawer). Muted hint
+  // when the store says the session owns nothing; honest pending/pending-route
+  // states otherwise. READ-ONLY: the card opens the board's existing
+  // inspector — no transitions, no actions from the overlay.
+  const cardContainer = el("div", "hvs-card-wrap")
+  if (parts.itemCard.pending) {
+    cardContainer.appendChild(el("div", "hvs-card-empty", "attached board item — loading…"))
+  } else if (parts.itemCard.error) {
+    cardContainer.appendChild(el("span", "hvs-flag", "board pairing unavailable — is the board route live yet?"))
+  } else if (parts.itemCard.item) {
+    const card = el("div", "hvs-card")
+    card.setAttribute("role", "button")
+    card.setAttribute("title", `Open ${parts.itemCard.item.id} in the HIVE Board tab`)
+    const top = el("div", "hvs-card-top")
+    top.appendChild(el("span", "hvs-card-id", parts.itemCard.item.id))
+    top.appendChild(el("span", `hvs-card-status`, parts.itemCard.item.status))
+    top.appendChild(el("span", "hvs-card-prio", parts.itemCard.item.priority))
+    card.appendChild(top)
+    const title = el("div", "hvs-card-title", parts.itemCard.item.title)
+    card.appendChild(title)
+    card.addEventListener("click", () => {
+      void openInBoardTab(parts.pluginCtx, parts.itemCard.item!.id)
+    })
+    cardContainer.appendChild(card)
+  } else {
+    cardContainer.appendChild(el("div", "hvs-card-empty", "no attached in-progress board item (owner/group match found none)"))
+  }
+  panel.appendChild(cardContainer)
 
   const meta = el("div", "hvs-meta")
   const hive = parts.data?.hive

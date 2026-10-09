@@ -175,3 +175,12 @@ test("emitted client.js: ambient rows can never come back (v1.1 scope pin)", () 
   assert.ok(!CLIENT.includes("energy tick"), "no energy-tick row text in the bundle")
   assert.ok(!CLIENT.includes("(workspace)"), "no ambient labeling in the bundle")
 })
+
+test("emitted client.js: v1.2 item card + in-UI deep-link markers", () => {
+  assert.ok(CLIENT.includes("/api/hive-board/session-item"), "board-pairing route URL present")
+  assert.ok(CLIENT.includes("hvs-card"), "item card markup present")
+  assert.ok(CLIENT.includes("selectPanel"), "in-UI tab deep-link present (ctx.layout.selectPanel)")
+  assert.ok(CLIENT.includes("'hive-board'") || CLIENT.includes('"hive-board"'), "the board tab main key is addressed")
+  assert.ok(CLIENT.includes("openDrawer"), "the SAME tab inspector opens the item (no duplicated spec/history)")
+  assert.doesNotMatch(CLIENT, /["'`]https?:\/\/[^"']*:4400/, "no :4400 viewer URL hand-off anywhere (comments may mention history)")
+})

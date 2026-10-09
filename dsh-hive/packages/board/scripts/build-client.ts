@@ -69,8 +69,10 @@ const wrapper = `;window.__ModuleLoader__.load({
     return {
       name: '@hive/dsh-board',
       // The load-bearing client services gate (I-128): registration goes
-      // through 'slots'; the 15 s poll cadence rides ctx.interval ('timer').
-      inject: ['slots', 'timer'],
+      // through 'slots'; the 15 s poll cadence rides ctx.interval ('timer');
+      // the WI-083 open flow reads ctx.layout (cross-plugin panel-transition
+      // face — selectPanel deep-links the board tab without touching :4400).
+      inject: ['slots', 'timer', 'layout'],
       apply(ctx) {
         if (applied_once) return; // idempotent: duplicate slot registration throws
         applied_once = true;
@@ -128,7 +130,7 @@ const wrapper = `;window.__ModuleLoader__.load({
           slots.inject('conversation.composer.dock', () => {
             slots.register(
               { name: 'conversation.composer.dock', id: 'hive-state-timeline', order: 60 },
-              E.makeHiveStateDock(React),
+              E.makeHiveStateDock(ctx, React),
             );
           });
         } else {
