@@ -2,6 +2,11 @@ import path from "path"
 import fs from "fs"
 import { readCoordinators, type CoordinatorRecord } from "./sessions.js"
 import { readHiveState } from "./energy.js"
+// The BEHAVIOR package, not the framework — a real dependency (W-044), the
+// same twin pattern board's src/lib/drm-read.ts uses: ONE DRM dialect reader,
+// never a fork. (WI-085: the reader now knows owner_session.)
+import { readDreamState } from "@hive/dsh-dream-archive"
+import { activeDreamPath, historyDreamPath, dreamsBase } from "@hive/dsh-dream-archive/lib/dream-state"
 
 /**
  * WI-083 (v1.1) — HIVE-state overlay host half: the SESSION-SCOPEd snapshot
@@ -55,6 +60,16 @@ export interface SessionHiveSnapshot {
   /** Dream-archive tool calls recorded for THIS session, ascending. */
   dreamEvents: Array<{ ts: string; tool: string }>
   dreamEventTotal: number
+  /**
+   * WI-085 — OWNER-ATTRIBUTED dreams for this session (owner_session stamped
+   * at begin; the SHADOW-027 fix). `active` non-empty ⟺ the dreaming stage
+   * is real for this session. Dreams begun BEFORE the fix carry no owner —
+   * they stay unattributed by definition (never backfilled).
+   */
+  dreams: {
+    active: Array<{ dreamId: string; entryTime: string }>
+    history: Array<{ dreamId: string; entryTime: string; exitTime: string | null }>
+  }
   generated: string
 }
 
@@ -82,6 +97,59 @@ function readDreamTelemetry(directory: string, idBare: string): Array<{ ts: stri
   } catch {
     return []
   }
+}
+
+export interface AttributedDream {
+  dreamId: string
+  entryTime: string
+  exitTime: string | null
+}
+
+/** Read ONE DRM file's ownership facts through the published reader. */
+function readAttributedDream(filePath: string, idVariants: string[]): AttributedDream | null {
+  try {
+    const d = readDreamState(filePath)
+    if (typeof d.owner_session !== "string" || !idVariants.includes(d.owner_session)) return null
+    return {
+      dreamId: typeof d.dream_id === "string" ? d.dream_id : path.basename(filePath).replace(/\.yaml$/, ""),
+      entryTime: typeof d.entry_time === "string" ? d.entry_time : "",
+      exitTime: typeof d.exit_time === "string" ? d.exit_time : null,
+    }
+  } catch {
+    // an unreadable DRM file skips, never throws
+    return null
+  }
+}
+
+/** Owner-attributed dreams for this session across active/ and history/. */
+export function readAttributedDreams(directory: string, sessionId: string, cap = 10): {
+  active: AttributedDream[]
+  history: AttributedDream[]
+} {
+  const bare = bareId(sessionId)
+  const idVariants = [...new Set([sessionId, bare, `session-${bare}`])]
+  const active: AttributedDream[] = []
+  const history: AttributedDream[] = []
+  for (const [sub, sink] of [
+    ["active", active],
+    ["history", history],
+  ] as const) {
+    let names: string[] = []
+    try {
+      names = fs.readdirSync(path.join(dreamsBase(directory), sub)).filter((f) => /^DRM-\d+\.yaml$/.test(f))
+    } catch {
+      continue
+    }
+    for (const name of names) {
+      const full = sub === "active" ? activeDreamPath(directory, name.replace(/\.yaml$/, "")) : historyDreamPath(directory, name.replace(/\.yaml$/, ""))
+      const attributed = readAttributedDream(full, idVariants)
+      if (attributed) sink.push(attributed)
+    }
+  }
+  const byEntryDesc = (a: AttributedDream, b: AttributedDream) => new Date(b.entryTime || 0).getTime() - new Date(a.entryTime || 0).getTime()
+  active.sort(byEntryDesc)
+  history.sort(byEntryDesc)
+  return { active: active.slice(0, cap), history: history.slice(0, cap) }
 }
 
 export function buildSessionHiveSnapshot(
@@ -125,6 +193,7 @@ export function buildSessionHiveSnapshot(
     usageTotal: usageMarks.length,
     dreamEvents: dreamEventsAll.slice(-listCap),
     dreamEventTotal: dreamEventsAll.length,
+    dreams: readAttributedDreams(directory, sessionId),
     generated: new Date().toISOString(),
   }
 }

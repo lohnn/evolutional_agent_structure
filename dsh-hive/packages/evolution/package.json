@@ -1,6 +1,6 @@
 {
   "name": "@hive/dsh-evolution",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "private": true,
   "files": [
     "dist",
@@ -29,6 +29,7 @@
   },
   "dependencies": {
     "@deepseek-ai/schemastery": "^3.18.2",
+    "@hive/dsh-dream-archive": "workspace:*",
     "@hive/dsh-board": "workspace:*"
   },
   "peerDependencies": {

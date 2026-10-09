@@ -53,6 +53,16 @@ export interface HiveStatePayload {
   goalReason?: string
   usageMarks?: Array<{ capability: string; timestamp: string }>
   dreamEvents?: Array<{ ts: string; tool: string }>
+  /**
+   * WI-085 — OWNER-ATTRIBUTED dreams for this session (begin-time
+   * owner_session; SHADOW-027 fix). `active` non-empty ⟺ the dreaming
+   * stage is REAL for this session. Pre-fix dreams carry no owner and
+   * never appear here (never attributed, never backfilled).
+   */
+  dreams?: {
+    active?: Array<{ dreamId: string; entryTime: string }>
+    history?: Array<{ dreamId: string; entryTime: string; exitTime: string | null }>
+  }
   children?: ChildEntryView[]
   childrenTotal?: number
   runningAgents?: number
@@ -78,6 +88,24 @@ export interface SessionRowLike {
   running?: boolean
   parentId?: string
   updatedAt?: number
+}
+
+/** The /api/hive-board/session-item payload projection (v1.2/v1.3). */
+export interface SessionItemPairing {
+  ok?: boolean
+  item?: { id: string; title: string; status: string; priority: string } | null
+  matchedBy?: string
+  /** The resolved item's OWN transition history (latest first, capped). */
+  history?: OwnedItemTransitionView[]
+  historyTotal?: number
+}
+
+export interface OwnedItemTransitionView {
+  at: string
+  from: string | null
+  to: string
+  by: string
+  session?: string
 }
 
 export interface SessionListLike {
@@ -128,6 +156,16 @@ export function buildTimeline(p: HiveStatePayload | undefined): TimelineEvent[] 
     events.push({ ts: m.timestamp, kind: "registered", text: `registered — dispatched as ${m.capability}` })
   }
   for (const d of p.dreamEvents ?? []) events.push({ ts: d.ts, kind: "dream", text: `dream archive ${d.tool}` })
+  for (const d of p.dreams?.history ?? []) {
+    events.push({
+      ts: d.entryTime,
+      kind: "dream",
+      text: `dreaming · ${d.dreamId} started${d.exitTime ? " · completed" : ""}`,
+    })
+  }
+  for (const d of p.dreams?.active ?? []) {
+    events.push({ ts: d.entryTime, kind: "dreaming", text: `dreaming · ${d.dreamId} (active)` })
+  }
   for (const c of p.children ?? []) {
     const asWhom = c.capability ? ` as ${c.capability}` : ""
     const label = c.label ? ` — "${c.label}"` : ""
@@ -145,13 +183,13 @@ export function buildTimeline(p: HiveStatePayload | undefined): TimelineEvent[] 
 }
 
 /** The honest current stage of the selected session. */
-export type Stage = "working" | "idle" | "awakened" | "registered" | "dormant" | "done"
+export type Stage = "working" | "dreaming" | "idle" | "awakened" | "registered" | "dormant" | "done"
 
 export function currentStage(params: {
   payload: HiveStatePayload | undefined
   routeReachable: boolean
   pageRunning: boolean | undefined
-}): { stage: Stage; tone: "live" | "hive" | "ambient" | "unknown" } {
+}): { stage: Stage; tone: "live" | "dream" | "hive" | "ambient" | "unknown" } {
   const { payload, routeReachable, pageRunning } = params
   const hive = payload?.hive?.isCoordinator === true
   // Working = page truth OR host truth (either flip must move the tone).
@@ -163,6 +201,9 @@ export function currentStage(params: {
   // pre-restart coordinator read done right after its host rebooted).
   // `done` is an OBSERVED milestone only (row removal / explicit end).
   if (payload === undefined) return { stage: "dormant", tone: "unknown" }
+  // WI-085 — an ACTIVE owner-attributed dream IS the dreaming stage (real,
+  // session-scoped; the completion's in-place rewrite keeps the owner).
+  if ((payload.dreams?.active?.length ?? 0) > 0) return { stage: "dreaming", tone: "dream" }
   if (hive) return { stage: "awakened", tone: "hive" }
   if ((payload.usageMarks?.length ?? 0) > 0) return { stage: "registered", tone: "ambient" }
   if (payload.live === true) return { stage: "idle", tone: "ambient" }
@@ -192,6 +233,21 @@ export function durationSince(ts: string | null | undefined, nowMs: number): str
   if (ms < 3_600_000) return `${Math.max(1, Math.round(ms / 60_000))}m`
   if (ms < 86_400_000) return `${Math.round(ms / 3_600_000)}h`
   return `${Math.round(ms / 86_400_000)}d`
+}
+
+/**
+ * WI-085 v1.3 — the resolved board item's OWN transitions as session-
+ * attributed milestone rows. Durable BOARD facts (the item's history read
+ * through the locked store's primitives); the session's STAGE never
+ * derives from them (W-109 line: liveness ≠ done).
+ */
+export function buildItemTimeline(pairing: SessionItemPairing | undefined): TimelineEvent[] {
+  if (!pairing || !Array.isArray(pairing.history)) return []
+  return pairing.history.map((tr) => ({
+    ts: tr.at,
+    kind: "transition",
+    text: `${tr.from === null || tr.from === undefined ? "∅" : tr.from} → ${tr.to} (by ${tr.by}${tr.session ? `, ${tr.session.slice(0, 12)}` : ""})`,
+  }))
 }
 
 /** "2026-10-08 16:55" style stamp (UTC, tabular). */

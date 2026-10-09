@@ -184,3 +184,49 @@ test("emitted client.js: v1.2 item card + in-UI deep-link markers", () => {
   assert.ok(CLIENT.includes("openDrawer"), "the SAME tab inspector opens the item (no duplicated spec/history)")
   assert.doesNotMatch(CLIENT, /["'`]https?:\/\/[^"']*:4400/, "no :4400 viewer URL hand-off anywhere (comments may mention history)")
 })
+
+test("view lib v1.3: dreaming is an attributed, session-scoped stage", async () => {
+  const view = await import("@hive/dsh-board/lib/hive-state-view")
+  const payload = {
+    ...PAYLOAD,
+    live: true,
+    // the host agents projection must NOT report this session running —
+    // the dreaming check is about the DREAM, not another turn
+    agents: [{ id: "session-abc", status: "idle" }],
+    dreams: {
+      active: [{ dreamId: "DRM-060", entryTime: "2026-10-09T08:00:00.000Z" }],
+      history: [{ dreamId: "DRM-059", entryTime: "2026-10-09T07:00:00.000Z", exitTime: "2026-10-09T07:30:00.000Z" }],
+    },
+  }
+  // dreaming stage flips on an ACTIVE attributed dream; page running still wins
+  assert.equal(view.currentStage({ payload, routeReachable: true, pageRunning: false }).stage, "dreaming")
+  assert.equal(view.currentStage({ payload, routeReachable: true, pageRunning: false }).tone, "dream")
+  assert.equal(view.currentStage({ payload, routeReachable: true, pageRunning: true }).stage, "working")
+  // timeline rows: started/complete attributed rows rendered; dreamEvents still present
+  const events = view.buildTimeline(payload)
+  const dreamingRows = events.filter((e) => e.kind === "dreaming" || e.kind === "dream")
+  assert.ok(dreamingRows.some((e) => e.text.includes("DRM-060") && e.text.includes("(active)")))
+  assert.ok(dreamingRows.some((e) => e.text.includes("DRM-059") && e.text.includes("completed")))
+  // UNATTRIBUTED (pre-fix) dreams never arrive — the payload shape omits them
+  const legacy = view.buildTimeline({ ...PAYLOAD, dreams: undefined })
+  assert.equal(legacy.filter((e) => e.kind === "dreaming").length, 0)
+})
+
+test("view lib v1.3: item history renders as durable transition milestones", async () => {
+  const view = await import("@hive/dsh-board/lib/hive-state-view")
+  const pairing = {
+    item: { id: "WI-083", title: "t", status: "done", priority: "medium" },
+    matchedBy: "owner",
+    history: [
+      { at: "2026-10-09T07:00:00.000Z", from: "in_progress", to: "done", by: "hive_board_complete", session: "session-ac945505-3567-4aac-b683-9da796726d3a" },
+      { at: "2026-10-08T16:53:00.000Z", from: null, to: "in_progress", by: "hive_board_bind", session: "session-ac945505-3567-4aac-b683-9da796726d3a" },
+    ],
+    historyTotal: 2,
+  }
+  const rows = view.buildItemTimeline(pairing)
+  assert.equal(rows.length, 2)
+  assert.equal(rows[0].kind, "transition")
+  assert.match(rows[0].text, /in_progress → done/)
+  assert.match(rows[1].text, /∅ → in_progress/)
+  assert.equal(view.buildItemTimeline(undefined).length, 0)
+})

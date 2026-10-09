@@ -86,6 +86,9 @@ importers:
       '@hive/dsh-board':
         specifier: workspace:*
         version: link:../board
+      '@hive/dsh-dream-archive':
+        specifier: workspace:*
+        version: link:../dream-archive
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: ^4.0.1
@@ -111,9 +114,6 @@ importers:
       '@deepseek-ai/dsh-tools':
         specifier: 0.2.0-rc.2
         version: 0.2.0-rc.2(34e581271325766b244192fdb0a1d55a)
-      '@hive/dsh-dream-archive':
-        specifier: workspace:*
-        version: link:../dream-archive
       '@hive/dsh-hivemind':
         specifier: workspace:*
         version: link:../hivemind

@@ -1067,11 +1067,16 @@ parameters: {
    */
   sessionItem(sessionId: string): unknown {
     const all = this.items()
-    const { item, matchedBy } = resolveSessionItem(all, sessionId)
+    const { item, matchedBy, history, historyTotal } = resolveSessionItem(all, sessionId)
+    // WI-085 (v1.3): the payload carries the resolved item's OWN transition
+    // history (latest first, capped at the drawer's HISTORY_CAP) — the
+    // overlay renders them as session-attributed milestone rows. Same
+    // budget discipline as tabItem: display caps only, nothing dropped
+    // from the record.
     if (!item) {
-      return { ok: true as const, generated: nowIso(), boardBuild: readBoardBuild(), session: sessionId, item: null, matchedBy }
+      return { ok: true as const, generated: nowIso(), boardBuild: readBoardBuild(), session: sessionId, item: null, matchedBy, history: [], historyTotal: 0 }
     }
-    return { ok: true as const, generated: nowIso(), boardBuild: readBoardBuild(), session: sessionId, item, matchedBy }
+    return { ok: true as const, generated: nowIso(), boardBuild: readBoardBuild(), session: sessionId, item, matchedBy, history, historyTotal }
   }
 }
 

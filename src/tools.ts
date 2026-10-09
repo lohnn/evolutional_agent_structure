@@ -1304,6 +1304,12 @@ export function createHiveTools(
           retain_high: splitLines(args.retain_high),
           retain_low: splitLines(args.retain_low),
           pre_compaction: args.pre_compaction ?? false,
+          // WI-085 — begin-time session identity (SHADOW-027 root-cause fix).
+          // The awaken LINEAGE is not cheaply readable on this root-plugin
+          // face (resolveAgent names the capability, not the parent session)
+          // — omitted here; the dsh tools face stamps it when the session
+          // header carries a parent.
+          owner_session: typeof context.sessionID === "string" && context.sessionID ? context.sessionID : undefined,
         })
 
         log("info", `[dream_begin] opened ${dreamId}`, { filePath, caller, preCompaction: args.pre_compaction ?? false })
