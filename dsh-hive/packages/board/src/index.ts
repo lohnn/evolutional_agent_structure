@@ -56,6 +56,7 @@ import {
   type WorkItem,
 } from "./lib/board-store.js"
 import { computeProblems } from "./lib/board-invariants.js"
+import { resolveSessionItem } from "./lib/session-item.js"
 import { recencyKey } from "./lib/board-recency.js"
 import {
   listBoard,
@@ -772,6 +773,42 @@ parameters: {
         "board tab item route",
       )
       this.ctx.logger?.info?.("[board] tab item route registered at /api/hive-board/item")
+
+      // WI-083 (v1.2): the session ⟷ board pairing route — the ONE attached
+      // in_progress item for a session, resolved through the locked store's
+      // read primitives (owner_session first — the 1:1 bind — then the
+      // group_id fallback). Same auth posture, same WAIT block, read-only.
+      serverCtx.effect(
+        () =>
+          webServer.register({
+            kind: "exact",
+            path: "/api/hive-board/session-item",
+            handler: async (req: unknown, res: WebLikeResponse) => {
+              let payload: unknown
+              let sessionId = ""
+              try {
+                const reqAny = req as { url?: unknown } | null
+                const raw = typeof reqAny?.url === "string" ? reqAny.url : ""
+                sessionId = new URLSearchParams(raw.includes("?") ? raw.slice(raw.indexOf("?") + 1) : "").get("id")?.trim() ?? ""
+                sessionId = decodeURIComponent(sessionId)
+                if (!sessionId.match(/^[A-Za-z0-9._-]+$/)) {
+                  payload = { ok: false, error: "missing or malformed id query parameter", missing: sessionId ? [sessionId] : [] }
+                } else {
+                  payload = this.sessionItem(sessionId)
+                }
+              } catch (e) {
+                payload = { ok: false, error: String((e as Error)?.message ?? e) }
+              }
+              res.writeHead(200, {
+                "content-type": "application/json; charset=utf-8",
+                "cache-control": "no-store",
+              })
+              res.end(JSON.stringify(payload))
+            },
+          }),
+        "board session-item route",
+      )
+      this.ctx.logger?.info?.("[board] session-item route registered at /api/hive-board/session-item")
     })
 
     // Slice 3D — the live-activity feed. WAIT (the W-090 order-agnostic
@@ -1018,6 +1055,23 @@ parameters: {
       bodyBytes: bodyFull.length,
       historyTotal: transitionsFull.length,
     }
+  }
+
+  /**
+   * WI-083 (v1.2) — the session ⟷ board pairing: which in_progress item does
+   * this session own? Read-only over the SAME single parse pass as
+   * this.items() — the locked store's read primitives only, no raw file
+   * reads. The bind contract is the 1:1 in_progress ⟷ owner_session bind
+   * (the group_id fallback covers dispatch-group children). Returns the
+   * light card face (id/title/status/priority) the overlay renders.
+   */
+  sessionItem(sessionId: string): unknown {
+    const all = this.items()
+    const { item, matchedBy } = resolveSessionItem(all, sessionId)
+    if (!item) {
+      return { ok: true as const, generated: nowIso(), boardBuild: readBoardBuild(), session: sessionId, item: null, matchedBy }
+    }
+    return { ok: true as const, generated: nowIso(), boardBuild: readBoardBuild(), session: sessionId, item, matchedBy }
   }
 }
 

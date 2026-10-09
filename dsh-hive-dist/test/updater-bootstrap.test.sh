@@ -65,9 +65,9 @@ DSH_HIVE_RAW="https://example.test/evolutional_agent_structure" \
 
 archives=(
   hive-dsh-agents-0.0.2.tgz
-  hive-dsh-board-0.1.1.tgz
+  hive-dsh-board-0.1.4.tgz
   hive-dsh-dream-archive-0.0.1.tgz
-  hive-dsh-evolution-0.0.2.tgz
+  hive-dsh-evolution-0.0.4.tgz
   hive-dsh-hivemind-0.0.2.tgz
   hive-dsh-painpoints-0.0.2.tgz
   hive-dsh-tools-0.0.2.tgz

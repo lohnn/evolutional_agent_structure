@@ -69,8 +69,10 @@ const wrapper = `;window.__ModuleLoader__.load({
     return {
       name: '@hive/dsh-board',
       // The load-bearing client services gate (I-128): registration goes
-      // through 'slots'; the 15 s poll cadence rides ctx.interval ('timer').
-      inject: ['slots', 'timer'],
+      // through 'slots'; the 15 s poll cadence rides ctx.interval ('timer');
+      // the WI-083 open flow reads ctx.layout (cross-plugin panel-transition
+      // face — selectPanel deep-links the board tab without touching :4400).
+      inject: ['slots', 'timer', 'layout'],
       apply(ctx) {
         if (applied_once) return; // idempotent: duplicate slot registration throws
         applied_once = true;
@@ -118,19 +120,35 @@ const wrapper = `;window.__ModuleLoader__.load({
         // browser tab's icon reflects board truth while a different panel is
         // active. Panel-level wiring (slots) above stays untouched.
         E.startFaviconDriver(ctx);
-        console.log('[@hive/dsh-board] client plugin applied (viewer-parity read-only board + favicon driver + item drawer)');
+        // WI-083 — HIVE-state overlay: a SESSION-scope occupant of the
+        // conversation composer dock (the chat package's StatsPills pattern).
+        // The framework hands the component sessionId + the global
+        // useSessions standard hooks (ui-session's root provision); the
+        // component polls the READ-ONLY /api/hive-state/session route
+        // (@hive/dsh-evolution host half). No board state is touched.
+        if (typeof E.makeHiveStateDock === 'function') {
+          slots.inject('conversation.composer.dock', () => {
+            slots.register(
+              { name: 'conversation.composer.dock', id: 'hive-state-timeline', order: 60 },
+              E.makeHiveStateDock(ctx, React),
+            );
+          });
+        } else {
+          console.warn('[@hive/dsh-board] __BOARD_ENGINE.makeHiveStateDock missing — WI-083 overlay skipped (stale bundle?)');
+        }
+        console.log('[@hive/dsh-board] client plugin applied (viewer-parity read-only board + favicon driver + item drawer + hive-state dock)');
       },
     };
   },
 });
 `
 
-const banner = `// @hive/dsh-board — GENERATED client bundle (WI-062 slice 3+3b). DO NOT EDIT BY HAND.
+const banner = `// @hive/dsh-board — GENERATED client bundle (WI-062 slice 3+3b + WI-083). DO NOT EDIT BY HAND.
 // Build: dsh-hive/packages/board/scripts/build-client.ts (bun) — bundles
 // websrc/client-main.ts (the ported 4400 viewer engine + the tab engine + the
-// favicon driver + the item drawer) into the twin classic shape; the wrapper
-// below is the only React-using code and takes React from the loader's runtime
-// module table (W-044).
+// favicon driver + the item drawer + the WI-083 hive-state dock overlay) into
+// the twin classic shape; the wrapper below is the only React-using code and
+// takes React from the loader's runtime module table (W-044).
 // Build stamp (both sides of the I-152 staleness verdict): ${sha}
 `
 
