@@ -37,7 +37,7 @@
 #
 # ═══ COHORT BUMP RULE — kit tarballs are name-addressed ═════════════════════
 # Tarball mode (the DEFAULT transport here) resolves updates by tarball NAME:
-# `dsh plugin add file:./hive-dsh-board-0.1.4.tgz` finds the installed
+# `dsh plugin add file:./hive-dsh-board-0.1.5.tgz` finds the installed
 # @hive/dsh-board@0.1.0 already satisfied and installs NOTHING even when the
 # archive's contents changed (verified on a kit machine during the
 # 0.1.7-rc.2 bump, PR #50). Same for the fetch path: fetch_missing_tarballs()
@@ -343,12 +343,12 @@ NODE
 # pnpm 10.x or >=12.0 only.
 KIT_TARBALLS=(
   hive-dsh-agents-0.0.2.tgz
-  hive-dsh-board-0.1.4.tgz
-  hive-dsh-dream-archive-0.0.1.tgz
-  hive-dsh-evolution-0.0.4.tgz
+  hive-dsh-board-0.1.5.tgz
+  hive-dsh-dream-archive-0.0.2.tgz
+  hive-dsh-evolution-0.0.5.tgz
   hive-dsh-hivemind-0.0.2.tgz
   hive-dsh-painpoints-0.0.2.tgz
-  hive-dsh-tools-0.0.2.tgz
+  hive-dsh-tools-0.0.3.tgz
   dsh-berget-refresh-0.1.0.tgz
   dsh-berget-usage-0.2.0.tgz
   dsh-provider-usage-0.1.0.tgz
@@ -414,12 +414,12 @@ if [ "$HAS_KIT_TARBALLS" = "1" ] && [ "${DSH_HIVE_GIT_MODE:-0}" != "1" ]; then
   # rel-spec anchoring against the caller cwd is bypassed by the cd.
   SPECS=(
     file:./hive-dsh-agents-0.0.2.tgz
-    file:./hive-dsh-board-0.1.4.tgz
-    file:./hive-dsh-dream-archive-0.0.1.tgz
-    file:./hive-dsh-evolution-0.0.4.tgz
+    file:./hive-dsh-board-0.1.5.tgz
+    file:./hive-dsh-dream-archive-0.0.2.tgz
+    file:./hive-dsh-evolution-0.0.5.tgz
     file:./hive-dsh-hivemind-0.0.2.tgz
     file:./hive-dsh-painpoints-0.0.2.tgz
-    file:./hive-dsh-tools-0.0.2.tgz
+    file:./hive-dsh-tools-0.0.3.tgz
     file:./dsh-berget-refresh-0.1.0.tgz
     file:./dsh-berget-usage-0.2.0.tgz
     file:./dsh-provider-usage-0.1.0.tgz

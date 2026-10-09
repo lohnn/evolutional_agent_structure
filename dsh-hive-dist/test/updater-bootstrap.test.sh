@@ -65,12 +65,12 @@ DSH_HIVE_RAW="https://example.test/evolutional_agent_structure" \
 
 archives=(
   hive-dsh-agents-0.0.2.tgz
-  hive-dsh-board-0.1.4.tgz
-  hive-dsh-dream-archive-0.0.1.tgz
-  hive-dsh-evolution-0.0.4.tgz
+  hive-dsh-board-0.1.5.tgz
+  hive-dsh-dream-archive-0.0.2.tgz
+  hive-dsh-evolution-0.0.5.tgz
   hive-dsh-hivemind-0.0.2.tgz
   hive-dsh-painpoints-0.0.2.tgz
-  hive-dsh-tools-0.0.2.tgz
+  hive-dsh-tools-0.0.3.tgz
   dsh-berget-refresh-0.1.0.tgz
   dsh-berget-usage-0.2.0.tgz
   dsh-provider-usage-0.1.0.tgz

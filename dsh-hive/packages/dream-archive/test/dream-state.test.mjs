@@ -213,3 +213,45 @@ describe("pre_compaction lifecycle marker (WI-080)", () => {
     assert.equal(readDreamState(historyDreamPath(dir, dreamId)).pre_compaction, false)
   })
 })
+
+
+describe("begin-time session identity (WI-085 / SHADOW-027)", () => {
+  it("beginDream stamps owner_session (and lineage) into the active DRM file, parse-round-trips", () => {
+    const { filePath } = beginDream(dir, baseIntent({
+      owner_session: "session-abc-000",
+      owner_lineage: "session-coordinator-000",
+    }))
+    const raw = fs.readFileSync(filePath, "utf8")
+    assert.ok(raw.includes('owner_session: "session-abc-000"'), "owner line present")
+    assert.ok(raw.includes('owner_lineage: "session-coordinator-000"'), "lineage line present")
+    const state = readDreamState(filePath)
+    assert.equal(state.owner_session, "session-abc-000")
+    assert.equal(state.owner_lineage, "session-coordinator-000")
+  })
+
+  it("completion PRESERVES the owner lines (I-049 in-place rewrite path)", () => {
+    const { filePath } = beginDream(dir, baseIntent({ owner_session: "session-abc-000" }))
+    completeDream(dir, "2026-10-09T08:00:00Z", [])
+    const historyPath = path.join(dir, ".opencode/dreams/history", path.basename(filePath))
+    const state = readDreamState(historyPath)
+    assert.equal(state.status, "COMPLETE")
+    assert.equal(state.owner_session, "session-abc-000")
+  })
+
+  it("pre-fix dreams (no owner lines) parse as undefined — unattributed, never guessed", () => {
+    const { filePath } = beginDream(dir, baseIntent())
+    const state = readDreamState(filePath)
+    assert.equal(state.owner_session, undefined)
+    assert.equal(state.owner_lineage, undefined)
+  })
+
+  it("parseDreamState reads owner fields from an arbitrary older-shaped file", () => {
+    const yaml = [
+      'owner_session: "session-x"',
+      'owner_lineage: "lineage-y"',
+    ].join("\n")
+    const parsed = parseDreamState(yaml)
+    assert.equal(parsed.owner_session, "session-x")
+    assert.equal(parsed.owner_lineage, "lineage-y")
+  })
+})

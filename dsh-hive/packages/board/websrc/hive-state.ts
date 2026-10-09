@@ -48,6 +48,7 @@
  * bundled here AND unit-tested from dist. This file is DOM + wiring only.
  */
 import {
+  buildItemTimeline,
   buildTimeline,
   childrenInFlight,
   childrenKnown,
@@ -57,22 +58,33 @@ import {
   relTime,
   HIVE_STATE_URL,
 } from "../src/lib/hive-state-view.js"
-import type { HiveStatePayload, SessionRowLike, SessionListLike, TimelineEvent } from "../src/lib/hive-state-view.js"
+import type {
+  HiveStatePayload,
+  OwnedItemTransitionView,
+  SessionItemPairing,
+  SessionRowLike,
+  SessionListLike,
+  TimelineEvent,
+} from "../src/lib/hive-state-view.js"
 
-/** The light card face from /api/hive-board/session-item (board store read). */
-export interface BoardItemCard {
-  id: string
-  title: string
-  status: string
-  priority: string
+/** The /api/hive-board/session-item pairing payload (board store read). */
+export interface BoardPairing {
+  item: { id: string; title: string; status: string; priority: string } | null
+  matchedBy?: string
+  history?: OwnedItemTransitionView[]
+  historyTotal?: number
 }
 
-async function fetchItemCard(sessionId: string): Promise<BoardItemCard | null> {
+async function fetchItemCard(sessionId: string): Promise<BoardPairing> {
   const res = await fetch(`/api/hive-board/session-item?id=${encodeURIComponent(sessionId)}`, { cache: "no-store" })
   if (!res.ok) throw new Error(`route ${res.status}`)
-  const body = (await res.json()) as { ok?: boolean; item?: BoardItemCard | null }
+  const body = (await res.json()) as { ok?: boolean; item?: BoardPairing["item"]; history?: OwnedItemTransitionView[]; historyTotal?: number }
   if (body?.ok === false) throw new Error("bad request")
-  return body.item ?? null
+  return {
+    item: body.item ?? null,
+    history: Array.isArray(body.history) ? body.history : [],
+    historyTotal: typeof body.historyTotal === "number" ? body.historyTotal : 0,
+  }
 }
 
 async function fetchHiveState(sessionId: string): Promise<HiveStatePayload> {
@@ -93,6 +105,7 @@ export const HIVE_STATE_CSS = `
 .hvs-pill[data-tone="hive"] .hvs-dot{background:var(--dsw-alias-state-business-primary)}
 .hvs-pill[data-tone="live"] .hvs-dot{background:var(--dsw-alias-state-success-primary);
   animation:hvs-pulse 1.6s ease-in-out infinite}
+.hvs-pill[data-tone="dream"] .hvs-dot{background:var(--dsw-alias-state-warn-primary)}
 .hvs-pill[data-tone="unknown"] .hvs-dot{background:var(--dsw-alias-label-dimmed)}
 .hvs-pill .hvs-word{overflow:hidden;text-overflow:ellipsis}
 .hvs-pill .hvs-badge{flex:0 0 auto;font-size:10px;color:var(--dsw-alias-label-tertiary)}
@@ -206,6 +219,8 @@ const KIND_GLYPH: Record<string, string> = {
   returned: "⇙",
   goal: "◎",
   dream: "☾",
+  dreaming: "☾",
+  transition: "⇄",
 }
 
 /**
@@ -246,7 +261,7 @@ export function makeHiveStateDock(
     const [open, setOpen] = React.useState<boolean>(false)
     // v1.2 — the attached board work item (light card from the board store's
     // read primitives, /api/hive-board/session-item).
-    const [itemCard, setItemCard] = React.useState<{ item: BoardItemCard | null; pending: boolean; error?: boolean }>({ item: null, pending: true })
+    const [itemCard, setItemCard] = React.useState<{ pairing: BoardPairing | undefined; pending: boolean; error?: boolean }>({ pairing: undefined, pending: true })
     const openRef = React.useRef<boolean>(false)
     openRef.current = open
     const [eventNotes, setEventNotes] = React.useState<TimelineEvent[]>([])
@@ -346,9 +361,9 @@ export function makeHiveStateDock(
           })
         if (!openRef.current) return
         fetchItemCard(sessionId)
-          .then((card) => {
+          .then((pairing) => {
             if (cancelled) return
-            setItemCard({ item: card, pending: false })
+            setItemCard({ pairing, pending: false })
           })
           .catch(() => {
             if (cancelled) return
@@ -358,7 +373,7 @@ export function makeHiveStateDock(
       poll()
       const onOpen = () => {
         fetchItemCard(sessionId)
-          .then((card) => { if (!cancelled) setItemCard({ item: card, pending: false }) })
+          .then((pairing) => { if (!cancelled) setItemCard({ pairing, pending: false }) })
           .catch(() => { if (!cancelled) setItemCard((prev) => ({ ...prev, pending: false, error: true })) })
       }
       onOpen()
@@ -487,7 +502,7 @@ function drawPanel(
     kidsAll: SessionRowLike[]
     eventNotes: TimelineEvent[]
     nowTick: number
-    itemCard: { item: BoardItemCard | null; pending: boolean; error?: boolean }
+    itemCard: { pairing: BoardPairing | undefined; pending: boolean; error?: boolean }
     pluginCtx: Record<string, unknown> | undefined
     onClose: () => void
   },
@@ -532,23 +547,24 @@ function drawPanel(
     cardContainer.appendChild(el("div", "hvs-card-empty", "attached board item — loading…"))
   } else if (parts.itemCard.error) {
     cardContainer.appendChild(el("span", "hvs-flag", "board pairing unavailable — is the board route live yet?"))
-  } else if (parts.itemCard.item) {
+  } else if (parts.itemCard.pairing?.item) {
+    const cardItem = parts.itemCard.pairing.item
     const card = el("div", "hvs-card")
     card.setAttribute("role", "button")
-    card.setAttribute("title", `Open ${parts.itemCard.item.id} in the HIVE Board tab`)
+    card.setAttribute("title", `Open ${cardItem.id} in the HIVE Board tab`)
     const top = el("div", "hvs-card-top")
-    top.appendChild(el("span", "hvs-card-id", parts.itemCard.item.id))
-    top.appendChild(el("span", `hvs-card-status`, parts.itemCard.item.status))
-    top.appendChild(el("span", "hvs-card-prio", parts.itemCard.item.priority))
+    top.appendChild(el("span", "hvs-card-id", cardItem.id))
+    top.appendChild(el("span", "hvs-card-status", cardItem.status))
+    top.appendChild(el("span", "hvs-card-prio", cardItem.priority))
     card.appendChild(top)
-    const title = el("div", "hvs-card-title", parts.itemCard.item.title)
+    const title = el("div", "hvs-card-title", cardItem.title)
     card.appendChild(title)
     card.addEventListener("click", () => {
-      void openInBoardTab(parts.pluginCtx, parts.itemCard.item!.id)
+      void openInBoardTab(parts.pluginCtx, cardItem.id)
     })
     cardContainer.appendChild(card)
   } else {
-    cardContainer.appendChild(el("div", "hvs-card-empty", "no attached in-progress board item (owner/group match found none)"))
+    cardContainer.appendChild(el("div", "hvs-card-empty", "no owned board item — the session has not owned one (owner/bind/history found none)"))
   }
   panel.appendChild(cardContainer)
 
@@ -612,9 +628,13 @@ function drawPanel(
 
   // ── LIFECYCLE ROWS (stage transitions + milestones, newest first) ─────────
   const rows = el("div", "hvs-rows")
-  const events = [...parts.eventNotes, ...buildTimeline(parts.fetchFailed ? undefined : parts.data)].sort(
-    (a, b) => new Date(b.ts || 0).getTime() - new Date(a.ts || 0).getTime(),
-  )
+  // WI-085 v1.3: the owned item's OWN transitions join the story (durable
+  // board facts — the timeline's done-transition milestone).
+  const events = [
+    ...parts.eventNotes,
+    ...buildTimeline(parts.fetchFailed ? undefined : parts.data),
+    ...buildItemTimeline(parts.fetchFailed ? undefined : parts.itemCard?.pairing),
+  ].sort((a, b) => new Date(b.ts || 0).getTime() - new Date(a.ts || 0).getTime())
   if (events.length === 0) {
     rows.appendChild(el("div", "hvs-empty", "no HIVE records for this session yet — stage transitions land here as they happen"))
   } else {

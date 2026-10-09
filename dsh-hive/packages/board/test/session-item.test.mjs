@@ -54,15 +54,67 @@ test("resolveSessionItem: group fallback covers dispatch-group children", () => 
   assert.equal(item?.id, "WI-083")
 })
 
-test("resolveSessionItem: only in_progress binds (done items never match)", () => {
-  const { item, matchedBy } = resolveSessionItem([ITEM_DONE], "session-ac945505-3567-4aac-b683-9da796726d3a")
-  assert.equal(item, null)
-  assert.equal(matchedBy, null)
+test("resolveSessionItem (v1.3): a DONE owned item stays connected via its ownership", () => {
+  const doneOwned = {
+    ...ITEM_DONE,
+    updated: "2026-10-09T07:00:00Z",
+    transitions: [
+      { at: "2026-10-08T16:53:00Z", from: null, to: "in_progress", by: "hive_board_bind", session: "session-ac945505-3567-4aac-b683-9da796726d3a" },
+      { at: "2026-10-09T07:00:00Z", from: "in_progress", to: "done", by: "hive_board_complete", session: "session-ac945505-3567-4aac-b683-9da796726d3a" },
+    ],
+  }
+  const { item, matchedBy, history, historyTotal } = resolveSessionItem([doneOwned], "session-ac945505-3567-4aac-b683-9da796726d3a")
+  assert.equal(matchedBy, "owner")
+  assert.equal(item.id, "WI-001")
+  assert.equal(item.status, "done", "the card carries the CURRENT durable status")
+  assert.equal(historyTotal, 2)
+  assert.equal(history[0].to, "done", "latest transition first")
+  assert.ok(history.some((t) => t.to === "in_progress" && t.by === "hive_board_bind"))
 })
 
-test("resolveSessionItem: no match is honest null", () => {
-  const { item } = resolveSessionItem([ITEM_A, ITEM_B], "session-nobody-000")
+test("resolveSessionItem (v1.3): newest ownership evidence wins over older owned items", () => {
+  const older = {
+    ...ITEM_DONE,
+    id: "WI-OLD",
+    owner_session: "session-ac945505-3567-4aac-b683-9da796726d3a",
+    updated: "2026-10-01T00:00:00Z",
+  }
+  const newer = { ...doneOwnedFixture(), updated: "2026-10-09T07:00:00Z" }
+  const { item } = resolveSessionItem([older, newer], "session-ac945505-3567-4aac-b683-9da796726d3a")
+  assert.equal(item.id, "WI-001")
+})
+
+function doneOwnedFixture() {
+  return {
+    id: "WI-001",
+    title: "old work",
+    status: "done",
+    priority: "low",
+    owner_session: "session-ac945505-3567-4aac-b683-9da796726d3a",
+    group_id: null,
+    updated: "2026-10-09T07:00:00Z",
+    transitions: [
+      { at: "2026-10-09T07:00:00Z", from: "in_progress", to: "done", by: "hive_board_complete", session: "session-ac945505-3567-4aac-b683-9da796726d3a" },
+    ],
+  }
+}
+
+test("resolveSessionItem: no ownership at all is honest null", () => {
+  const stranger = { ...ITEM_A, owner_session: "session-someone-else", group_id: null, transitions: [], updated: "2026-10-09T00:00:00Z" }
+  const { item, matchedBy, history, historyTotal } = resolveSessionItem([ITEM_A, ITEM_B, stranger], "session-nobody-000")
   assert.equal(item, null)
+  assert.equal(matchedBy, null)
+  assert.equal(history.length, 0)
+  assert.equal(historyTotal, 0)
+})
+
+test("resolveSessionItem (v1.3): a LIVE in_progress bind outranks a settled done", () => {
+  const settled = doneOwnedFixture()
+  const live = { ...ITEM_A, updated: "2026-10-08T16:53:00Z" } // in_progress owner bind
+  const { item, matchedBy } = resolveSessionItem([settled, live], "session-ac945505-3567-4aac-b683-9da796726d3a")
+  assert.equal(matchedBy, "owner")
+  assert.equal(item.status, "in_progress")
+  assert.equal(item.id, "WI-083")
 })
 
 // ── route over the real store copy ───────────────────────────────────────────
@@ -130,6 +182,13 @@ test("the session-item route serves the real owned item over a store copy", asyn
   assert.equal(good.body.ok, true)
   assert.equal(good.body.item?.id, pairing.itemId, "the real pairing resolves")
   assert.ok(good.body.matchedBy === "owner" || good.body.matchedBy === "group")
+  // v1.3: the payload carries the resolved item's OWN transition history
+  assert.ok(Array.isArray(good.body.history), "history array present")
+  assert.equal(typeof good.body.historyTotal, "number")
+  assert.ok(good.body.history.length <= 20, "history display-capped")
+  const none2 = await call("/api/hive-board/session-item?id=session-not-a-real-owner-000")
+  assert.equal(none2.body.history.length, 0)
+  assert.equal(none2.body.historyTotal, 0)
 
   const none = await call("/api/hive-board/session-item?id=session-not-a-real-owner-000")
   assert.equal(none.body.ok, true)

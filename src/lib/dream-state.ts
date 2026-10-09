@@ -95,6 +95,19 @@ export interface DreamState {
    * false (an unflagged end-of-work dream keeps the historical close behavior).
    */
   pre_compaction: boolean
+  /**
+   * WI-085 — the OWNING SESSION's id, stamped ONCE at hive_dream_begin
+   * (scalar-set-at-begin semantics; completion's in-place rewrite never
+   * touches it — I-049 append-preserve). Root-cause fix for SHADOW-027:
+   * DRM records previously carried no session identity, so no consumer
+   * could attribute dreams to sessions. Absent from dreams begun before
+   * the fix — those stay workspace-level by definition; every consumer
+   * must treat undefined as UNATTRIBUTED (never backfill, never guess).
+   * `owner_lineage` rides the same stamp when the caller can resolve the
+   * awaken lineage cheaply.
+   */
+  owner_session?: string
+  owner_lineage?: string
   insights: string[]
   warnings: string[]
   songlines: string[]
@@ -377,6 +390,10 @@ export function serializeDreamState(d: DreamState): string {
     `exit_time: ${exitTime}`,
     `status: ${d.status}`,
     `project_context: ${q(d.project_context)}`,
+    // WI-085 begin-time session identity — emitted ONLY when recorded;
+    // older dreams (pre-fix) carry neither line, by definition unattributed.
+    ...(d.owner_session !== undefined ? [`owner_session: ${q(d.owner_session)}`] : []),
+    ...(d.owner_lineage !== undefined ? [`owner_lineage: ${q(d.owner_lineage)}`] : []),
   ].join("\n"))
 
   // context_signals block

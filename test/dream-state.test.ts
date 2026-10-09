@@ -163,3 +163,30 @@ describe("pre_compaction lifecycle marker (WI-080)", () => {
     expect(readDreamState(historyDreamPath(dir, dreamId)).pre_compaction).toBe(false)
   })
 })
+
+
+describe("begin-time session identity (WI-085 / SHADOW-027)", () => {
+  test("beginDream stamps owner_session into the active DRM file and parses back", () => {
+    const { filePath } = beginDream(dir, baseIntent({
+      owner_session: "session-root-000",
+      owner_lineage: "lineage-root",
+    }))
+    const raw = fs.readFileSync(filePath, "utf8")
+    expect(raw).toContain('owner_session: "session-root-000"')
+    expect(raw).toContain('owner_lineage: "lineage-root"')
+    const state = readDreamState(filePath)
+    expect(state.owner_session).toBe("session-root-000")
+    expect(state.owner_lineage).toBe("lineage-root")
+  })
+
+  test("completion preserves owner lines and pre-fix files stay unattributed", () => {
+    const stamped = beginDream(dir, baseIntent({ owner_session: "session-root-000" }))
+    completeDream(dir, "2026-08-11T03:00:00Z", [])
+    const hist = fs.readFileSync(historyDreamPath(dir, stamped.dreamId), "utf8")
+    expect(hist).toContain('owner_session: "session-root-000"')
+
+    const plain = beginDream(dir, baseIntent())
+    expect(readDreamState(plain.filePath).owner_session).toBeUndefined()
+    expect(readDreamState(plain.filePath).owner_lineage).toBeUndefined()
+  })
+})

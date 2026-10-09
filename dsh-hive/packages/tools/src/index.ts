@@ -424,7 +424,7 @@ export function apply(ctx: DreamToolsCtx) {
         ),
       },
       output: TEXT_OUT,
-      async execute(args) {
+      async execute(args, exec) {
         // Single-active invariant
         const active = arc().listActiveDreams()
         if (active.length > 0) {
@@ -432,6 +432,23 @@ export function apply(ctx: DreamToolsCtx) {
           log("warn", "[dream_begin] refused — active dream already exists", { existing })
           return `Cannot begin a new dream: ${existing} is already active. Complete it first with hive_dream_complete, or check dreams/active/ manually.`
         }
+
+        // WI-085 — begin-time session identity (SHADOW-027 fix): the dream
+        // file records WHO owns it, so observability surfaces can attribute
+        // dreams to sessions. Lineage (the awaken parent) is best-effort:
+        // the agent's session header may carry the parent id under dsh.
+        const { sessionID } = resolveCaller(exec as { agent?: unknown })
+        const lineage = (() => {
+          try {
+            const agent = (exec as { agent?: unknown }).agent as
+              | { session?: { header?: { parentId?: string } } }
+              | undefined
+            const parent = agent?.session?.header?.parentId
+            return typeof parent === "string" && parent ? parent : undefined
+          } catch {
+            return undefined
+          }
+        })()
 
         const splitLines = (s?: string): string[] =>
           s ? s.split("\n").map((l) => l.trim()).filter(Boolean) : []
@@ -451,9 +468,11 @@ export function apply(ctx: DreamToolsCtx) {
           retain_high: splitLines(args.retain_high),
           retain_low: splitLines(args.retain_low),
           pre_compaction: args.pre_compaction ?? false,
+          owner_session: sessionID === "unknown-session" ? undefined : sessionID,
+          ...(lineage !== undefined ? { owner_lineage: lineage } : {}),
         })
 
-        log("info", `[dream_begin] opened ${dreamId}`, { filePath, preCompaction: args.pre_compaction ?? false })
+        log("info", `[dream_begin] opened ${dreamId}`, { filePath, preCompaction: args.pre_compaction ?? false, ownerSession: sessionID })
         const lifecycleNote = args.pre_compaction === true
           ? "\nMarked pre_compaction: completing this dream will NOT close any board work item — work continues afterwards."
           : ""
