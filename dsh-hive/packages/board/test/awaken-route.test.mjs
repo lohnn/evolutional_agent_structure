@@ -412,6 +412,96 @@ test("origin guard — Origin with missing/mismatched Host fails closed; garbage
   }
 })
 
+// ── WORKSPACE GROUPING (post-landing bug fix): resolve-before-create, parity
+// with the browser path; explicit body id wins; misses stay honest, not fatal ─
+
+test("workspace grouping — resolver hit: create carries workspaceId (NO cwd), response echoes it", async () => {
+  const services = fakeServices()
+  let resolvedPath = null
+  const handler = buildHandler(services, {
+    resolveWorkspace: async (path) => { resolvedPath = path; return { id: "ws-1" } },
+    readBody: bodyReaderFor({}),
+  })
+  const r = await fire(handler, { body: "{}" })
+  assert.equal(r.status, 200)
+  assert.equal(r.json.workspaceId, "ws-1")
+  assert.ok(!("workspaceNote" in r.json), "a resolved workspace needs no note")
+  assert.equal(resolvedPath, synthDir, "the resolver is called with the board's directory")
+  // XOR discipline: workspaceId replaces cwd in the controller request
+  const createArgs = services.calls[0][3].request
+  assert.equal(createArgs.workspaceId, "ws-1")
+  assert.ok(!("cwd" in createArgs), "workspaceId and cwd are mutually exclusive on the wire")
+})
+
+test("workspace grouping — explicit body.workspaceId wins and skips resolution", async () => {
+  const services = fakeServices()
+  let resolverCalls = 0
+  const handler = buildHandler(services, {
+    resolveWorkspace: async () => { resolverCalls++; return { id: "ws-1" } },
+    readBody: bodyReaderFor({ workspaceId: "ws-explicit" }),
+  })
+  const r = await fire(handler, { body: "{}" })
+  assert.equal(r.status, 200)
+  assert.equal(r.json.workspaceId, "ws-explicit")
+  assert.equal(resolverCalls, 0, "an explicit workspace short-circuits the resolver")
+  assert.equal(services.calls[0][3].request.workspaceId, "ws-explicit")
+})
+
+test("workspace grouping — resolver miss: cwd fallback + honest note, session still created", async () => {
+  const services = fakeServices()
+  const handler = buildHandler(services, {
+    resolveWorkspace: async () => undefined,
+    readBody: bodyReaderFor({}),
+  })
+  const r = await fire(handler, { body: "{}" })
+  assert.equal(r.status, 200, "a grouping miss is cosmetic — the awaken still works")
+  assert.equal(r.json.ok, true)
+  assert.equal(r.json.workspaceId, null)
+  assert.match(r.json.workspaceNote, /UNGROUPED/)
+  assert.match(r.json.workspaceNote, /workspaceRegistry/)
+  assert.equal(services.calls[0][3].request.cwd, synthDir, "falls back to the pre-fix cwd-only create")
+})
+
+test("workspace grouping — resolver throw is contained: cwd fallback + note, create proceeds", async () => {
+  const services = fakeServices()
+  const handler = buildHandler(services, {
+    resolveWorkspace: async () => { throw new Error("registry wedged") },
+    readBody: bodyReaderFor({}),
+  })
+  const r = await fire(handler, { body: "{}" })
+  assert.equal(r.status, 200)
+  assert.equal(r.json.workspaceId, null)
+  assert.match(r.json.workspaceNote, /registry wedged/)
+  assert.equal(services.calls[0][3].request.cwd, synthDir)
+})
+
+test("workspace grouping — the preset-400 marker carries the resolved workspaceId (live-code probe without creating anything)", async () => {
+  for (const [resolver, expected] of [
+    [async () => ({ id: "ws-1" }), "ws-1"],
+    [async () => undefined, null],
+  ]) {
+    const services = fakeServices({ presetOk: false })
+    const handler = buildHandler(services, { resolveWorkspace: resolver, readBody: bodyReaderFor({ preset: "nope" }) })
+    const r = await fire(handler, { body: "{}" })
+    assert.equal(r.status, 400)
+    assert.equal(r.json.workspaceId, expected, `marker workspaceId for resolver ${String(resolver)}`)
+    assert.match(r.json.error, /unknown agent preset "nope"/)
+  }
+})
+
+test("workspace grouping — attach failure after create is a typed 500, nothing swallowed", async () => {
+  const services = fakeServices({ createError: { code: "session/workspace-attach-failed", message: 'session "x" was created but could not attach to workspace "ws-1"' } })
+  const handler = buildHandler(services, {
+    resolveWorkspace: async () => ({ id: "ws-1" }),
+    readBody: bodyReaderFor({}),
+  })
+  const r = await fire(handler, { body: "{}" })
+  assert.equal(r.status, 500)
+  assert.equal(r.json.code, "session/workspace-attach-failed")
+  assert.match(r.json.error, /could not attach/)
+  assert.equal(r.json.workspaceId, "ws-1", "the workspace identity rides the failure for the drawer")
+})
+
 // ── 2. the cordis-level wiring: OPT-IN flag gates ONLY the awaken route ──────
 
 const bootCtx = async (config) => {
@@ -432,13 +522,18 @@ const bootCtx = async (config) => {
   provide(routeCtx, "agents", { get: (id) => ({ id }), list: () => [] })
   provide(routeCtx, "commands", { find: () => ({ name: "awaken" }), execute: async () => ({ result: { kind: "success", text: "flipped" } }) })
   provide(routeCtx, "agentPresets", { resolve: async (id) => ({ id: id ?? "standard" }) })
-  provide(routeCtx, "typertGateway", { invoke: async () => ({ sessionId: "session-cordis-1", agentPreset: "standard" }) })
+  const sentRequests = []
+  provide(routeCtx, "typertGateway", {
+    invoke: async (request) => { sentRequests.push(request); return { sessionId: "session-cordis-1", agentPreset: "standard" } },
+  })
   // ORIGIN GUARD belt: a trust fence fake that admits everything (loopback-like)
   provide(routeCtx, "connection", { requestRejection: (req) => undefined })
+  // WORKSPACE GROUPING: a registry fake that resolves the board directory
+  provide(routeCtx, "workspaceRegistry", { resolveByPath: async (path) => ({ id: "ws-live", path }) })
 
   routeCtx.plugin(Board, config)
   await new Promise((r) => setTimeout(r, 100))
-  return { routeCtx, routes }
+  return { routeCtx, routes, sentRequests }
 }
 
 function provide(ctx, key, value) {
@@ -448,7 +543,7 @@ function provide(ctx, key, value) {
 }
 
 test("awaken:true registers the POST route (exact) beside the read-only routes, and it answers end-to-end over fakes", async () => {
-  const { routes, routeCtx } = await bootCtx({ directory: synthDir, awaken: true })
+  const { routes, routeCtx, sentRequests } = await bootCtx({ directory: synthDir, awaken: true })
   assert.equal(routeCtx.board.awaken, true)
   const awakenRoute = routes.find((r) => r.path === AWAKEN_ROUTE_PATH)
   assert.ok(awakenRoute, "the awaken route registers ONLY when the opt-in flag composes true")
@@ -466,6 +561,12 @@ test("awaken:true registers the POST route (exact) beside the read-only routes, 
   assert.equal(body.ok, true)
   assert.equal(body.sessionId, "session-cordis-1")
   assert.equal(body.awakened.commanded, true)
+  // WORKSPACE GROUPING parity: the wired handler resolved the workspace and
+  // sent workspaceId (not cwd) to the controller.
+  assert.equal(body.workspaceId, "ws-live")
+  const createRequest = sentRequests.find((s) => s.namespace === "session" && s.method === "create")?.args?.request
+  assert.equal(createRequest?.workspaceId, "ws-live", "the wired handler passes the resolved workspace id")
+  assert.ok(!("cwd" in (createRequest ?? {})), "workspaceId replaces cwd on the wire")
 
   // Same-origin browser-style POST through the WIRED handler also passes (the
   // wiring hands the connection trust fence through, and it admits here).

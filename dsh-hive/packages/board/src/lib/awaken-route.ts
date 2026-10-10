@@ -102,6 +102,19 @@ export interface AwakenResponseLike {
  */
 export type AwakenConnectionTrust = (req: AwakenRequestLike) => unknown
 
+/**
+ * The workspace registry's path resolver (service key `workspaceRegistry`,
+ * method `resolveByPath`). The SHELL's sidebar groups sessions by workspace
+ * MEMBERSHIP — key `cwd:${workspace.path}` for members vs the fallback
+ * `session:${sessionId}` ("Ungrouped") — and membership is filled by the
+ * controller's post-create `workspace.attachSession`, which only runs when
+ * the create request carries `workspaceId`. Resolving the board's directory
+ * to its workspace and passing that id is exactly what the browser's
+ * SessionManager.create does; every awaken session then joins the workspace
+ * group instead of floating ungrouped.
+ */
+export type AwakenWorkspaceResolver = (path: string) => Promise<{ id: string } | null | undefined>
+
 /** Everything the handler needs; Board wires the real services, tests the fakes. */
 export interface AwakenDeps {
   /** The workspace root (the dir containing `.opencode/`) created sessions start in. */
@@ -123,6 +136,18 @@ export interface AwakenDeps {
    * nothing to undo (W-049).
    */
   connectionTrust?: AwakenConnectionTrust
+  /**
+   * WORKSPACE GROUPING (post-landing bug fix): when wired, every awaken
+   * resolves the board directory to its workspace and passes `workspaceId`
+   * to session/create — the controller then creates under workspace.path and
+   * runs attachSession, which is the membership the sidebar groups by. An
+   * explicit `workspaceId` in the request body wins (controller-native typed
+   * `workspace/not-found` if wrong). When unwired or resolution misses, the
+   * session is created cwd-only (the old Ungrouped behavior) with an honest
+   * additive note — fail-open by design: grouping is cosmetic and the drawer
+   * says why; NOTHING is silently swallowed.
+   */
+  resolveWorkspace?: AwakenWorkspaceResolver
   /** Test seams — production code never passes these. */
   mintSessionId?: () => string
   mintRequestId?: () => string
@@ -141,6 +166,12 @@ export interface AwakenRequestPayload {
   hint?: string
   /** First user message to plant via session/prompt AFTER the flip settles. */
   firstMessage?: string
+  /**
+   * Explicit workspace for the new session (controller-native semantics:
+   * unknown id → typed `workspace/not-found`, fail-closed pre-create).
+   * Absent ⇒ the route resolves the board directory's workspace itself.
+   */
+  workspaceId?: string
 }
 
 /** A settled handler outcome — never a throw; status + payload speak for it. */
@@ -189,7 +220,11 @@ export function readPostBody(req: AwakenRequestLike, maxBytes: number): Promise<
  * the raw message — never swallowed silently.
  */
 export function classifyAwakenFailure(error: unknown): { status: number; code: string | undefined; message: string } {
-  const message = error instanceof Error ? error.message : String(error)
+  const message =
+    error instanceof Error ? error.message
+    : typeof (error as { message?: unknown } | null | undefined)?.message === "string"
+      ? ((error as { message: string }).message)
+      : String(error)
   const code = typeof (error as { code?: unknown })?.code === "string" ? ((error as { code: string }).code) : undefined
   if (code === "gateway/bad-request") return { status: 400, code, message }
   if (code === "workspace/not-found") return { status: 404, code, message }
@@ -314,7 +349,49 @@ export function createAwakenRouteHandler(deps: AwakenDeps) {
       }
     }
 
+    // ── WORKSPACE GROUPING: resolve BEFORE any creation, additive & honest ────
+    // Explicit body.workspaceId wins (controller-native: unknown id → typed
+    // workspace/not-found, fail-closed pre-create — the caller redirected
+    // intent). Otherwise resolve the board directory itself to its workspace
+    // and pass the id — the SAME membership the browser path coins and the
+    // ONLY thing the shell sidebar groups by. Unwired or miss ⇒ the create
+    // proceeds exactly as pre-fix (cwd-only) with an additive workspaceNote —
+    // fail-open with visible cause: grouping is cosmetic and recoverable,
+    // a hard block would trade a UX mismatch for a feature outage.
+    let requestWorkspaceId: string | undefined
+    let resolvedWorkspaceId: string | null = null
+    let workspaceNote: string | undefined
+    const explicitWorkspaceId = stringField(body.workspaceId)
+    if (explicitWorkspaceId !== undefined) {
+      // typed controller semantics: workspace/not-found if unknown
+      requestWorkspaceId = explicitWorkspaceId
+      resolvedWorkspaceId = explicitWorkspaceId
+    } else if (deps.resolveWorkspace) {
+      try {
+        const ws = await deps.resolveWorkspace(deps.directory)
+        if (ws && typeof ws.id === "string" && ws.id !== "") {
+          requestWorkspaceId = ws.id
+          resolvedWorkspaceId = ws.id
+        } else {
+          workspaceNote =
+            `no composed workspace matches the board directory "${deps.directory}" — the session is created but stays UNGROUPED in the sidebar; add/point a workspace at that path (workspaceRegistry) to group it`
+        }
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e)
+        log("warn", "[board] awaken route: workspace resolution threw", { directory: deps.directory, error: message })
+        workspaceNote =
+          `workspace lookup failed (${message}) — the session is created but stays UNGROUPED in the sidebar; fix the workspace registry and re-attach`
+      }
+    } else {
+      workspaceNote =
+        "this composition exposes no workspace registry to the awaken route — the session is created but stays UNGROUPED in the sidebar (board awaken wiring needs workspaceRegistry)"
+    }
+
     // Preset validation EARLY: an unknown preset must fail before create.
+    // The 400 payload carries the RESOLVED workspace id — also the cheap
+    // live-code marker: a preset-only failure that echoes `workspaceId`
+    // proves the grouping-aware handler is hot (no session is ever created
+    // to check this).
     let resolvedPresetId: string | undefined
     if (preset) {
       try {
@@ -326,6 +403,8 @@ export function createAwakenRouteHandler(deps: AwakenDeps) {
         respond(res, 400, {
           ok: false,
           error: `unknown agent preset "${preset}": ${message} — list presets via agentPresets or omit "preset" for the deployment default`,
+          workspaceId: resolvedWorkspaceId,
+          ...(workspaceNote ? { workspaceNote } : {}),
           generated,
         })
         return
@@ -339,9 +418,13 @@ export function createAwakenRouteHandler(deps: AwakenDeps) {
     // session here.
     // WIRE SHAPE (captured live 2026-09-20): gateway invoke args are the
     // METHOD's NAMED parameters — the controller's create(request) takes one
-    // object ⇒ args = { request: { cwd, agentPreset? } }. Flattened fields
+    // object ⇒ args = { request: {…} }. The controller takes workspaceId XOR
+    // cwd: with a resolved workspace it creates under workspace.path and runs
+    // attachSession (the SIDEBAR MEMBERSHIP) itself, surfacing its typed
+    // session/workspace-attach-failed up to our mapping; flattened fields
     // fail the decode with gateway/arguments-invalid (typed, actionable).
-    const requestBody: Record<string, unknown> = { cwd: deps.directory }
+    const requestBody: Record<string, unknown> =
+      requestWorkspaceId !== undefined ? { workspaceId: requestWorkspaceId } : { cwd: deps.directory }
     // agentPreset rides only when requested; omitted ⇒ the deployment default
     // (the controller resolves it — the same resolution as the browser's new chat).
     if (resolvedPresetId) requestBody.agentPreset = resolvedPresetId
@@ -360,6 +443,7 @@ export function createAwakenRouteHandler(deps: AwakenDeps) {
         error: message,
         code,
         note: "session creation failed — nothing was created, nothing was flipped",
+        workspaceId: resolvedWorkspaceId,
         generated,
       })
       return
@@ -466,7 +550,7 @@ export function createAwakenRouteHandler(deps: AwakenDeps) {
       }
     }
 
-    log("info", "[board] awaken route: session created", { sessionId, preset: resolvedPresetId ?? null, item: item?.id ?? null, flipOk: awakened.ok })
+    log("info", "[board] awaken route: session created", { sessionId, preset: resolvedPresetId ?? null, workspaceId: resolvedWorkspaceId, item: item?.id ?? null, flipOk: awakened.ok })
 
     respond(res, 200, {
       ok: true as const,
@@ -474,6 +558,11 @@ export function createAwakenRouteHandler(deps: AwakenDeps) {
       sessionId,
       preset: (typeof createValue.agentPreset === "string" && createValue.agentPreset) || resolvedPresetId || null,
       cwd: deps.directory,
+      // WORKSPACE GROUPING, additive: the resolved workspace the session was
+      // attached to (the sidebar's group identity) — null means Ungrouped,
+      // and workspaceNote says why.
+      workspaceId: resolvedWorkspaceId,
+      ...(workspaceNote ? { workspaceNote } : {}),
       item: item ?? null,
       awakened,
       ...(planted ? { planted } : {}),

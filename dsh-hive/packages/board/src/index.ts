@@ -848,13 +848,14 @@ parameters: {
     // Default OFF (this.awaken): the exposure question for a route that creates
     // REAL sessions is the user's §5 re-ratification — see src/lib/awaken-route.ts.
     if (this.awaken) {
-      ctx.registry.inject(["webServer", "agents", "commands", "agentPresets", "typertGateway", "connection"], (wakeCtx) => {
+      ctx.registry.inject(["webServer", "agents", "commands", "agentPresets", "typertGateway", "connection", "workspaceRegistry"], (wakeCtx) => {
         const webServer = wakeCtx.get("webServer") as WebServerLike | undefined
         const agents = wakeCtx.get("agents") as { get?: unknown } | undefined
         const commands = wakeCtx.get("commands") as { find?: unknown; execute?: unknown } | undefined
         const presets = wakeCtx.get("agentPresets") as { resolve?: unknown } | undefined
         const gateway = wakeCtx.get("typertGateway") as { invoke?: unknown } | undefined
         const connection = wakeCtx.get("connection") as { requestRejection?: unknown } | undefined
+        const workspaces = wakeCtx.get("workspaceRegistry") as { resolveByPath?: unknown } | undefined
         const shaped =
           webServer && typeof webServer.register === "function" &&
           agents && typeof agents.get === "function" &&
@@ -872,6 +873,19 @@ parameters: {
           commands: commands as import("./lib/awaken-route.js").AwakenCommandsLike,
           presets: presets as import("./lib/awaken-route.js").AwakenPresetsLike,
           gateway: gateway as import("./lib/awaken-route.js").AwakenGatewayLike,
+          // WORKSPACE GROUPING: resolve the board directory to its workspace so
+          // session/create carries workspaceId — the controller then attaches
+          // post-create, which is the sidebar's group membership. A missing or
+          // unshaped registry ⇒ the handler's honest ungrouped note; nothing
+          // hard-blocks.
+          ...(workspaces && typeof workspaces.resolveByPath === "function"
+            ? {
+                resolveWorkspace: (path: string) =>
+                  (workspaces.resolveByPath as (p: string) => Promise<unknown>)(path) as ReturnType<
+                    import("./lib/awaken-route.js").AwakenWorkspaceResolver
+                  >,
+              }
+            : {}),
           // ORIGIN GUARD belt: the connection trust fence — the same
           // requestRejection the gateway runs on its WebSocket upgrade.
           // Absent connection service (pathological composition) ⇒ the
