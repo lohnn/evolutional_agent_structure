@@ -112,6 +112,7 @@ import {
   type TransitionResult,
 } from "./lib/board-transitions.js"
 import { isSessionAwakened } from "./lib/sessions-read.js"
+import { AWAKEN_ROUTE_PATH, createAwakenRouteHandler } from "./lib/awaken-route.js"
 export { makeDrmCompleteCheck, makeDrmArtifacts } from "./lib/drm-read.js"
 
 // Re-export the lib surface — B4's tool registrations and the two seams (B5
@@ -278,9 +279,17 @@ export class Board extends Service {
   static Config = z.object({
     // Workspace root (the dir containing `.opencode/`). Default: process cwd.
     directory: z.string().default(process.cwd()),
+    // WI-064 spike — the POST /api/hive-board/awaken route is OPT-IN (default
+    // OFF). Plugin webServer routes carry NO token/cookie auth (board-tab
+    // contract §5 — "not an auth layer"), and this route creates REAL
+    // sessions, so the exposure decision is the USER's §5 re-ratification,
+    // never a silent default. Compose `- id: board / config: { awaken: true }`
+    // (or a --patch overlay on a machine you trust) to turn it on.
+    awaken: z.boolean().default(false),
   })
 
   readonly directory: string
+  readonly awaken: boolean
 
   /**
    * Slice 3D — the live-activity feed. Captured via the W-090 WAIT (below),
@@ -293,16 +302,17 @@ export class Board extends Service {
    */
   private agentsSvc: { list?: () => Array<{ id?: unknown; status?: unknown }> | undefined } | undefined
 
-  constructor(ctx: import("@deepseek-ai/cordis").Context, config: { directory: string }) {
+  constructor(ctx: import("@deepseek-ai/cordis").Context, config: { directory: string; awaken?: boolean }) {
     super(ctx, "board")
     this.directory = config.directory
+    this.awaken = config.awaken === true
     this.ctx.logger?.info?.("[board] storage module active (8 hive_board_* tools registered)", {
       directory: this.directory,
       tools: 8,
     })
 
     const directory = this.directory
-    const log = (level: "info" | "warn", msg: string, extra?: Record<string, unknown>) =>
+    const log = (level: "info" | "warn" | "error", msg: string, extra?: Record<string, unknown>) =>
       this.ctx.logger?.[level]?.(msg, extra)
 
     // ── hive_board_list ──────────────────────────────────────────────────────
@@ -828,6 +838,80 @@ parameters: {
         this.ctx.logger?.warn?.("[board] agents service arrived without list() — activity stays zero")
       }
     })
+
+    // ── WI-064 spike: POST /api/hive-board/awaken (host-half), OPT-IN ─────────
+    // ONE combined W-090 WAIT at constructor top level (never nested — W-096):
+    // all five services the handler touches must exist on the composition, or
+    // the route silently never registers (honest degradation — the route is
+    // meaningless without them). The captured services ride the handler CLOSURE;
+    // the handler itself never re-reads ctx at request time (W-090 discipline).
+    // Default OFF (this.awaken): the exposure question for a route that creates
+    // REAL sessions is the user's §5 re-ratification — see src/lib/awaken-route.ts.
+    if (this.awaken) {
+      ctx.registry.inject(["webServer", "agents", "commands", "agentPresets", "typertGateway", "connection", "workspaceRegistry"], (wakeCtx) => {
+        const webServer = wakeCtx.get("webServer") as WebServerLike | undefined
+        const agents = wakeCtx.get("agents") as { get?: unknown } | undefined
+        const commands = wakeCtx.get("commands") as { find?: unknown; execute?: unknown } | undefined
+        const presets = wakeCtx.get("agentPresets") as { resolve?: unknown } | undefined
+        const gateway = wakeCtx.get("typertGateway") as { invoke?: unknown } | undefined
+        const connection = wakeCtx.get("connection") as { requestRejection?: unknown } | undefined
+        const workspaces = wakeCtx.get("workspaceRegistry") as { resolveByPath?: unknown } | undefined
+        const shaped =
+          webServer && typeof webServer.register === "function" &&
+          agents && typeof agents.get === "function" &&
+          commands && typeof commands.find === "function" && typeof commands.execute === "function" &&
+          presets && typeof presets.resolve === "function" &&
+          gateway && typeof gateway.invoke === "function"
+        if (!shaped) {
+          this.ctx.logger?.warn?.("[board] awaken:true — a required service arrived without its seam (webServer/agents/commands/agentPresets/typertGateway); awaken route skipped")
+          return
+        }
+        const handler = createAwakenRouteHandler({
+          directory: this.directory,
+          loadItem: (id: string) => this.readItem(id),
+          agents: agents as { get: (id: string) => unknown },
+          commands: commands as import("./lib/awaken-route.js").AwakenCommandsLike,
+          presets: presets as import("./lib/awaken-route.js").AwakenPresetsLike,
+          gateway: gateway as import("./lib/awaken-route.js").AwakenGatewayLike,
+          // WORKSPACE GROUPING: resolve the board directory to its workspace so
+          // session/create carries workspaceId — the controller then attaches
+          // post-create, which is the sidebar's group membership. A missing or
+          // unshaped registry ⇒ the handler's honest ungrouped note; nothing
+          // hard-blocks.
+          ...(workspaces && typeof workspaces.resolveByPath === "function"
+            ? {
+                resolveWorkspace: (path: string) =>
+                  (workspaces.resolveByPath as (p: string) => Promise<unknown>)(path) as ReturnType<
+                    import("./lib/awaken-route.js").AwakenWorkspaceResolver
+                  >,
+              }
+            : {}),
+          // ORIGIN GUARD belt: the connection trust fence — the same
+          // requestRejection the gateway runs on its WebSocket upgrade.
+          // Absent connection service (pathological composition) ⇒ the
+          // same-origin Origin check alone still guards.
+          ...(connection && typeof connection.requestRejection === "function"
+            ? {
+                connectionTrust: (req: import("./lib/awaken-route.js").AwakenRequestLike) =>
+                  (connection.requestRejection as (r: unknown) => unknown)(req),
+              }
+            : {}),
+          log,
+        })
+        // The sibling routes' exact effect form: the body returns the register
+        // disposer, so the route unregisters with the plugin's scope.
+        wakeCtx.effect(
+          () =>
+            webServer.register({
+              kind: "exact",
+              path: AWAKEN_ROUTE_PATH,
+              handler: handler as (req: unknown, res: WebLikeResponse) => Promise<void>,
+            }),
+          "board awaken route",
+        )
+        this.ctx.logger?.info?.(`[board] awaken route registered at ${AWAKEN_ROUTE_PATH} (POST; opt-in awaken config)`)
+      })
+    }
   }
 
   // ── read surface (B1; the locked write surface lives in the lib modules —
