@@ -20,6 +20,36 @@ from `projects/hive-board/` on 2026-08-03; that directory no longer holds the so
 | `test/board-viewer/`, `fixtures/`, `docs/board-viewer/` | the viewer's tests, fixtures, docs | board-viewer |
 | `package.json`, `tsconfig.json`, `exports`, `bin` | packaging | hive-infra |
 
+## The dsh-hive cohort ships as a KIT — merge is not ship
+
+`dsh-hive/` is the DSH-plugin pnpm monorepo (twelve packages); `dsh-hive-dist/` is the
+**install kit** those packages ship as (committed tarballs — the tarball NAME, version
+included, *is* the release identity). This machine runs a `link:` install of the working
+tree, so it sees everything the moment it is written — every other machine installs
+tarballs and resolves `pkg@version`. Split-brain lesson (2026-10-14, board buttons #59/#60
+and again the same day, agents #54): **a source PR merged without a repack ships to
+nobody.** A same-name repack also ships to nobody — bump the version, always.
+
+Definition of done for any `dsh-hive/packages/**` change, in the same PR:
+
+```
+pnpm --dir dsh-hive rebake <pkg…|--all>     # bump → build → pack → drop old →
+                                            # repoint every ref site → run both gates
+pnpm --dir dsh-hive rebake board --dry-run  # preview the plan, write nothing
+```
+
+The repoint list is non-obvious (`dsh-hive-update.sh` KIT_TARBALLS + SPECS,
+`.pnpmfile.cjs`, the `dsh-profile-hive` `package.json`, the bootstrap test's cohort
+pins) — which is exactly why it is scripted. CI (`.github/workflows/hive-kit.yml`)
+fails a PR whose package sources are newer than their committed tarball
+(`dsh-hive-dist/test/kit-freshness.test.sh`, pure git ancestry — no rebuilds). Keep
+`dsh-hive/**` in that workflow's trigger paths: it once watched only `dsh-hive-dist/**`,
+and source-only PRs slipped the kit gate entirely — the hole the whole rule now covers.
+`research-rampage` is deliberately NOT kit-shipped (see `NOT_KIT_SHIPPED` in the gate).
+
+Full cohort-bump checklist: `docs/DSH-UPDATE-RUNBOOK.md`; the three install ways and
+their consumers: `dsh-hive-dist/README.md`.
+
 ## No build step
 
 `main`/`exports` point at `src/*.ts` **directly**. `dist/` is gitignored and is never loaded at

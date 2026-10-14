@@ -28,6 +28,12 @@ new). So before repacking the kit for ANY content change:
 Way A (git) re-resolves by moving ref — unaffected. Full cohort-bump
 checklist: `../docs/DSH-UPDATE-RUNBOOK.md`.
 
+Steps 1–3 are scripted since 2026-10-14: `pnpm --dir dsh-hive rebake <pkg…|--all>`
+(bump → build → pack → drop the old tarball → repoint every reference site → run
+the updater-bootstrap + kit-freshness gates). CI fails a PR whose package sources
+are newer than their committed tarball — the #59/#60 board-buttons miss (source
+merged twice, no repack, kit machines sat on 0.1.5).
+
 Prereqs for all ways: **Node 22+, pnpm 11, git** (Way A's cohort is
 git-hosted; pnpm `dlx` likewise needs it), and a model-provider credential —
 see "Shared notes" (the step people miss).

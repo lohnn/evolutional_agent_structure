@@ -64,7 +64,7 @@ DSH_HIVE_RAW="https://example.test/evolutional_agent_structure" \
 "$KIT/dsh-hive-update.sh" "$PROFILE" > "$ROOT/updater.log"
 
 archives=(
-  hive-dsh-agents-0.0.2.tgz
+  hive-dsh-agents-0.0.5.tgz
   hive-dsh-board-0.1.6.tgz
   hive-dsh-dream-archive-0.0.2.tgz
   hive-dsh-evolution-0.0.5.tgz

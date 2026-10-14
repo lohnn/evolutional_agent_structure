@@ -10,6 +10,7 @@
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
     "pack:all": "pnpm -r build && pnpm -r exec pnpm pack --pack-destination ../../../dsh-hive-dist",
+    "rebake": "node scripts/rebake-kit.mjs",
     "sync-models": "node scripts/berget-models-sync.mjs"
   },
   "devDependencies": {
