@@ -96,6 +96,17 @@ export interface Transition {
    * this" must skip entries carrying `superseded` (see SCHEMA §4d).
    */
   superseded?: string
+  /**
+   * Free-text annotation carried by COMMAND-driven transitions (WI-093):
+   * `/board-close`'s reason line, verbatim from the user. Optional — entries
+   * without it serialize byte-identical to the pre-note format (the same
+   * backward-compatibility guarantee `absorbed` and `superseded` carry:
+   * emitted only when present, tolerated when absent, and never re-serialized
+   * on later edits — append-only line surgery, I-049). Quoted whenever the
+   * text exceeds the bare token alphabet (`token()`), so spaces and
+   * punctuation round-trip through the flow-map parser.
+   */
+  note?: string
 }
 
 export interface WorkItem {
@@ -261,6 +272,7 @@ function emitTransition(t: Transition): string {
     ...(t.session !== undefined ? [`session: ${token(t.session)}`] : []),
     ...(t.absorbed !== undefined ? [`absorbed: ${token(t.absorbed)}`] : []),
     ...(t.superseded !== undefined ? [`superseded: ${token(t.superseded)}`] : []),
+    ...(t.note !== undefined ? [`note: ${token(t.note)}`] : []),
   ]
   return `{ ${pairs.join(", ")} }`
 }
@@ -380,6 +392,7 @@ export function parseWorkItem(content: string): WorkItem {
           ...(m.session !== undefined && m.session !== "null" ? { session: m.session } : {}),
           ...(m.absorbed !== undefined && m.absorbed !== "null" ? { absorbed: m.absorbed } : {}),
           ...(m.superseded !== undefined && m.superseded !== "null" ? { superseded: m.superseded } : {}),
+          ...(m.note !== undefined && m.note !== "null" ? { note: m.note } : {}),
         })
       }
       continue

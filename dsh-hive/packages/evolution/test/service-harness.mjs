@@ -123,12 +123,15 @@ dispose()
 check("markUsed.event", usedEvent?.name === "beta" && usedEvent?.sessionId === "ses_harness_2", "hive/capability-used emitted")
 
 // ── Commands registered ─────────────────────────────────────────────────────
-// /awaken joined the lifecycle four (T2/D1); /status joins them last (T6/D8-2).
+// /awaken joined the lifecycle four (T2/D1); /status joins them last (T6/D8-2);
+// /dream toggles the dreamtime partition (TOKEN-ECONOMY D4); the WI-093 board
+// trio (close/release/reopen) completes the family (test/board-commands.test.mjs
+// drives their full verdict flow).
 // All of these gate on an AWAKENED coordinator except /awaken itself, which
 // opens the gate.
-const cmdNames = ["tick", "spawn", "evolve", "dissolve", "awaken", "status"]
+const cmdNames = ["tick", "spawn", "evolve", "dissolve", "awaken", "status", "dream", "board-close", "board-release", "board-reopen"]
 const registered = cmdNames.filter((n) => ctx.commands.find(undefined, n) !== undefined)
-check("commands.registered", registered.length === 6, `commands visible: ${registered.join(", ") || "(none)"}`)
+check("commands.registered", registered.length === 10, `commands visible: ${registered.join(", ") || "(none)"}`)
 
 // ── Command-summoned lifecycle tools (WI-037) ───────────────────────────────
 // Commands refuse without a live receiving agent (they never mutate directly).

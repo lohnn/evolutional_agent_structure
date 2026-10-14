@@ -343,9 +343,9 @@ NODE
 # pnpm 10.x or >=12.0 only.
 KIT_TARBALLS=(
   hive-dsh-agents-0.0.5.tgz
-  hive-dsh-board-0.1.6.tgz
+  hive-dsh-board-0.1.7.tgz
   hive-dsh-dream-archive-0.0.2.tgz
-  hive-dsh-evolution-0.0.5.tgz
+  hive-dsh-evolution-0.0.6.tgz
   hive-dsh-hivemind-0.0.2.tgz
   hive-dsh-painpoints-0.0.2.tgz
   hive-dsh-tools-0.0.3.tgz
@@ -414,9 +414,9 @@ if [ "$HAS_KIT_TARBALLS" = "1" ] && [ "${DSH_HIVE_GIT_MODE:-0}" != "1" ]; then
   # rel-spec anchoring against the caller cwd is bypassed by the cd.
   SPECS=(
     file:./hive-dsh-agents-0.0.5.tgz
-    file:./hive-dsh-board-0.1.6.tgz
+    file:./hive-dsh-board-0.1.7.tgz
     file:./hive-dsh-dream-archive-0.0.2.tgz
-    file:./hive-dsh-evolution-0.0.5.tgz
+    file:./hive-dsh-evolution-0.0.6.tgz
     file:./hive-dsh-hivemind-0.0.2.tgz
     file:./hive-dsh-painpoints-0.0.2.tgz
     file:./hive-dsh-tools-0.0.3.tgz

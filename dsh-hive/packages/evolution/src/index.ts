@@ -48,6 +48,14 @@ import { COORDINATOR_DOCTRINE, DORMANT_NOTICE, AWAKEN_BRIEF, REAWAKEN_BRIEF, CAP
 import { recordAwakened, isAwakened, decideGate } from "./lib/sessions.js"
 import { registerHiveStateRoute } from "./lib/hive-state-route.js"
 import { autoRegister } from "@hive/dsh-board/lib/board-transitions"
+// WI-093 — the board command transitions + the read primitives the command
+// layer needs to resolve targets and gate ownership (same B5-seam subpath
+// convention as the autoRegister import above; store functions take the
+// workspace root, the service's `directory` config).
+import { findItemByOwner, readItem } from "@hive/dsh-board/lib/board-store"
+import { normaliseItemId } from "@hive/dsh-board/lib/board-read"
+import { closeItem, releaseItem, reopenItem } from "@hive/dsh-board/lib/board-commands"
+import type { WorkItem } from "@hive/dsh-board/lib/board-store"
 import { parseCapabilityPersona, renderAgentCordisYml, type CapabilityPersona } from "./lib/persona.js"
 import { resolveCapabilityMaterial } from "./lib/material.js"
 import { optionalService } from "./lib/service-optional.js"
@@ -823,8 +831,15 @@ export class Evolution extends Service {
         agent: Agent | undefined,
         command: string,
         registerTool: (agentCtx: import("@deepseek-ai/cordis").Context) => () => void,
-        brief: string
+        brief: string,
+        // WI-093: per-summon overrides for commands whose tool name is not
+        // `hive_${command}` (dashes in command names) and whose mutation
+        // surface is not .opencode/agents/. Defaults preserve the historical
+        // text byte-for-byte.
+        opts: { toolName?: string; advisory?: string } = {}
       ): { kind: "success"; text: string } | { kind: "error"; text: string } => {
+        const toolName = opts.toolName ?? `hive_${command}`
+        const advisory = opts.advisory ?? "Do NOT hand-edit files under .opencode/agents/ — the tool performs the mutation."
         if (!agent) {
           return {
             kind: "error" as const,
@@ -849,9 +864,9 @@ export class Evolution extends Service {
                 type: "text",
                 text:
                   `[HIVE /${command}] ${brief}\n\n` +
-                  `The scoped lifecycle tool \`hive_${command}\` for this command has been summoned into your toolset ` +
-                  `FOR THIS TURN ONLY. Call \`hive_${command}\` now to carry out the command. ` +
-                  `Do NOT hand-edit files under .opencode/agents/ — the tool performs the mutation.`,
+                  `The scoped lifecycle tool \`${toolName}\` for this command has been summoned into your toolset ` +
+                  `FOR THIS TURN ONLY. Call \`${toolName}\` now to carry out the command. ` +
+                  `${advisory}`,
               },
             ],
             source: { kind: "user" },
@@ -1383,7 +1398,164 @@ export class Evolution extends Service {
         },
       })
 
-      return () => { d1(); d2(); d3(); d4(); d5(); d6(); d7() }
+      // ── /board-close, /board-release, /board-reopen (WI-093) ─────────────
+      // The user-invocable board-transition family (user decision
+      // 2026-10-14): same UX as /awaken and /dream — a command on THIS seam,
+      // NOT new model-facing hive_board_* tools (B4's 8-verb surface stays
+      // frozen; these are turn-scoped summons gated by requireAwake, the
+      // WI-037 pattern). The store's transition module (B2) had
+      // close/release-compiled-but-uncalled since the old viewer retired;
+      // WI-083's SESSION_OWNS_OTHER deadlock (a dream-promoted done item
+      // still owned by its finished session) is the release verb's target.
+      //
+      // Consumption semantics follow WI-074's grammar with ONE refinement
+      // (pinned by test): a refusal whose state-intent ALREADY HOLDS is a
+      // no-op, not a refusal — ALREADY_DONE on close, ALREADY_IN_PROGRESS +
+      // NOT_DONE on reopen, NOT_OWNED on release consume as plain reports
+      // (nothing to correct). Refusals a CORRECTED re-call could satisfy arm
+      // the summon (NOT_FOUND id typo, wrong-owner ownership gates, not
+      // id-shaped args, `to` on a done release). SESSION_RELEASED is
+      // explicitly terminal (the tombstone is history — §5.5): it consumes.
+      const boardSessionId = (agent: Agent | undefined): string =>
+        String(agent ? (agent.session?.id ?? agent.id) : "")
+      // The advisory line these three pass to summon(): the mutation surface
+      // is the board store, not the agents dir.
+      const BOARD_ADVISORY =
+        "Do NOT hand-edit files under .opencode/board/ — the tool performs the mutation."
+      // "/board-close WI-024 reason here" → { id: "WI-024", rest: "reason here" };
+      // a first token that is NOT a WI id stays with the text (a bare reason).
+      const parseBoardArgs = (raw: string): { id?: string; rest: string } => {
+        const text = raw.trim()
+        const m = text.match(/^(\S+)\s*([\s\S]*)$/)
+        if (!m) return { rest: "" }
+        const norm = normaliseItemId(m[1]!)
+        return norm ? { id: norm, rest: m[2]!.trim() } : { rest: text }
+      }
+
+      const d8 = ctx.commands.register({
+        name: "board-close",
+        description:
+          "Close a hive-board work item as DONE WITHOUT A DREAM (§5.4 escape hatch, badged on the item) via a turn-scoped hive_board_close tool; the reason line is recorded verbatim on the transition entry.",
+        input: { hint: "[<WI-id>] [reason — the line recorded on the transition]" },
+        handler: (inv) => {
+          const gate = requireAwake(inv)
+          if (gate) return gate
+          const sessionId = boardSessionId(inv.agent)
+          const parsed = parseBoardArgs(inv.rawInput)
+          return summon(
+            inv.agent,
+            "board-close",
+            (agentCtx) =>
+              this.registerLifecycleTool(
+                agentCtx,
+                "hive_board_close",
+                "Close the named hive-board work item: status → done, badged done_without_dream (§5.4 — no dream, no artifacts, never silent in the history). " +
+                  "Omit `id` to target the item THIS session owns (the 1:1 bind). " +
+                  "Pass the `reason` VERBATIM from the command brief — it is recorded on the appended transition entry. " +
+                  "A refused call does not consume this summon: correct the args and re-call. When the item is already done the summon is spent (nothing to correct).",
+                // WI-074 gating: correctables arrive as verdicts.
+                (args): Promise<SummonOutcome> =>
+                  this.boardCloseVerdict({ sessionId, parsedId: parsed.id, parsedReason: parsed.rest, args }),
+                {
+                  id: { type: "string", description: "Work item id, e.g. WI-024 (case/zero-padding forgiven). Omit to default to this session's own item." },
+                  reason: { type: "string", description: "The close reason line — recorded verbatim on the transition entry." },
+                },
+                { consumeOnVerdict: true }
+              ),
+            parsed.id
+              ? `Close board work item ${parsed.id} as done-without-dream${parsed.rest ? ` — user's reason: "${parsed.rest}"` : ""}. Pass id:"${parsed.id}"${parsed.rest ? ` and reason:${JSON.stringify(parsed.rest)}` : ""}.`
+              : `Close this session's own board work item as done-without-dream${parsed.rest ? ` — user's reason: "${parsed.rest}"` : ""}. Omit id to target this session's 1:1 item${parsed.rest ? `; pass reason:${JSON.stringify(parsed.rest)}` : ""}.`,
+            { toolName: "hive_board_close", advisory: BOARD_ADVISORY }
+          )
+        },
+      })
+
+      const d9 = ctx.commands.register({
+        name: "board-release",
+        description:
+          "Release a hive-board work item's ownership: un-own, tombstone the released session into released_sessions[], re-stamp spec_hash — via a turn-scoped hive_board_release tool. The unblock for a done-but-still-owned item (WI-083) and for zombie in_progress rows.",
+        input: { hint: "[<WI-id>] [todo|backlog — the column for an in_progress item, default todo]" },
+        handler: (inv) => {
+          const gate = requireAwake(inv)
+          if (gate) return gate
+          const sessionId = boardSessionId(inv.agent)
+          const parsed = parseBoardArgs(inv.rawInput)
+          const first = parsed.rest.split(/\s+/)[0] ?? ""
+          const restAfterTo = parsed.rest.slice(first.length).trim()
+          const to = parsed.rest && (first === "todo" || first === "backlog") ? first : undefined
+          const note = to ? restAfterTo : parsed.rest
+          return summon(
+            inv.agent,
+            "board-release",
+            (agentCtx) =>
+              this.registerLifecycleTool(
+                agentCtx,
+                "hive_board_release",
+                "Release a hive-board work item's OWNERSHIP: owner_session + group_id cleared, the owning session tombstoned into released_sessions[] (§5.5 — history, not forgotten), spec_hash re-stamped from the current body. " +
+                  "An in_progress item also moves to `to` (todo default, backlog option) — the true-demote; a DONE item's status is left alone (a release never redefines how work finished). " +
+                  "Omit `id` to target the item THIS session owns (the 1:1 bind). This is an operator verb: it may release another session's claim — the receipt names the released session. " +
+                  "A refused call that a corrected re-call could satisfy does not consume this summon; an un-owned item consumes it (nothing to release).",
+                (args): Promise<SummonOutcome> =>
+                  this.boardReleaseVerdict({
+                    sessionId,
+                    parsedId: parsed.id,
+                    parsedTo: to,
+                    parsedNote: note,
+                    args,
+                  }),
+                {
+                  id: { type: "string", description: "Work item id, e.g. WI-024 (case/zero-padding forgiven). Omit to default to this session's own item." },
+                  to: { type: "string", enum: ["todo", "backlog"], description: "Target column for an in_progress item (todo default). A done item refuses `to` — its status is history." },
+                  note: { type: "string", description: "Optional free text recorded on the appended transition entry." },
+                },
+                { consumeOnVerdict: true }
+              ),
+            parsed.id
+              ? `Release board work item ${parsed.id}${to ? ` to ${to}` : ""}${note ? ` — user's note: "${note}"` : ""}. Pass id:"${parsed.id}"${to ? `, to:"${to}"` : ""}${note ? `, note:${JSON.stringify(note)}` : ""}.`
+              : `Release this session's own board work item${to ? ` to ${to}` : ""}${note ? ` — user's note: "${note}"` : ""}. Omit id to target this session's 1:1 item${to ? `; pass to:"${to}"` : ""}${note ? `; pass note:${JSON.stringify(note)}` : ""}.`,
+            { toolName: "hive_board_release", advisory: BOARD_ADVISORY }
+          )
+        },
+      })
+
+      const d10 = ctx.commands.register({
+        name: "board-reopen",
+        description:
+          "Reopen a done hive-board work item (done → in_progress, ownership per WI-069's rule) via a turn-scoped hive_board_reopen tool. Tombstones in released_sessions[] are respected — a released session cannot re-own.",
+        input: { hint: "[<WI-id>] [note — free text recorded on the transition]" },
+        handler: (inv) => {
+          const gate = requireAwake(inv)
+          if (gate) return gate
+          const sessionId = boardSessionId(inv.agent)
+          const parsed = parseBoardArgs(inv.rawInput)
+          return summon(
+            inv.agent,
+            "board-reopen",
+            (agentCtx) =>
+              this.registerLifecycleTool(
+                agentCtx,
+                "hive_board_reopen",
+                "Reopen a DONE hive-board work item: status → in_progress, the done_without_dream badge cleared. " +
+                  "Ownership settles by WI-069's rule — the acting session's own item reopens in place; an UN-OWNED item is ADOPTED (owner_session + group_id stamped together) when this session owns nothing else and is refused naming its other item otherwise; an item owned by ANOTHER session is refused naming the blocking owner (/board-release it first). " +
+                  "A released_sessions[] tombstone on this item for this session is TERMINAL: the summon is consumed, not corrected. " +
+                  "Omit `id` to target the item THIS session owns (the 1:1 bind).",
+                (args): Promise<SummonOutcome> =>
+                  this.boardReopenVerdict({ sessionId, parsedId: parsed.id, parsedNote: parsed.rest, args }),
+                {
+                  id: { type: "string", description: "Work item id, e.g. WI-019 (case/zero-padding forgiven). Omit to default to this session's own item." },
+                  note: { type: "string", description: "Optional free text recorded on the appended transition entry." },
+                },
+                { consumeOnVerdict: true }
+              ),
+            parsed.id
+              ? `Reopen board work item ${parsed.id}${parsed.rest ? ` — user's note: "${parsed.rest}"` : ""}. Pass id:"${parsed.id}"${parsed.rest ? `, note:${JSON.stringify(parsed.rest)}` : ""}.`
+              : `Reopen this session's own board work item, if it is done${parsed.rest ? ` — user's note: "${parsed.rest}"` : ""}. Omit id to target this session's 1:1 item${parsed.rest ? `; pass note:${JSON.stringify(parsed.rest)}` : ""}.`,
+            { toolName: "hive_board_reopen", advisory: BOARD_ADVISORY }
+          )
+        },
+      })
+
+      return () => { d1(); d2(); d3(); d4(); d5(); d6(); d7(); d8(); d9(); d10() }
     })
 
     // ── Capability dispatch (the Phase-5 seam) ────────────────────────────────
@@ -1785,13 +1957,20 @@ export class Evolution extends Service {
    * non-retraction decision was literally just made for THIS call, from the
    * registration's own tool name — if the mount semantics ever change, the
    * line no longer exists rather than lying (W-049: assert on actionability —
-   * what to call, what to do — never bare presence).
+   * what to do, what to call — never bare presence).
+   *
+   * WI-093: a gated summon's body may also be ASYNC (return a Promise of the
+   * verdict) — the board store's advisory lock is async, so the /board-*
+   * verdicts await real store transitions. The gated path awaits before
+   * classifying; a REJECTED body keeps the summon armed exactly like a sync
+   * throw (nothing processed, nothing consumed — E2). The non-gated path is
+   * untouched: zero-arg sync tools keep their byte-identical finally-retract.
    */
   private registerLifecycleTool(
     agentCtx: import("@deepseek-ai/cordis").Context,
     name: string,
     description: string,
-    run: (args: unknown) => string | SummonOutcome,
+    run: (args: unknown) => string | SummonOutcome | Promise<string | SummonOutcome>,
     parameters: ParameterSchemaSpec = {},
     options: { consumeOnVerdict?: boolean } = {}
   ): () => void {
@@ -1824,7 +2003,10 @@ export class Evolution extends Service {
           // the ordinary way: an unprocessed error consumed nothing (E2). The
           // gated bodies catch their expected input refusals and return
           // verdicts, so nothing correctable ever reaches this line.
-          const result = run(args)
+          // WI-093: `await` flattens a sync verdict or a Promise of one (the
+          // board store's lock is async); awaiting a non-promise is a no-op,
+          // so the sync bodies' classification is unchanged.
+          const result = await run(args)
           if (typeof result === "string") {
             disposer?.()
             return result
@@ -2174,6 +2356,258 @@ export class Evolution extends Service {
       consumed: true,
       text: `HIVE awakening manifests: ${manifested}/${list.length} manifested.\n\n` + lines.join("\n"),
     }
+  }
+
+  // ── Board command verdicts (WI-093 / user decision 2026-10-14) ────────────
+  // The three /board-* commands resolve their target identically (tool arg →
+  // command-line id → this session's own 1:1 item) and classify every store
+  // refusal into WI-074's grammar: no-op outcomes consume (nothing to
+  // correct), corrected-args-could-work refusals arm the summon, tombstones
+  // terminate by ruling. The store calls below are the locked transitions in
+  // @hive/dsh-board/lib/board-commands — no direct file mutation here
+  // (WI-036's rule applies to the board surface too: .opencode/board/ files
+  // are written ONLY by the store).
+
+  /**
+   * Target resolution for all three verbs: explicit tool arg (correctable —
+   * the re-call can pass another id) → command-line id → the session's own
+   * item (the 1:1 bind). Returns an ARMED refusal when nothing resolves —
+   * a missing id is the one "fix" the corrected re-call exists for.
+   */
+  private boardTargetId(input: { sessionId: string; argsId: unknown; parsedId?: string }): { id: string } | { refusal: SummonOutcome } {
+    const raw = input.argsId
+    if (raw !== undefined && raw !== null && String(raw).trim() !== "") {
+      const norm = normaliseItemId(String(raw))
+      if (!norm) {
+        return {
+          refusal: {
+            consumed: false,
+            text:
+              `✗ refused: id "${String(raw)}" is not a work-item id (WI-<digits>; case and zero-padding are forgiven). ` +
+              `Nothing was written. Re-call with id:"WI-024" — hive_board_list lists ids.`,
+          },
+        }
+      }
+      return { id: norm }
+    }
+    if (input.parsedId) return { id: input.parsedId }
+    const own = findItemByOwner(this.directory, input.sessionId)
+    if (own) return { id: own.id }
+    return {
+      refusal: {
+        consumed: false,
+        text:
+          `✗ refused: no id was given and this session owns no board item (the 1:1 bind is empty — nothing rides on this session). ` +
+          `Nothing was written. Re-call with id:"WI-024" once you have the target.`,
+      },
+    }
+  }
+
+  /** Fresh read of the target; an unknown id is an ARMED refusal (typo fix). */
+  private boardReadTarget(id: string): { item: WorkItem } | { refusal: SummonOutcome } {
+    const item = readItem(this.directory, id)
+    if (!item) {
+      return {
+        refusal: {
+          consumed: false,
+          text:
+            `✗ refused: no work item ${id} exists on this board. Nothing was written. ` +
+            `Re-call with the corrected id (hive_board_list lists ids; done items need status:"all").`,
+        },
+      }
+    }
+    return { item }
+  }
+
+  private boardSignedBy = (command: string, sessionId: string): string => `command:${command}:${sessionId}`
+
+  /**
+   * /board-close verdict: any live state → done, badged done_without_dream
+   * (§5.4), the reason line recorded verbatim on the transition. Ownership:
+   * the acting session or un-owned (SCHEMA §2's authoring rule); the wrong
+   * owner arms the summon. ALREADY_DONE is the no-op consume.
+   */
+  boardCloseVerdict = async (input: { sessionId: string; parsedId?: string; parsedReason: string; args: unknown }): Promise<SummonOutcome> => {
+    const rec = (input.args ?? {}) as { id?: unknown; reason?: unknown }
+    const target = this.boardTargetId({ sessionId: input.sessionId, argsId: rec.id, parsedId: input.parsedId })
+    if ("refusal" in target) return target.refusal
+    const read = this.boardReadTarget(target.id)
+    if ("refusal" in read) return read.refusal
+    const item = read.item
+    if (item.owner_session !== null && item.owner_session !== input.sessionId) {
+      return {
+        consumed: false,
+        text:
+          `✗ refused: ${item.id} is owned by session ${item.owner_session} — once owned, an item's state belongs to that session ` +
+          `(SCHEMA §2). Nothing was written. Close it from that session, or /board-release it first to make it fluid, then re-call.`,
+      }
+    }
+    if (item.status === "done") {
+      return {
+        consumed: true,
+        text:
+          `✓ ${item.id} ("${item.title}") is already done — nothing to close, no transition recorded. ` +
+          `The summon is spent; to close a DIFFERENT item invoke /board-close again.`,
+      }
+    }
+    const reason = typeof rec.reason === "string" && rec.reason.trim() !== "" ? rec.reason.trim() : input.parsedReason
+    return (async () => {
+      const r = await closeItem(this.directory, target.id, {
+        actingSession: input.sessionId,
+        by: this.boardSignedBy("board-close", input.sessionId),
+        ...(reason ? { note: reason } : {}),
+      })
+      if (!r.ok) return { consumed: true, text: `✗ refused (${r.reason}): ${r.detail} — nothing was written.` }
+      return {
+        consumed: true,
+        text:
+          `✓ closed ${r.item.id} ("${r.item.title}"): ${item.status} → done, badged done_without_dream (§5.4 — this completion has no dream, no artifacts, and the badge says so in the history).` +
+          (reason ? ` Reason recorded on the transition: "${reason}".` : " No reason line was given.") +
+          ` Transition signed by:${this.boardSignedBy("board-close", input.sessionId)}. Ownership is UNCHANGED — /board-release ${r.item.id} frees this session to bind new work.`,
+      }
+    })()
+  }
+
+  /**
+   * /board-release verdict: un-own + tombstone + spec_hash re-stamp (§5.5).
+   * An in_progress item takes `to` (todo default); a done item refuses `to`
+   * (ARMED — drop it and re-call) and keeps its DONE status. Un-owned items
+   * are the no-op consume. The operator-verb reading is loud in the receipt:
+   * another session's claim IS released, and the receipt names it.
+   */
+  boardReleaseVerdict = async (input: { sessionId: string; parsedId?: string; parsedTo?: string; parsedNote: string; args: unknown }): Promise<SummonOutcome> => {
+    const rec = (input.args ?? {}) as { id?: unknown; to?: unknown; note?: unknown }
+    const target = this.boardTargetId({ sessionId: input.sessionId, argsId: rec.id, parsedId: input.parsedId })
+    if ("refusal" in target) return target.refusal
+    const read = this.boardReadTarget(target.id)
+    if ("refusal" in read) return read.refusal
+    const item = read.item
+    if (rec.to !== undefined && rec.to !== null && String(rec.to) !== "") {
+      if (rec.to !== "todo" && rec.to !== "backlog") {
+        return {
+          consumed: false,
+          text:
+            `✗ refused: to must be "todo" or "backlog" (arrived: ${JSON.stringify(rec.to)}). ` +
+            `Nothing was written. Re-call with to:"todo" (or drop it — todo is the default), or to:"backlog".`,
+        }
+      }
+      if (item.status === "done") {
+        return {
+          consumed: false,
+          text:
+            `✗ refused: ${item.id} is DONE — a release leaves the done badge alone (how an item finished is history, not a column move), so \`to\` does not apply. ` +
+            `Nothing was written. Drop \`to\` and re-call to plain-release it, or /board-reopen ${item.id} to bring it back to in_progress.`,
+        }
+      }
+    }
+    if (item.owner_session === null) {
+      return {
+        consumed: true,
+        text:
+          `✓ nothing to release: ${item.id} ("${item.title}") is un-owned (${item.status}) — no session is riding it. ` +
+          `The summon is spent; releasing an item needs an owner to release.`,
+      }
+    }
+    if (item.status !== "in_progress" && item.status !== "done") {
+      return {
+        consumed: true,
+        text:
+          `✓ nothing to release: ${item.id} ("${item.title}") is ${item.status} and un-owned — queued items hold no ownership. ` +
+          `The summon is spent.`,
+      }
+    }
+    const note = typeof rec.note === "string" && rec.note.trim() !== "" ? rec.note.trim() : input.parsedNote
+    return (async () => {
+      const r = await releaseItem(this.directory, target.id, {
+        ...(rec.to === "todo" || rec.to === "backlog" ? { to: rec.to } : {}),
+        by: this.boardSignedBy("board-release", input.sessionId),
+        ...(note ? { note } : {}),
+      })
+      if (!r.ok) return { consumed: true, text: `✗ refused (${r.reason}): ${r.detail} — nothing was written.` }
+      return {
+        consumed: true,
+        text:
+          r.action === "demoted"
+            ? `✓ released ${r.item.id} ("${r.item.title}"): was in_progress (owner ${item.owner_session}) → ${r.item.status}; owner_session + group_id cleared; the released session is tombstoned in released_sessions[]; spec_hash re-stamped.`
+            : `✓ released ${r.item.id} ("${r.item.title}") from its owner ${item.owner_session}: status STAYS done (the release never redefines how work finished); owner_session + group_id cleared; the released session is tombstoned in released_sessions[]; spec_hash re-stamped. That session can bind fresh work again — the WI-083 unblock.`,
+      }
+    })()
+  }
+
+  /**
+   * /board-reopen verdict: done → in_progress with WI-069's ownership rule.
+   * Tombstones are the ONE terminal refusal here (explicit ruling: §5.5's
+   * history is not a correctable flag). Wrong-owner and owns-another-item
+   * refusals ARM the summon — /board-release the blocking item, or pass
+   * another id. ALREADY_IN_PROGRESS and NOT_DONE are the no-op consumes.
+   */
+  boardReopenVerdict = async (input: { sessionId: string; parsedId?: string; parsedNote: string; args: unknown }): Promise<SummonOutcome> => {
+    const rec = (input.args ?? {}) as { id?: unknown; note?: unknown }
+    const target = this.boardTargetId({ sessionId: input.sessionId, argsId: rec.id, parsedId: input.parsedId })
+    if ("refusal" in target) return target.refusal
+    const read = this.boardReadTarget(target.id)
+    if ("refusal" in read) return read.refusal
+    const item = read.item
+    if (item.released_sessions.includes(input.sessionId)) {
+      return {
+        consumed: true,
+        text:
+          `✗ terminal: this session (${input.sessionId}) was RELEASED from ${item.id} — it is tombstoned in the item's released_sessions[] (§5.5: the tombstone is history, not a stale flag). ` +
+          `The summon is consumed: no argument corrects a tombstone. A different session may reopen ${item.id}, or bind fresh work of its own.`,
+      }
+    }
+    if (item.status === "in_progress") {
+      return {
+        consumed: true,
+        text:
+          `✓ nothing to reopen: ${item.id} ("${item.title}") is already in progress (owner ${item.owner_session ?? "unset"}) — it is open. The summon is spent.`,
+      }
+    }
+    if (item.status !== "done") {
+      return {
+        consumed: true,
+        text:
+          `✓ nothing to reopen: ${item.id} ("${item.title}") is ${item.status} — a queued item was never closed. ` +
+          `The summon is spent; opening a queued item is hive_board_bind's job, not a reopen.`,
+      }
+    }
+    if (item.owner_session !== null && item.owner_session !== input.sessionId) {
+      return {
+        consumed: false,
+        text:
+          `✗ refused: ${item.id} ("${item.title}") is owned by session ${item.owner_session} — the blocking owner. ` +
+          `Nothing was written. /board-release ${item.id} first (that un-tombs nothing but clears the claim), then re-call; or reopen it from the owning session.`,
+      }
+    }
+    if (item.owner_session === null) {
+      // Adoption requires the acting session to be FREE (1:1, Q7) — the same
+      // armed-when-wrong shape as the blocking-owner refusal above; the store
+      // re-verifies under the lock.
+      const owned = findItemByOwner(this.directory, input.sessionId)
+      if (owned) {
+        return {
+          consumed: false,
+          text:
+            `✗ refused: this session already owns ${owned.id} ("${owned.title}") — session⟷item is strictly 1:1 (Q7). ` +
+            `Nothing was written. /board-release the owned item first, then re-call; adoption then re-stamps ownership.`,
+        }
+      }
+    }
+    const note = typeof rec.note === "string" && rec.note.trim() !== "" ? rec.note.trim() : input.parsedNote
+    return (async () => {
+      const r = await reopenItem(this.directory, target.id, input.sessionId, {
+        by: this.boardSignedBy("board-reopen", input.sessionId),
+        ...(note ? { note } : {}),
+      })
+      if (!r.ok) return { consumed: true, text: `✗ refused (${r.reason}): ${r.detail} — nothing was written.` }
+      return {
+        consumed: true,
+        text:
+          r.action === "adopted"
+            ? `✓ reopened ${r.item.id} ("${r.item.title}"): done → in_progress, and this session ADOPTED it (owner_session + group_id stamped together). done_without_dream cleared.`
+            : `✓ reopened ${r.item.id} ("${r.item.title}"): done → in_progress; ownership stays with this session. done_without_dream badge cleared.`,
+      }
+    })()
   }
 
   /**
