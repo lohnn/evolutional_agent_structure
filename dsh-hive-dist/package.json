@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@hive/dsh-agents": "file:./hive-dsh-agents-0.0.2.tgz",
+    "@hive/dsh-agents": "file:./hive-dsh-agents-0.0.5.tgz",
     "@hive/dsh-board": "file:./hive-dsh-board-0.1.6.tgz",
     "@hive/dsh-dream-archive": "file:./hive-dsh-dream-archive-0.0.2.tgz",
     "@hive/dsh-evolution": "file:./hive-dsh-evolution-0.0.5.tgz",

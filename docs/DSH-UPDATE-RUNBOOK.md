@@ -33,6 +33,13 @@ change:
 
 Way A (git) re-resolves by moving ref — unaffected.
 
+Mechanized since 2026-10-14 (the #59/#60 lesson: the board buttons PRs merged as
+source only, twice in one day — and #54 the same way): `pnpm --dir dsh-hive
+rebake <pkg…|--all>` does steps 1–3 above plus the gate runs; CI fails a PR
+whose package sources are newer than their committed tarball
+(`dsh-hive-dist/test/kit-freshness.test.sh`). House summary in `AGENTS.md`
+("merge is not ship").
+
 ## Cohort bump checklist (ordered)
 
 1. **Audit the corridor** first: materialize both published trees + any rc

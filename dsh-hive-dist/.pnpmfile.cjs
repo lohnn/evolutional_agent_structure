@@ -39,7 +39,7 @@ const PKG_PATHS = {
 const TARBALL_FILE = (name) => `file:${require("node:path").join(__dirname, name)}`
 
 const TARBALLS = {
-  "@hive/dsh-agents": TARBALL_FILE("hive-dsh-agents-0.0.2.tgz"),
+  "@hive/dsh-agents": TARBALL_FILE("hive-dsh-agents-0.0.5.tgz"),
   "@hive/dsh-board": TARBALL_FILE("hive-dsh-board-0.1.6.tgz"),
   "@hive/dsh-dream-archive": TARBALL_FILE("hive-dsh-dream-archive-0.0.2.tgz"),
   "@hive/dsh-evolution": TARBALL_FILE("hive-dsh-evolution-0.0.5.tgz"),
