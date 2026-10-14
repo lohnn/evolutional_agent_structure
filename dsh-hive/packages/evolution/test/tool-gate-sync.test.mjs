@@ -172,6 +172,11 @@ test("lifecycle summons stay turn-scoped (never globally registered, gated by re
   // an explicit exemption in the commands block.
   assert.deepEqual(collectLifecycleSummons(), [
     "hive_awaken_spawn",
+    // WI-093 board commands — top-level coordinator surface, each gated by
+    // requireAwake() in its command handler (same D2 review as the five above).
+    "hive_board_close",
+    "hive_board_release",
+    "hive_board_reopen",
     "hive_dissolve",
     "hive_evolve",
     "hive_spawn",

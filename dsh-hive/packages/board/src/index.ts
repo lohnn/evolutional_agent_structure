@@ -113,7 +113,22 @@ import {
 } from "./lib/board-transitions.js"
 import { isSessionAwakened } from "./lib/sessions-read.js"
 import { AWAKEN_ROUTE_PATH, createAwakenRouteHandler } from "./lib/awaken-route.js"
+// The command-surface transitions (WI-093): the locked-store write paths the
+// /board-close, /board-release and /board-reopen evolution commands drive.
+import {
+  closeItem,
+  releaseItem,
+  reopenItem,
+  type BoardCommandOptions,
+  type ReleaseOptions,
+} from "./lib/board-commands.js"
 export { makeDrmCompleteCheck, makeDrmArtifacts } from "./lib/drm-read.js"
+
+// Command transitions re-exported at the package root, like every transition
+// family (the evolution package consumes the ./lib subpath — the B5 seam's
+// convention — but the root surface stays complete for parity).
+export { closeItem, releaseItem, reopenItem }
+export type { BoardCommandOptions, ReleaseOptions }
 
 // Re-export the lib surface — B4's tool registrations and the two seams (B5
 // evolution, B6 tools) import through the package root, exactly the way
