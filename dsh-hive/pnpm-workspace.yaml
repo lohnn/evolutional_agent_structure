@@ -7,7 +7,11 @@ packages:
 # the corridor was typechecked against. Profile/tarball installs are a
 # separate workspace and unaffected.
 overrides:
-  '@deepseek-ai/schemastery': 3.18.2
+  # 3.18.2 was the 2026-09-22 TS2742 baseline; the dsh 0.2.1 corridor's own
+  # packages pin ~3.18.5 and use .volatile() schema builders, so the dev
+  # resolution MUST be >=3.18.5 for tests importing them. TS2742 not
+  # re-observed at 3.18.5 (re-verify typecheck on any future bump).
+  '@deepseek-ai/schemastery': 3.18.5
 minimumReleaseAgeExclude:
   # The dsh 0.2.1-rc.2 cohort published 2026-10-17 08:36Z (rc.1 at 03:17Z the
   # same morning) — inside every machine's minimumReleaseAge window the day it

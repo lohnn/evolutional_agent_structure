@@ -159,8 +159,15 @@ for (const j of doing) {
 
 // — build + pack per package —
 for (const j of doing) {
-  console.log(`building ${j.pkg.name}…`)
-  sh(["pnpm", "--filter", j.pkg.name, "run", "build"], { cwd: HIVE_DIR })
+  // Build is optional: plain-JS packages (dsh-berget-refresh) carry no build
+  // script — skip instead of failing the bake. A declared-but-broken build
+  // stays loud through the normal failure path.
+  if (j.pkg.scripts?.build) {
+    console.log(`building ${j.pkg.name}…`)
+    sh(["pnpm", "--filter", j.pkg.name, "run", "build"], { cwd: HIVE_DIR })
+  } else {
+    console.log(`building ${j.pkg.name}… (no build script — skipping)`)
+  }
   console.log(`packing ${j.pkg.name}…`)
   sh(["pnpm", "--filter", j.pkg.name, "exec", "pnpm", "pack", "--pack-destination", DIST_DIR], { cwd: HIVE_DIR })
   fs.existsSync(j.newTgz) || fail(`expected tarball missing after pack: ${j.newTgz}`)
