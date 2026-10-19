@@ -1,6 +1,6 @@
 {
   "name": "dsh-web-search-searxng",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "private": true,
   "description": "SearXNG-backed web search provider for the dsh ctx.web seam: self-hosted metasearch, no API key, no model turn per search.",
   "type": "module",

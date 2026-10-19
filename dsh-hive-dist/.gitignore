@@ -3,4 +3,4 @@
 # dists (no bun/git-prepare wall), so `pnpm pack` outputs must be
 # regenerated and committed on every cohort release (W-085/W-088).
 # Stale-name leftovers from intermediate repacks stay ignored:
-dsh-berget-usage-0.1.0.tgz
+dsh-berget-usage-0.2.0.tgz
