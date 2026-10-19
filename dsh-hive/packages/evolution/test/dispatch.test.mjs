@@ -11,9 +11,11 @@
 //    from the preset persona text or the legacy ledger body) + the capability
 //    standing context, always; a material miss is non-fatal (standing-only).
 //    Never the roster (dsh injects it process-wide; the in-persona copy was a
-//    live-observed duplicate in the child's system prompt). This return value
-//    is passed VERBATIM as SubagentStartRequest.persona — the request persona
-//    captured here is the one the dispatched child mounts.
+//    live-observed duplicate in the child's system prompt). dsh 0.2.1 corridor:
+//    SubagentStartRequest lost the per-request persona/toolFilter, so this
+//    return value rides the DISPATCHED PROMPT (first user message — survives
+//    resume/compaction as history); the tool filter rides
+//    dispatchToolFilters + the plugin's agent/created listener.
 // 5. Drift guard: canonical persona file ⇔ preset yml text ⇔ dispatch export.
 // 6. Reserved-name guard: /spawn never manifests a built-in's name.
 import { test } from "node:test"
@@ -135,9 +137,9 @@ test("no child persona carries the capability roster (dsh injects it process-wid
 
 // ── T5: capability material transport on dispatch ────────────────────────────
 // resolveCapabilityMaterial feeds composeDispatchPersona, whose return value
-// hive_dispatch passes VERBATIM as SubagentStartRequest.persona — the request
-// persona the resident child mounts. These capture that persona through the
-// same expression the tool executes.
+// hive_dispatch prepends to the dispatched child's PROMPT (dsh 0.2.1 corridor:
+// the request persona is gone; see the file-header note). These capture that
+// persona through the same expression the tool executes.
 
 // Fixture workspace: preset dirs are rendered by the plugin's OWN writer
 // (renderAgentCordisYml — the same file /spawn and the awaken batch tool
@@ -366,4 +368,38 @@ test("dreamcatcher read-only toolFilter deny list is intact", () => {
     "hive_dream_residue",
     "hive_dream_supersede",
   ])
+})
+
+// ── dsh 0.2.1 corridor: dispatch tool filters ride plugin-side (I-070) ──────
+// The corridor removed SubagentStartRequest.toolFilter/persona. dispatchFilterFromLedgerRecords
+// is the cold-resume half of the enforcement (the agent/created listener's ledger fallback):
+// builtin addresses re-derive their filter by shape, capability addresses read as unrestricted
+// (capability children keep the parent surface, exactly as 0.2.0 when no filter rode the request),
+// and unknown/missing records read as no-restriction (best-effort ledger).
+test("dispatchFilterFromLedgerRecords: builtin re-derivation, capability pass-through, ledger misses", async () => {
+  const { dispatchFilterFromLedgerRecords, BUILTIN_AGENTS } = await import("../dist/index.js")
+  const def = BUILTIN_AGENTS.dreamcatcher
+
+  const oneShotRow = (childId, address) => ({ kind: "dispatch-activated", childId, address, shape: "one-shot" })
+  const residentRow = (childId, address) => ({ kind: "dispatch-activated", childId, address, shape: "resident" })
+
+  // builtin one-shot → the D7 allow list; builtin resident → the deny mask:
+  const oneShot = dispatchFilterFromLedgerRecords([oneShotRow("s-1", "builtin/dreamcatcher")], "s-1")
+  assert.deepEqual(oneShot, { allow: [...def.oneShotAllow] })
+  const resident = dispatchFilterFromLedgerRecords([residentRow("s-2", "builtin/dreamcatcher")], "s-2")
+  assert.deepEqual(resident, { deny: [...def.toolFilter.deny] })
+
+  // the latest record for that child wins (a child is dispatched once, but re-derivations repeat):
+  const latest = dispatchFilterFromLedgerRecords(
+    [oneShotRow("s-3", "builtin/dreamcatcher"), residentRow("s-3", "builtin/dreamcatcher")],
+    "s-3"
+  )
+  assert.deepEqual(latest, { deny: [...def.toolFilter.deny] })
+
+  // capability children and unrelated ids read as unrestricted / missing:
+  assert.equal(dispatchFilterFromLedgerRecords([residentRow("s-4", "capability/gamma")], "s-4"), undefined)
+  assert.equal(dispatchFilterFromLedgerRecords([oneShotRow("s-5", "builtin/unknown-agent")], "s-5"), undefined)
+  assert.equal(dispatchFilterFromLedgerRecords([], "s-6"), undefined)
+  // a child id reused across addresses resolves by its LATEST address, and other children don't leak:
+  assert.equal(dispatchFilterFromLedgerRecords([residentRow("s-7", "capability/gamma")], "s-8"), undefined)
 })

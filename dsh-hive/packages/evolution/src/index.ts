@@ -41,6 +41,14 @@ import { Service } from "@deepseek-ai/cordis"
 import z from "@deepseek-ai/schemastery"
 import fs from "fs"
 import path from "path"
+import { randomUUID } from "crypto"
+
+/** The start-activation spec face (last overload = the base `SubagentActivationSpec`). */
+type SubagentStartSpec = Parameters<import("@deepseek-ai/dsh-subagent").SubagentRuntime["startActivation"]>[0]
+/** The caller-reserved child identity for a dispatched activation. */
+type DispatchChildId = NonNullable<SubagentStartSpec["childId"]>
+/** Tool face a dispatched child is restricted to (0.2.1 ToolRestriction shape). */
+type DispatchToolFilter = { allow?: readonly string[]; deny?: readonly string[] }
 import { createMessage, type ContentBlock } from "@deepseek-ai/dsh-llm"
 import { defineTool, type ParameterSchemaSpec } from "@deepseek-ai/dsh-tools"
 import type { Agent } from "@deepseek-ai/dsh-agent"
@@ -755,6 +763,59 @@ export class Evolution extends Service {
       }
     })
 
+    // ── Dispatch-scoped tool filters (I-070; dsh 0.2.1 corridor) ─────────────
+    // THIRD `agent/created` listener (the energy tick and the dormant gate
+    // above are the first two; serial listeners coexist in registration
+    // order). hive_dispatch children that carry a tool restriction — builtin
+    // residents get the deny mask, one-shot consults the D7 allow list — get
+    // it applied here as an agent-scoped `tools.restrict`, in the same
+    // creation window the old request-level `toolFilter` used to occupy
+    // (dsh 0.2.1 removed that request field; the guarantee stayed absolute).
+    // Payloads carry `source`, so a cold-resumed child re-restricts here too
+    // — the usage ledger (workspace-durable JSONL) re-derives the restriction
+    // when the run-scoped map has no entry for this process.
+    //restrict-name filtering mirrors the dormant gate: `tools.restrict`
+    // VALIDATES names against the process's registered globals and THROWS on
+    // unknowns, and a throw inside this serial listener fails agent
+    // publication — so the mask is reduced to what this process registered
+    // (standalone-evolution installs degrade, production restricts all of it).
+    ctx.on("agent/created", (payload): undefined => {
+      const agent = payload.agent
+      const sessionId = String(agent.session?.id ?? agent.id)
+      if (!sessionId) return
+      const seen = this.dispatchToolFilters.get(sessionId) ?? dispatchFilterFromLedgerRecords(this.usageLog.read(), sessionId)
+      if (!seen) return
+      const resolvable = (name: string): boolean => {
+        try {
+          return ctx.tools.get(name) !== undefined
+        } catch {
+          return false
+        }
+      }
+      const allow = seen.allow ? seen.allow.filter(resolvable) : undefined
+      const deny = seen.deny ? seen.deny.filter(resolvable) : undefined
+      if ((allow === undefined || allow.length === 0) && (deny === undefined || deny.length === 0)) return
+      try {
+        // restrict() must run in the CALLING agent's scope: the listener body
+        // runs on the plugin context, so go through the payload agent's own
+        // scoped tools face — the same access path the dormant gate uses.
+        const lift = agent.ctx?.tools?.restrict(allow ? { allow } : { deny })
+        if (lift) this.dispatchFilterLifts.set(sessionId, lift)
+      } catch (err) {
+        // I-070 is a guarantee, not a nicety: a failed restriction must not
+        // silently widen the child. Loud log + refuse the turn's tool world
+        // the second-best way — a global guard would be over-scoping, so log
+        // loudly and keep the child alive (the capability persona and the
+        // deny-list still read in the prompt; the guard GATE listeners stay).
+        this.ctx.logger.error?.("[evolution] dispatch tool restriction failed — child observed unrestricted", {
+          sessionId,
+          filter: seen,
+          error: err instanceof Error ? err.message : String(err),
+        })
+      }
+      return undefined
+    })
+
     // Best-effort disposer cleanup: a disposed agent's scoped world already
     // unwound its registrations, so the only real job is dropping the held
     // references. Calling the lift either way is harmless (idempotent) per the
@@ -763,7 +824,7 @@ export class Evolution extends Service {
     ctx.on("agent/disposed", (payload) => {
       const sessionId = String(payload.agent?.session?.id ?? payload.agent?.id ?? "")
       if (!sessionId) return
-      for (const map of [this.gateRestrictions, this.dormantSections, this.standingDreamRestrictions]) {
+      for (const map of [this.gateRestrictions, this.dormantSections, this.standingDreamRestrictions, this.dispatchFilterLifts]) {
         const disposer = map.get(sessionId)
         if (disposer === undefined) continue
         try {
@@ -773,6 +834,7 @@ export class Evolution extends Service {
         }
         map.delete(sessionId)
       }
+      this.dispatchToolFilters.delete(sessionId)
       this.dreamSurfaceAgents.delete(sessionId)
     })
 
@@ -1742,19 +1804,34 @@ export class Evolution extends Service {
               // D10 usage skeleton: call + settle stay observable plugin-side
               const usageT0 = Date.now()
               this.usageLog.append({ kind: "dispatch", shape, address, label: args.label ?? "", model: agentOptions?.model ?? null, routeSource: route?.source ?? "inherit" })
-              const run = await this.ctx.subagents.start("spawn", {
-                parent,
+              // dsh 0.2.1 corridor: `start` is gone (`startActivation`), the
+              // per-request `persona`/`toolFilter` are gone with it. The
+              // persona rides the dispatched prompt (first user message — it
+              // survives resume/compaction as history, and the plugin's
+              // post-compaction section re-asserts identity after trims); the
+              // tool rider goes through dispatchToolFilters + the
+              // `agent/created` listener. The child id is caller-minted so the
+              // filter is registered before the runtime can create the agent.
+              const childId = randomUUID() as unknown as DispatchChildId
+              const oneShotFilter = childToolFilterFor(def2, "one-shot")
+              if (oneShotFilter) this.dispatchToolFilters.set(String(childId), oneShotFilter)
+              const activation = await this.ctx.subagents.startActivation({
+                provider: "spawn",
                 label: composeDispatchLabel(address, args.label, "one-shot"),
-                prompt: [{ type: "text", text: taskPrompt }] as ContentBlock[],
-                persona: def2.persona,
-                toolFilter: childToolFilterFor(def2, "one-shot"),
-                ...(agentOptions ? { agentOptions } : {}),
+                childId,
+                delivery: "caller",
                 signal: exec.signal,
+                request: {
+                  parent,
+                  prompt: [{ type: "text", text: def2.persona ? `${def2.persona}\n\n---\n\n# Dispatched task (one-shot consult — return the result inline)\n\n${taskPrompt}` : taskPrompt }] as ContentBlock[],
+                  ...(agentOptions ? { agentOptions } : {}),
+                },
               })
-              this.markUsed(target.id, String(run.id))
-              const result = await run.result
+              this.markUsed(target.id, String(activation.childId))
+              this.usageLog.append({ kind: "dispatch-activated", childId: String(activation.childId), address, shape })
+              const result = await activation.result
               try {
-                await run.dispose()
+                await activation.dispose()
               } catch {
                 // disposal is best-effort after settlement
               }
@@ -1775,31 +1852,36 @@ export class Evolution extends Service {
             }
 
             this.usageLog.append({ kind: "dispatch", shape, address, label: args.label ?? "", model: agentOptions?.model ?? null, routeSource: route?.source ?? "inherit" })
-            const start = await this.ctx.subagents.startContinuable({
+            // dsh 0.2.1 corridor: `startContinuable` → `startActivation` with
+            // `delivery: "parent"` (the child joins the parent catalog; the
+            // result returns `{ childId, messageId }` immediately). Same
+            // persona/filter migration as the one-shot branch above, with the
+            // composed capability persona (child-identity line + method
+            // material) riding the prompt.
+            const childId = randomUUID() as unknown as DispatchChildId
+            const residentFilter = childToolFilterFor(def, shape)
+            if (residentFilter) this.dispatchToolFilters.set(String(childId), residentFilter)
+            const start = await this.ctx.subagents.startActivation({
               provider: "spawn",
               label: composeDispatchLabel(address, args.label),
+              childId,
+              delivery: "parent",
+              signal: exec.signal,
               request: {
                 parent,
-                prompt: [{ type: "text", text: taskPrompt }] as ContentBlock[],
-                persona,
-                // I-070: read-only enforcement stays caller-side — passed in
-                // as the request's `toolFilter`, applied as a scoped
-                // tools.restrict() in the child's creation window. Built-ins
-                // carry the canonical filter from BUILTIN_AGENTS (resident:
-                // deny; one-shot consults may carry the D7 allow list).
-                ...(def ? { toolFilter: childToolFilterFor(def, shape) } : {}),
+                prompt: [{ type: "text", text: persona ? `${persona}\n\n---\n\n# Dispatched task\n\n${taskPrompt}` : taskPrompt }] as ContentBlock[],
                 // Orchestrator-chosen model route (AgentOptions: provider? +
                 // model; dsh merges it over the parent's route child-side).
                 ...(agentOptions ? { agentOptions } : {}),
               },
-              signal: exec.signal,
             })
             this.markUsed(target.id, String(start.childId))
+            this.usageLog.append({ kind: "dispatch-activated", childId: String(start.childId), address, shape })
             return (
               `Dispatched ${target.kind === "builtin" ? `builtin/${target.id}` : `capability/${target.id}`} as a resident continuable child (session ${String(start.childId)}).` +
               (route ? ` Model route: ${routeLabel}.` : "") +
               (dreamNote ? ` ${dreamNote}` : "") +
-              (def ? " Read-only filter applied via the start request's toolFilter field." : "") +
+              (def ? " Read-only tool filter re-applied at the child's creation window (I-070)." : "") +
               ` Continue THIS child with hive_send(session: "${String(start.childId)}", message) when it holds relevant context; hive_children lists your children with their dispatch labels; dispatch again only for fresh or parallel work.`
             )
           },
@@ -2071,6 +2153,20 @@ export class Evolution extends Service {
 
   private gateRestrictions = new Map<string, () => void>()
   private dormantSections = new Map<string, () => void>()
+
+  // ── dispatched-child tool filters (I-070; dsh 0.2.1 corridor) ─────────────
+  // dsh 0.2.1 removed the per-request `toolFilter`/`persona` from
+  // `SubagentStartRequest` (child composition moved to presets), so the
+  // dispatch-scoped tool guarantee rides plugin-side:
+  // `dispatchToolFilters` holds childId → filter, WRITTEN BEFORE
+  // `startActivation` (keyed by the caller-minted reserved child id — the
+  // child agent is created *during* that call, so a post-call write would
+  // miss the creation window) and applied by the `agent/created` listener as
+  // an agent-scoped `tools.restrict`. `dispatchFilterLifts` holds the exact
+  // disposers (unwound with the agent's scope on dispose). Cold resume
+  // re-derives from the durable usage ledger (`dispatchFilterFor`).
+  private dispatchToolFilters = new Map<string, DispatchToolFilter>()
+  private dispatchFilterLifts = new Map<string, () => void>()
 
   // ── standing dream-surface mask (TOKEN-ECONOMY D4) ────────────────────────
   // Keyed by session id like the rest. HOLDING a disposer here means "the
@@ -2721,6 +2817,31 @@ export const childToolFilterFor = (
     : shape === "one-shot" && def.oneShotAllow
       ? { allow: [...def.oneShotAllow] }
       : { deny: [...def.toolFilter.deny] }
+
+/**
+ * I-070 re-derivation (dsh 0.2.1 corridor): reconstruct a dispatched child's
+ * tool restriction from the durable usage ledger for a cold-resumed child the
+ * run-scoped map has no entry for. Only built-ins carry filters (capability
+ * children run with the parent surface, exactly as in 0.2.0 when their
+ * request carried no filter). Best-effort: unreadable/missing records read as
+ * "no restriction" — the ledger row is written at activation time, before the
+ * child's first turn, so the window where both paths miss is a torn write
+ * (fire-and-forget append), not a lifecycle gap.
+ */
+export const dispatchFilterFromLedgerRecords = (
+  records: readonly Record<string, unknown>[],
+  sessionId: string
+): DispatchToolFilter | undefined => {
+  const hits = records.filter((r) => r.kind === "dispatch-activated" && String(r.childId ?? "") === sessionId)
+  const last = hits[hits.length - 1] as { address?: unknown; shape?: unknown } | undefined
+  if (!last) return undefined
+  const address = String(last.address ?? "")
+  if (!address.startsWith("builtin/")) return undefined
+  const def = BUILTIN_AGENTS[address.slice("builtin/".length)]
+  if (!def) return undefined
+  const shape: DispatchShape = last.shape === "one-shot" ? "one-shot" : "resident"
+  return childToolFilterFor(def, shape)
+}
 
 /**
  * The plugin-owned built-ins. One table row is the whole cost of adding the
