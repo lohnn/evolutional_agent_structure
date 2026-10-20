@@ -10,7 +10,7 @@
 #   DSH_HIVE_REF   git ref to track                        (default: main)
 #   DSH_HIVE_REPO  git base for the specs                  (default: github:lohnn/evolutional_agent_structure)
 #   DSH_VERSION   pinned harness version for `dsh plugin` (default:
-#                 0.2.0-rc.2; when run under the dsh-hive-web service, the
+#                 0.2.1-rc.2; when run under the dsh-hive-web service, the
 #                 TOML `env` sets this and remains the single version source —
 #                 bump THAT line, and keep it >= the version the profile
 #                 actually serves). Cohort bumps: kit tarballs must be
@@ -66,7 +66,7 @@ done
 PROFILE="${PROFILE:-${HOME}/.dsh/profiles/hive}"
 REF="${DSH_HIVE_REF:-main}"
 REPO="${DSH_HIVE_REPO:-github:lohnn/evolutional_agent_structure}"
-DSH_VERSION="${DSH_VERSION:-0.2.0-rc.2}"
+DSH_VERSION="${DSH_VERSION:-0.2.1-rc.2}"
 KIT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NAME="$(basename "$PROFILE")"
 STAMP="[dsh-hive-update]"
