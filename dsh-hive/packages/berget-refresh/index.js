@@ -63,21 +63,23 @@ const CATALOG_SYNC_MS = 24 * 60 * 60 * 1000;
 // Backoff after a failed catalog sync (missing script, expired credential…).
 const CATALOG_RETRY_MS = 60 * 60 * 1000;
 const CATALOG_SYNC_STATE = join(homedir(), '.dsh', 'berget-catalog-sync.json');
-// Where the catalog sync script lives depends on how this plugin was installed:
-//  - linked from a dsh-hive source checkout (`link:…/dsh-hive/packages/berget-refresh`):
-//    use the checkout's own dsh-hive/scripts/berget-models-sync.mjs, so the
-//    script and the plugin always come from the same tree;
-//  - installed from a tarball (the ship kit): the installer copies the script
-//    to ~/.dsh/hive-kit/.
-// The checkout path cannot exist inside a tarball install (the package ships
-// only index.js and cordis.patch.yml), so the probe is unambiguous.
+// The catalog sync script SHIPS WITH THIS PLUGIN (scripts/, a prepack copy of
+// the repo master dsh-hive/scripts/berget-models-sync.mjs committed next to
+// the sources) — no install step may place it: a tarball install self-serves,
+// a linked checkout resolves the checkout master directly. The fixed
+// ~/.dsh/hive-kit path remains only as a legacy fallback for deployments that
+// predate the bundling (their service pre-start's curl still maintains it).
+// Resolution prefers the source-adjacent copies so dev iteration hits the
+// master without repacking; on kit installs only the bundled copy exists.
 const CHECKOUT_SYNC_SCRIPT = fileURLToPath(
   new URL('../../scripts/berget-models-sync.mjs', import.meta.url),
 );
+const BUNDLED_SYNC_SCRIPT = fileURLToPath(
+  new URL('./scripts/berget-models-sync.mjs', import.meta.url),
+);
 const KIT_SYNC_SCRIPT = join(homedir(), '.dsh', 'hive-kit', 'berget-models-sync.mjs');
-const CATALOG_SYNC_SCRIPT = existsSync(CHECKOUT_SYNC_SCRIPT)
-  ? CHECKOUT_SYNC_SCRIPT
-  : KIT_SYNC_SCRIPT;
+const CATALOG_SYNC_SCRIPT = [CHECKOUT_SYNC_SCRIPT, BUNDLED_SYNC_SCRIPT, KIT_SYNC_SCRIPT]
+  .find((p) => existsSync(p)) ?? KIT_SYNC_SCRIPT;
 
 export async function apply(ctx) {
   const log = ctx.logger ?? console;

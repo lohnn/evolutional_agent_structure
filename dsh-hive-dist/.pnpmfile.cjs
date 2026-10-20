@@ -46,7 +46,7 @@ const TARBALLS = {
   "@hive/dsh-hivemind": TARBALL_FILE("hive-dsh-hivemind-0.0.3.tgz"),
   "@hive/dsh-painpoints": TARBALL_FILE("hive-dsh-painpoints-0.0.3.tgz"),
   "@hive/dsh-tools": TARBALL_FILE("hive-dsh-tools-0.0.4.tgz"),
-  "dsh-berget-refresh": TARBALL_FILE("dsh-berget-refresh-0.1.2.tgz"),
+  "dsh-berget-refresh": TARBALL_FILE("dsh-berget-refresh-0.1.3.tgz"),
   "dsh-berget-usage": TARBALL_FILE("dsh-berget-usage-0.2.0.tgz"),
   "dsh-provider-usage": TARBALL_FILE("dsh-provider-usage-0.1.1.tgz"),
   "dsh-web-search-searxng": TARBALL_FILE("dsh-web-search-searxng-0.5.2.tgz"),
