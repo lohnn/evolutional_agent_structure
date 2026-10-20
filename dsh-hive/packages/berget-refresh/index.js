@@ -28,7 +28,8 @@
  */
 
 import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
-import { readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, renameSync, existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { spawn } from 'node:child_process';
@@ -59,8 +60,24 @@ const EXPIRY_MARGIN_MS = 90 * 1000;
 // Poll cadence fallback / retry backoff.
 const RETRY_MS = 60 * 1000;
 const CATALOG_SYNC_MS = 24 * 60 * 60 * 1000;
+// Backoff after a failed catalog sync (missing script, expired credential…).
+const CATALOG_RETRY_MS = 60 * 60 * 1000;
 const CATALOG_SYNC_STATE = join(homedir(), '.dsh', 'berget-catalog-sync.json');
-const CATALOG_SYNC_SCRIPT = join(homedir(), '.dsh', 'hive-kit', 'berget-models-sync.mjs');
+// Where the catalog sync script lives depends on how this plugin was installed:
+//  - linked from a dsh-hive source checkout (`link:…/dsh-hive/packages/berget-refresh`):
+//    use the checkout's own dsh-hive/scripts/berget-models-sync.mjs, so the
+//    script and the plugin always come from the same tree;
+//  - installed from a tarball (the ship kit): the installer copies the script
+//    to ~/.dsh/hive-kit/.
+// The checkout path cannot exist inside a tarball install (the package ships
+// only index.js and cordis.patch.yml), so the probe is unambiguous.
+const CHECKOUT_SYNC_SCRIPT = fileURLToPath(
+  new URL('../../scripts/berget-models-sync.mjs', import.meta.url),
+);
+const KIT_SYNC_SCRIPT = join(homedir(), '.dsh', 'hive-kit', 'berget-models-sync.mjs');
+const CATALOG_SYNC_SCRIPT = existsSync(CHECKOUT_SYNC_SCRIPT)
+  ? CHECKOUT_SYNC_SCRIPT
+  : KIT_SYNC_SCRIPT;
 
 export async function apply(ctx) {
   const log = ctx.logger ?? console;
@@ -240,11 +257,21 @@ export async function apply(ctx) {
     return inFlight;
   }
 
-  async function syncCatalog() {
-    let lastSync = 0;
-    try { lastSync = JSON.parse(await readFile(CATALOG_SYNC_STATE, 'utf8')).at ?? 0; } catch {}
-    const delay = Math.max(0, lastSync + CATALOG_SYNC_MS - Date.now());
+  // `retryIn` is set after a failed run. Without it the delay is computed from
+  // the last *successful* sync, which stays in the past while the script keeps
+  // failing — a missing script then respawned node in a tight loop and pinned
+  // a whole CPU core (observed 2026-10-20: ~/.dsh/hive-kit lacked the script
+  // and the respawn storm cost ~1 core/harness until the restart).
+  async function syncCatalog(retryIn) {
+    if (stopped) return;
+    let delay = retryIn;
+    if (delay === undefined) {
+      let lastSync = 0;
+      try { lastSync = JSON.parse(await readFile(CATALOG_SYNC_STATE, 'utf8')).at ?? 0; } catch {}
+      delay = Math.max(0, lastSync + CATALOG_SYNC_MS - Date.now());
+    }
     catalogTimer = setTimeout(async () => {
+      let nextRetry;
       try {
         await new Promise((resolve, reject) => {
           const child = spawn(process.execPath, [CATALOG_SYNC_SCRIPT], { stdio: 'ignore' });
@@ -254,9 +281,14 @@ export async function apply(ctx) {
         await writeJsonAtomic(CATALOG_SYNC_STATE, { at: Date.now() });
         log.info?.('[dsh-berget-refresh] refreshed Berget model catalog');
       } catch (e) {
-        log.warn?.('[dsh-berget-refresh] catalog refresh failed: %s', e?.message ?? e);
+        log.warn?.(
+          '[dsh-berget-refresh] catalog refresh failed (%s): %s — retrying in 1h',
+          CATALOG_SYNC_SCRIPT,
+          e?.message ?? e,
+        );
+        nextRetry = CATALOG_RETRY_MS;
       } finally {
-        syncCatalog();
+        syncCatalog(nextRetry);
       }
     }, delay);
     catalogTimer.unref?.();
