@@ -349,7 +349,7 @@ KIT_TARBALLS=(
   hive-dsh-hivemind-0.0.3.tgz
   hive-dsh-painpoints-0.0.3.tgz
   hive-dsh-tools-0.0.4.tgz
-  dsh-berget-refresh-0.1.1.tgz
+  dsh-berget-refresh-0.1.2.tgz
   dsh-berget-usage-0.2.0.tgz
   dsh-provider-usage-0.1.1.tgz
   dsh-web-search-searxng-0.5.2.tgz
@@ -420,7 +420,7 @@ if [ "$HAS_KIT_TARBALLS" = "1" ] && [ "${DSH_HIVE_GIT_MODE:-0}" != "1" ]; then
     file:./hive-dsh-hivemind-0.0.3.tgz
     file:./hive-dsh-painpoints-0.0.3.tgz
     file:./hive-dsh-tools-0.0.4.tgz
-    file:./dsh-berget-refresh-0.1.1.tgz
+    file:./dsh-berget-refresh-0.1.2.tgz
     file:./dsh-berget-usage-0.2.0.tgz
     file:./dsh-provider-usage-0.1.1.tgz
     file:./dsh-web-search-searxng-0.5.2.tgz
