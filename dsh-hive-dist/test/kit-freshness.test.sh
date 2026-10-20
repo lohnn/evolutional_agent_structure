@@ -55,6 +55,18 @@ for pkg_dir in dsh-hive/packages/*/; do
     -- "${pkg_dir}" \
     ':(exclude)'"${pkg_dir}"'docs' \
     ':(exclude)'"${pkg_dir}"'test')
+
+  # Repo-level masters bundled INTO a package via prepack (see the package's
+  # prepack script) are build inputs even though their commit history lives
+  # outside ${pkg_dir}: a master-only edit must trip the bundling package's
+  # gate as well. Map: short ref name -> shipped master.
+  # dsh-berget-refresh ships dsh-hive/scripts/berget-models-sync.mjs.
+  if [ "$pkg_short" = "berget-refresh" ]; then
+    msha=$(git log -1 --format=%H -- 'dsh-hive/scripts/berget-models-sync.mjs')
+    if [ -n "$msha" ] && ! git merge-base --is-ancestor "$msha" "$src_sha" 2>/dev/null; then
+      src_sha="$msha"
+    fi
+  fi
   if [ -z "$src_sha" ]; then
     # A package with no build-input history yet (freshly scaffolded, or only
     # docs/test committed so far): nothing to go stale relative to.
