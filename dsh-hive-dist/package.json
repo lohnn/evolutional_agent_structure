@@ -10,7 +10,7 @@
     "@hive/dsh-hivemind": "file:./hive-dsh-hivemind-0.0.3.tgz",
     "@hive/dsh-painpoints": "file:./hive-dsh-painpoints-0.0.3.tgz",
     "@hive/dsh-tools": "file:./hive-dsh-tools-0.0.4.tgz",
-    "dsh-berget-refresh": "file:./dsh-berget-refresh-0.1.1.tgz",
+    "dsh-berget-refresh": "file:./dsh-berget-refresh-0.1.2.tgz",
     "dsh-berget-usage": "file:./dsh-berget-usage-0.2.0.tgz",
     "dsh-provider-usage": "file:./dsh-provider-usage-0.1.1.tgz",
     "dsh-web-search-searxng": "file:./dsh-web-search-searxng-0.5.2.tgz",

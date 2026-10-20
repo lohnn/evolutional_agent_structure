@@ -71,7 +71,7 @@ archives=(
   hive-dsh-hivemind-0.0.3.tgz
   hive-dsh-painpoints-0.0.3.tgz
   hive-dsh-tools-0.0.4.tgz
-  dsh-berget-refresh-0.1.1.tgz
+  dsh-berget-refresh-0.1.2.tgz
   dsh-berget-usage-0.2.0.tgz
   dsh-provider-usage-0.1.1.tgz
   dsh-web-search-searxng-0.5.2.tgz

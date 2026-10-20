@@ -380,18 +380,40 @@ for (const [id, sweep] of sweeps) {
 
 // default-model safety net — patch (`- id:` row) and legacy (`key:` block) shapes
 const allText = (await Promise.all(targets.map((t) => readFile(t.path, 'utf8')))).join('\n');
-const dm = allText.match(/- id: agent-default-model[\s\S]*?config:\n\s+provider: \S+\n\s+model: (\S+)/)
-  ?? allText.match(/agent-default-model:\n  provider: \S+\n  model: (\S+)/);
-const defaultModel = dm?.[1];
-const defaultLive = seen.has(defaultModel);
+const dm = allText.match(/- id: agent-default-model[\s\S]*?config:\n\s+provider: (\S+)\n\s+model: (\S+)/)
+  ?? allText.match(/agent-default-model:\n  provider: (\S+)\n  model: (\S+)/);
+const defaultProvider = dm?.[1];
+const defaultModel = dm?.[2];
+// seen is the BERGET catalog — a default pointing at another provider
+// (e.g. a catalog route like github-copilot) is perfectly valid. Only a
+// berget default that fell off the endpoint needs attention.
+const defaultLive = defaultProvider === 'berget' ? seen.has(defaultModel) : true;
 
 // ── write (every target that carries the block) ─────────────────────────────
 let wroteAny = false;
 for (const t of targets) {
   const cur = await readFile(t.path, 'utf8');
   const start = cur.indexOf(t.start);
-  const end = cur.indexOf(t.end);
-  if (start < 0 || end < 0 || end < start) {
+  // End where the models list actually ends: the first non-blank, non-comment
+  // line indented no deeper than the models: key itself. The static end
+  // anchors sit far below the block and swallow every sibling provider
+  // declaration between the list and agent-default-model — a hand-declared
+  // sibling under llm-pi-ai.providers (e.g. a catalog route like
+  // github-copilot) was lost exactly this way on 2026-10-20. t.end stays as a
+  // sanity precondition only.
+  let end = -1;
+  if (start >= 0) {
+    const body = cur.slice(start + 1).split('\n');
+    const pad = body[0].match(/^ */)[0].length;
+    let consumed = body[0].length;
+    for (let i = 1; i < body.length; i++) {
+      const l = body[i];
+      if (l.trim() === '' || l.trim().startsWith('#')) { consumed += l.length + 1; continue; }
+      if (l.match(/^ */)[0].length <= pad) { end = start + 1 + consumed; break; }
+      consumed += l.length + 1;
+    }
+  }
+  if (start < 0 || end < 0 || cur.indexOf(t.end) < 0 || cur.indexOf(t.end) < end) {
     console.error(`[berget-models-sync] could not locate the berget models block in ${t.path} — skipping`);
     continue;
   }
@@ -436,13 +458,26 @@ if (sweeps.size && !changes.length && !DRY) {
 function parsePreviousModels(txt) {
   const out = new Map();
   if (typeof txt !== 'string' || !txt) return out;
-  // works for both shells: `\n      models:` (legacy 6) and `\n        models:` (patch 8);
-  // end anchor: `\nagent-default-model:` (legacy YAML key) or `\n- id: agent-default-model`
-  // (patch loader row — the id line has NO trailing colon, hence the [:\n] lookahead)
-  const m = txt.match(/\n( *)models:\n([\s\S]*?)\n(?:- id: )?agent-default-model(?=[:\n])/);
-  if (!m) return out;
-  const entryIndent = m[1].length + 2;
-  const entries = m[2].split(new RegExp('\n(?= {' + entryIndent + '}- id: )')).filter((s) => s.trim());
+  // Span-limit to the FIRST models: block (the berget one), exactly like the
+  // write path: the static end anchors reach past sibling provider keys, whose
+  // model entries would otherwise surface as spurious "removed" change lines.
+  const head = txt.match(/\n( *)models:\n/);
+  if (!head) return out;
+  const pad = head[1].length;
+  const bodyLines = txt.slice(head.index + 1).split('\n');
+  let blockText = bodyLines[0];
+  let consumed = bodyLines[0].length;
+  for (let i = 1; i < bodyLines.length; i++) {
+    const l = bodyLines[i];
+    if (l.trim() === '' || l.trim().startsWith('#')) {
+      blockText += '\n' + l; consumed += l.length + 1; continue;
+    }
+    if ((l.match(/^ */)[0] || '').length <= pad) break;
+    blockText += '\n' + l; consumed += l.length + 1;
+  }
+  const entryIndent = pad + 2;
+  const entries = blockText.split(new RegExp('\n(?= {' + entryIndent + '}- id: )'))
+    .filter((s) => s.trim().startsWith('- id:'));
   const effortsRe = new RegExp('^' + ' '.repeat(entryIndent + 4));
   for (const e of entries) {
     const id = (e.match(/- id: (\S+)/) ?? [])[1];
