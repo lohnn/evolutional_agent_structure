@@ -72,9 +72,6 @@ for f in dsh-hive-update.sh .pnpmfile.cjs cordis.yml cordis.patch.yml; do
     chmod 755 "$d/dsh-hive-update.sh"
   fi
 done
-if curl -fsSL --max-time 60 "${base%/dsh-hive-dist}/dsh-hive/scripts/berget-models-sync.mjs" -o "$d/.tmp.berget-models-sync.mjs"; then
-  mv "$d/.tmp.berget-models-sync.mjs" "$d/berget-models-sync.mjs"
-fi
 if [ -x "$d/dsh-hive-update.sh" ]; then
   exec "$d/dsh-hive-update.sh"
 fi
