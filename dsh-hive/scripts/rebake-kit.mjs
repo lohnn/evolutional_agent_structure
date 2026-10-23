@@ -90,7 +90,10 @@ const allShort = fs.readdirSync(PACKAGES_DIR).filter((d) => fs.existsSync(path.j
 
 let shorts = names
 if (flags.all) {
-  shorts = allShort.filter((d) => !["research-rampage"].includes(d)) // NOT_KIT_SHIPPED — see dsh-hive-dist/test/kit-freshness.test.sh
+  // NOT_KIT_SHIPPED — see dsh-hive-dist/test/kit-freshness.test.sh:
+  // research-rampage ships in the host bundle; dsh-hive-relay is a svcwatch
+  // service fetched by dsh-hive-relay.toml's pre_start — never a plugin.
+  shorts = allShort.filter((d) => !["research-rampage", "dsh-hive-relay"].includes(d))
 } else if (shorts.length === 0) {
   console.error(`usage: pnpm rebake <package…|--all> [--set x.y.z] [--dry-run]\npackages: ${allShort.join(", ")}`)
   process.exit(1)

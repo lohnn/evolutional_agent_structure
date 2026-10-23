@@ -212,6 +212,16 @@ recreations exactly like `dsh-web` + `dsh-relay` do on the dev machine. The
 relay is optional — only for exposing dsh beyond the machine (dsh refuses
 `--host 0.0.0.0` by design).
 
+The relay template publishes the **boot-URL convenience**: `/_/boot-url`
+serves the current boot's `?token=` URL rewritten to your `DSH_ORIGIN`, so a
+new tailnet browser logs in with one click. It also replaced the earlier
+socat-only example of the same name — same service name, so overwriting the
+old `dsh-hive-relay.toml` hot-swaps it (only relay connections drop). The
+relay is **not a profile plugin**: its `pre_start` fetches `relay.js` from
+this repo (same rail as the kit bootstrap; see
+`../dsh-hive/packages/dsh-hive-relay/`). Pin `DSH_HIVE_REF` the same way you
+pin the web service's ref.
+
 **The TOML is the only locally maintained artifact.** Its `pre_start` is a
 short fetcher: on every (re)start it syncs the text kit
 (`dsh-hive-update.sh`, `.pnpmfile.cjs`, both cordis ymls) from this repo at

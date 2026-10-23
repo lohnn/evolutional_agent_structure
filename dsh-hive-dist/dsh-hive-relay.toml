@@ -1,23 +1,87 @@
-# dsh-hive-relay — publish dsh-hive-web on 0.0.0.0, reachable past dsh's RCE
-# fence (dsh refuses --host 0.0.0.0 by design; the relay is the exposure
-# path). OPTIONAL: only needed if you expose dsh beyond the machine itself
+# dsh-hive-relay — publish dsh-hive-web on 0.0.0.0 and make dsh web's boot
+# token reachable from any tailnet device: /_/boot-url serves the CURRENT
+# boot's ?token= URL rewritten to your public origin, so a new browser logs in
+# with one click instead of docker-exec-ing into the container for the boot
+# log. Also /_/healthz for the liveness probe below.
+#
+# This REPLACES the old socat example of the same name — the service name is
+# unchanged, so overwriting this file hot-reloads the relay (only its own
+# connections drop; dsh web is untouched).
+#
+# STILL OPTIONAL: only needed if you expose dsh beyond the machine itself
 # (e.g. Tailscale Serve 443 -> host port -> docker publish -> this relay).
-# If you only use dsh locally on the host, skip this file entirely — with
-# compose publishing 127.0.0.1:DSH_PORT -> container:DSH_PORT your browser
-# reaches dsh directly and no relay exists.
+# Local-only dsh browsers reach dsh directly — skip this file entirely.
 #
-# ADJUST the env line (see dsh-hive-web.toml for the full setup story):
-#   - DSH_RELAY_PORT  the published/listen port — must match your compose
-#                     publish for this service
-#   - DSH_PORT        must equal dsh-hive-web.toml's DSH_PORT (the target
-#                     dsh web listens on, loopback)
+# PACKAGE, NOT PLUGIN: dsh-hive-relay is not a profile plugin (it is a plain
+# node service, dsh-hive/packages/dsh-hive-relay/). The pre_start below
+# fetches relay.js from your DSH_HIVE_REF the same way dsh-hive-web.toml's
+# pre_start fetches the kit — so a git checkout of the repo is NOT required.
+# Offline first boot: the fetch fails and svcwatch backs off (retry later, or
+# point DSH_RELAY_JS at a local copy of relay.js). Offline later boots run on
+# the cached copy (stale-but-up, same trade as the kit itself).
 #
-# socat itself is argv-exec'd with no env expansion, hence the bash wrapper.
+# ADJUST the env line (~/.dsh/hive-kit is created by the fetch; relay needs
+# nothing else — zero dependencies, Node 22+):
+#   - DSH_RELAY_JS     absolute path of relay.js — the pre_start default is
+#                      "$HOME/.dsh/hive-kit/dsh-relay.js"; point it at a repo
+#                      checkout copy instead if you prefer (dev machines).
+#   - DSH_RELAY_PORT   the published/listen port — must match your compose
+#                      publish for this service (keep the liveness_cmd port
+#                      below in sync)
+#   - DSH_PORT         must equal dsh-hive-web.toml's DSH_PORT (the target
+#                      dsh web listens on, loopback) — single source, the
+#                      relay reads it as its upstream
+#   - DSH_ORIGIN       YOUR public origin (e.g. https://<tailnet-magicname>)
+#                      that /_/boot-url rewrites onto — this plus TLS-
+#                      termination in front is what makes the URL click-
+#                      openable; it grants NO trust by itself
+#   - DSH_WEB_LOG      the dsh-hive-web tee target the boot URL is read from
+#                      (must match; the URL rotates per dsh boot and this
+#                      file is the only place it lives)
+#   - DSH_HIVE_REF     git ref relay.js is fetched from (default main; tighten
+#                      to a tag/SHA for frozen behavior, like dsh-hive-web)
+#
+# SECURITY POSTURE (approved for this deployment model — keep it true):
+#   /_/boot-url hands the boot token to anyone who can reach the relay port.
+#   Token exchange is stateless and idempotent within a boot (verified on the
+#   0.2.1 corridor), and the token dies with the boot — so the served URL is
+#   reusable until the next dsh web restart. Do NOT republish the relay port
+#   to anything wider than the approved tailnet path.
+#
+# The four safety rules (mirrored in the package README):
+#   1. ONE process under svcwatch — the bash wrapper exists only for env
+#      expansion (svcwatch argv has none); there are no pipeline children, so
+#      a restart never strands a sibling holding the port.
+#   2. Liveness probe on /_/healthz — keep its port in sync with
+#      DSH_RELAY_PORT.
+#   3. Verify the 0.0.0.0 bind from a NON-loopback address (curl the
+#      container's eth0 IP) — a loopback-only bind inside the container is
+#      silently unreachable from the host.
+#   4. The relay logs method + pathname ONLY — token values never leave the
+#      dsh boot log's own text.
 name = "dsh-hive-relay"
-env = { DSH_RELAY_PORT = "3080", DSH_PORT = "3002" }
-command = ["bash", "-c", 'exec socat "TCP-LISTEN:${DSH_RELAY_PORT:?DSH_RELAY_PORT must be set -- see env line},bind=0.0.0.0,reuseaddr,fork" "TCP:127.0.0.1:${DSH_PORT:?DSH_PORT must be set -- must match DSH_PORT in dsh-hive-web.toml}"']
-cwd = "."  # irrelevant for socat; svcwatch resolves it against the workspace root
+env = { DSH_RELAY_JS = "/home/you/.dsh/hive-kit/dsh-relay.js", DSH_RELAY_PORT = "3080", DSH_PORT = "3002", DSH_ORIGIN = "https://your-machine.example.ts.net", DSH_WEB_LOG = "/tmp/dsh-hive-web.log", DSH_HIVE_REF = "main" }
+pre_start = ["bash", "-c", '''
+d="$HOME/.dsh/hive-kit"; mkdir -p "$d"
+base="${DSH_HIVE_RAW:-https://raw.githubusercontent.com/lohnn/evolutional_agent_structure}/${DSH_HIVE_REF:-main}"
+if curl -fsSL --max-time 60 "$base/dsh-hive/packages/dsh-hive-relay/relay.js" -o "$d/.tmp.dsh-relay.js"; then
+  mv "$d/.tmp.dsh-relay.js" "$d/dsh-relay.js"
+fi
+if [ -f "$d/dsh-relay.js" ]; then
+  exit 0
+fi
+echo "[dsh-hive-relay-pre-start] FATAL: relay.js not fetched from $base and no cached copy in $d" >&2
+exit 1
+''']
+liveness_cmd = ["curl", "-sf", "http://127.0.0.1:3080/_/healthz"]
+liveness_interval_sec = 60
+liveness_failures = 3
+cwd = "."  # svcwatch resolves it against the workspace root
 restart = "always"
 restart_delay_sec = 2
 backoff_max_sec = 60
 start_grace_sec = 5
+# bash wrapper = env expansion only; the service is one node process. The
+# DSH_* envs are bridged onto the relay's RELAY_* vocabulary so DSH_PORT
+# stays the single source shared with dsh-hive-web.toml.
+command = ["bash", "-c", 'exec env RELAY_PORT="${DSH_RELAY_PORT:?DSH_RELAY_PORT must be set -- see env line}" RELAY_UP_PORT="${DSH_PORT:?DSH_PORT must be set -- must match DSH_PORT in dsh-hive-web.toml}" RELAY_LOG="${DSH_WEB_LOG:?DSH_WEB_LOG must be set -- the dsh-hive-web tee target}" RELAY_ORIGIN="${DSH_ORIGIN:?DSH_ORIGIN must be set -- your public https origin}" node "${DSH_RELAY_JS:?DSH_RELAY_JS must point at relay.js -- the pre_start fetches it}"']

@@ -1,0 +1,15 @@
+{
+  "name": "dsh-hive-relay",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Transparent HTTP(+WebSocket) proxy for dsh web with a boot-URL sidecar (/_/boot-url, /_/healthz) — the svcwatch-exposed path past dsh's RCE fence. Not a dsh plugin: run it through .opencode/services/dsh-relay.toml.",
+  "type": "commonjs",
+  "main": "relay.js",
+  "files": [
+    "relay.js",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test"
+  }
+}
