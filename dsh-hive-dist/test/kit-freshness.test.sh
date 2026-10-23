@@ -33,7 +33,13 @@ cd "$(git rev-parse --show-toplevel)"
 # here, not an omission — add a reason when you edit this list.
 #   research-rampage: #53 — ships with the dsh host bundle (a dsh-commands
 #   bundle patch), not as part of the hive profile cohort.
-NOT_KIT_SHIPPED="research-rampage"
+#   dsh-hive-relay: a plain svcwatch service, NOT a dsh plugin: the
+#   kit installs plugins through `dsh plugin add` from KIT_TARBALLS, and a
+#   plugin-less tarball has no verified semantics there. Kit machines fetch
+#   relay.js directly (dsh-hive-relay.toml's pre_start, the same raw-fetch
+#   rail as dsh-hive-web.toml's kit bootstrap). Mirrored in the rebake
+#   filter (dsh-hive/scripts/rebake-kit.mjs).
+NOT_KIT_SHIPPED="research-rampage dsh-hive-relay"
 
 fail=0
 for pkg_dir in dsh-hive/packages/*/; do
