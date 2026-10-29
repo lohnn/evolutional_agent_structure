@@ -1,6 +1,6 @@
 {
   "name": "@hive/dsh-evolution",
-  "version": "0.0.8",
+  "version": "0.0.9",
   "private": true,
   "files": [
     "dist",
@@ -25,7 +25,7 @@
     "build": "tsc -p tsconfig.json",
     "prepare": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "npm run build && node --test"
+    "test": "npm run build && node --test test/*.test.mjs && node test/service-harness.mjs"
   },
   "dependencies": {
     "@deepseek-ai/schemastery": "^3.18.2",

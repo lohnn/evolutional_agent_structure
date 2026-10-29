@@ -179,6 +179,11 @@ test("lifecycle summons stay turn-scoped (never globally registered, gated by re
     "hive_board_reopen",
     "hive_dissolve",
     "hive_evolve",
+    // WI-108 — /evolve's mutation-apply executor, summoned alongside hive_evolve:
+    // gated by requireAwake() like every lifecycle summon; the executor's own
+    // approval gate (operator-approval evidence + verbatim queue records +
+    // W-047 end-state verification) lives in Evolution.evolveApply.
+    "hive_evolve_apply",
     "hive_spawn",
     "hive_status",
     "hive_tick",

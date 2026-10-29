@@ -88,6 +88,20 @@ import {
   type EcosystemSnapshotSource,
   type PreCompactionDreamPointer,
 } from "./lib/snapshot.js"
+// WI-108 — the mutation-apply path: the queue lib (types + store IO + verbatim
+// persona-block surgery) and the roster pairing (PR #68: the SINGLE
+// enumeration point — target lookups route through listCapabilities() below,
+// never a re-glob of the capabilities dir).
+import {
+  integrateCharterMutation,
+  mutationsPath,
+  readMutations,
+  transitionMutation,
+  verifyCharterIntegration,
+  writeMutations,
+  type CharterMutation,
+  type MutationStore,
+} from "./lib/mutations.js"
 
 /** String-output tool contract (the spike 0.1 pattern used across the port). */
 const TEXT_OUT = {
@@ -387,6 +401,53 @@ const SPAWN_PARAMETERS: ParameterSchemaSpec = {
       selfModification: { type: "string", description: "Self-Modification Protocol — how it may evolve itself." },
       boundaries: { type: "string", description: "Boundaries — what it must NOT do." },
       history: { type: "string", description: "Evolution History — spawn provenance and remembered dreams." },
+    },
+  },
+}
+
+/**
+ * WI-108 — /evolve's summoned executor-tool parameters (`hive_evolve_apply`).
+ * The approval object executes the mutation under operator sanction relayed
+ * through the summon cycle: the operator typed /evolve (commands are
+ * model-invisible, W-048 — the summon only exists on their keystroke) and
+ * confirmed the mutation in the turn; the coordinator relays the operator's
+ * words VERBATIM plus the archived evidence. Refusals are body-level verdicts
+ * (I-058/W-046): missing approval, missing proposal, unknown target, verbatim
+ * mismatch, and double-apply all refuse with ✗ lines and write NOTHING.
+ */
+const EVOLVE_APPLY_PARAMETERS: ParameterSchemaSpec = {
+  id: {
+    type: "string",
+    description: "Stable mutation id (a slug, e.g. 'retrain-orchestrator-charter-p2'). Matches the queue record.",
+  },
+  target: {
+    type: "string",
+    description: "The capability whose charter the mutation grows — must be on the live roster.",
+  },
+  proposal: {
+    type: "object",
+    additionalProperties: false,
+    description:
+      "Cold start ONLY (no queue record in hive-mutations.json yet): the proposal carried VERBATIM to the executor. " +
+      "When a record exists, omit this — the executor applies the record's text and refuses a mismatching one.",
+    properties: {
+      text: {
+        type: "string",
+        description: "The mutation text VERBATIM as proposed and operator-approved — applied verbatim, never paraphrased.",
+      },
+      proposed_by: { type: "string", description: "Who proposed it (capability name, or 'coordinator')." },
+      proposed_at: { type: "string", description: "ISO date of the proposal." },
+      evidence: { type: "string", description: "Where the proposal is archived (board ledger/revision, dream residue, …)." },
+    },
+  },
+  approval: {
+    type: "object",
+    additionalProperties: false,
+    description: "REQUIRED — the operator approval this apply executes under. Absent approval = the executor refuses.",
+    properties: {
+      operator_verbatim: { type: "string", description: "The operator's approval words, verbatim." },
+      approved_at: { type: "string", description: "ISO date of the operator's approval." },
+      evidence: { type: "string", description: "Where the approval is archived (board item + revision, ledger line, …)." },
     },
   },
 }
@@ -805,7 +866,7 @@ export class Evolution extends Service {
     ctx.on("agent/disposed", (payload) => {
       const sessionId = String(payload.agent?.session?.id ?? payload.agent?.id ?? "")
       if (!sessionId) return
-      for (const map of [this.gateRestrictions, this.dormantSections, this.standingDreamRestrictions, this.dispatchFilterLifts]) {
+      for (const map of [this.gateRestrictions, this.dormantSections, this.standingDreamRestrictions, this.dispatchFilterLifts, this.summonDisposers]) {
         const disposer = map.get(sessionId)
         if (disposer === undefined) continue
         try {
@@ -890,15 +951,31 @@ export class Evolution extends Service {
           }
         }
         let disposer: () => void
+        // WI-108: lift a stale unfired summon of a PREVIOUS command on this
+        // session before mounting the new one (the disposer contract doubles
+        // as a no-op for an already-fired summon). Keyed by session id —
+        // always derivable here; an empty id degenerates to never-lifting.
+        const sessionId = String(agent.session?.id ?? agent.id ?? "")
+        const stale = sessionId ? this.summonDisposers.get(sessionId) : undefined
+        if (stale) {
+          try {
+            stale()
+          } catch {
+            // already unwound with the agent's scoped world
+          }
+          this.summonDisposers.delete(sessionId)
+        }
         try {
           disposer = registerTool(agent.ctx)
         } catch (err) {
           return { kind: "error" as const, text: `/${command}: failed to summon the lifecycle tool: ${String(err)}` }
         }
-        // Unfired summons need no ledger: the tool was registered on the
-        // receiving agent's OWN ctx, so it never leaks to other agents and is
-        // retracted with its scope when the agent is disposed. (The audit's
-        // dead-WeakMap finding: tracking existed but nothing ever read it.)
+        // Unfired summons are held HERE for the next summon to lift (and
+        // dropped on agent disposal): the tool was registered on the receiving
+        // agent's OWN ctx, so it never leaks to other agents; a fired tool
+        // retracts itself (WI-037), and an UNFIRED one is replaced by the next
+        // lifecycle summon — one live summon per session (WI-108).
+        if (sessionId) this.summonDisposers.set(sessionId, disposer)
         agent.followup(
           createMessage({
             role: "user",
@@ -1111,20 +1188,50 @@ export class Evolution extends Service {
         },
       })
 
+      // ── WI-108: the mutation-apply path ─────────────────────────────────────
+      // /evolve is no longer analysis-only. The ONE operator keystroke summons
+      // TWO turn-scoped tools: `hive_evolve` (the analysis — roster + energy +
+      // the mutation queue from .opencode/agents/hive-mutations.json,
+      // read-only) and `hive_evolve_apply` (the executor). Commands are
+      // MODEL-INVISIBLE (W-048) — the operator typed /evolve, and their
+      // approval of a mutation this turn is relayed by the coordinator into
+      // the executor call; only mutations recorded/approved under operator
+      // sanction apply, the executor verifies the END-STATE (W-047) before
+      // reporting success, and refusal verdicts write nothing.
       const d4 = ctx.commands.register({
         name: "evolve",
-        description: "Show the HIVE roster + energy and let the agent run the evolution analysis via a turn-scoped hive_evolve tool.",
+        description:
+          "Show the HIVE roster, energy and the mutation queue, and run the evolution analysis (turn-scoped hive_evolve); operator-approved charter mutations execute via the hive_evolve_apply executor in the same summon.",
         handler: (inv) => {
           const gate = requireAwake(inv)
           if (gate) return gate
           return summon(
             inv.agent,
             "evolve",
-            (agentCtx) =>
-              this.registerLifecycleTool(agentCtx, "hive_evolve", "Return the current HIVE capability roster and energy state.", () =>
-                this.buildRoster()
-              ),
-            "Run the evolution analysis: call the summoned tool for the live roster, then report state, gaps, and any spawn/mutate/dissolve proposals."
+            (agentCtx) => {
+              // WI-108: BOTH tools ride this summon (the disposer below lifts
+              // whatever a previous summon left unfired on this session).
+              const d1 = this.registerLifecycleTool(
+                agentCtx,
+                "hive_evolve",
+                "Return the current HIVE capability roster, energy state, and the mutation queue (proposed/approved/voided records pending in hive-mutations.json). Read-only.",
+                () => this.evolveAnalysis()
+              )
+              const d2 = this.registerLifecycleTool(
+                agentCtx,
+                "hive_evolve_apply",
+                "Apply ONE operator-approved charter mutation to its target capability: verifies the queue record and the operator-approval evidence, integrates the approved text VERBATIM into the capability's persona, verifies the written end-state (re-read + live roster) before reporting, and records the applied transition in hive-mutations.json. Refusals (missing/unapproved/mismatched/double-apply) write NOTHING.",
+                (args) => this.evolveApply(args),
+                EVOLVE_APPLY_PARAMETERS,
+                { consumeOnVerdict: true }
+              )
+              return () => {
+                d1()
+                d2()
+              }
+            },
+            "Run the evolution analysis: call the summoned tool for the live roster and the mutation queue, then report state, gaps, and any spawn/mutate/dissolve proposals. " +
+              "If the operator confirmed a pending mutation this turn (or points at an approved-but-unapplied record and its archived approval), execute it with `hive_evolve_apply` — carrying the operator's approval words verbatim — and report the executor's verification."
           )
         },
       })
@@ -2135,6 +2242,16 @@ export class Evolution extends Service {
   private gateRestrictions = new Map<string, () => void>()
   private dormantSections = new Map<string, () => void>()
 
+  /**
+   * WI-108 — one LIVE summon per session. An unfired turn-scoped tool never
+   * retracts by itself (only first-execute or agent disposal ends it), so a
+   * REPEAT lifecycle command in the same live session collided with the stale
+   * registration ("already registered in this scope"). The summon holds the
+   * session's last summon disposer here and lifts it before mounting the next
+   * — the previous wake brief is defunct the moment a new command fires.
+   */
+  private summonDisposers = new Map<string, () => void>()
+
   // ── dispatched-child tool filters (I-070; dsh 0.2.1 corridor) ─────────────
   // dsh 0.2.1 removed the per-request `toolFilter`/`persona` from
   // `SubagentStartRequest` (child composition moved to presets), so the
@@ -2411,6 +2528,270 @@ export class Evolution extends Service {
     return {
       consumed: true,
       text: `HIVE awakening manifests: ${manifested}/${list.length} manifested.\n\n` + lines.join("\n"),
+    }
+  }
+
+  // ── WI-108: the /evolve mutation-apply path ─────────────────────────────────
+  // Doctrine: propose via tools → operator approves → tooling executes. The
+  // first two steps lived on board ledgers; the third was missing (the defect
+  // WI-108 names: MUTATE was a no-op). `/evolve` now carries the executor.
+
+  /**
+   * The analysis half (`hive_evolve`): the live roster + energy, then the
+   * mutation queue from hive-mutations.json — pending/approved records surface
+   * here with their FULL verbatim text and approval evidence, so the
+   * coordinator can report them to the operator and (during the same turn)
+   * execute an approved one via hive_evolve_apply. Read-only: a malformed
+   * store degrades to the honest "(unreadable)" line, never a throw.
+   */
+  evolveAnalysis = (): string => {
+    const roster = this.buildRoster()
+    const store = readMutations(this.directory)
+    const lines = [roster, "", "## Mutation Queue"]
+    const open = store.mutations.filter((m) => m.status === "proposed" || m.status === "approved")
+    const closed = store.mutations.filter((m) => m.status === "applied" || m.status === "voided")
+    if (open.length === 0 && closed.length === 0) {
+      lines.push("  (no mutation records — an approved charter mutation is carried to hive_evolve_apply with its proposal text, operator approval words verbatim, and evidence)")
+      return lines.join("\n")
+    }
+    for (const m of [...open, ...closed]) {
+      lines.push(
+        `  ${m.id} → ${m.target} [${m.status}]` +
+          ` — proposed by ${m.proposed_by} on ${m.proposed_at}${m.evidence ? ` (proposal evidence: ${m.evidence})` : ""}`
+      )
+      if (m.approval) {
+        lines.push(
+          `    approval: operator "${m.approval.operator_verbatim}" on ${m.approval.approved_at}` +
+            `${m.approval.evidence ? ` (evidence: ${m.approval.evidence})` : ""}`
+        )
+      }
+      lines.push(`    text: ${m.text}`)
+    }
+    if (open.length === 0) lines.push("  (no pending mutations — every record is applied or voided)")
+    return lines.join("\n")
+  }
+
+  /**
+   * The executor half (`hive_evolve_apply`, WI-108): apply ONE operator-
+   * approved charter mutation.
+   *
+   * Safety contract (W-047 / the spec's negative cases):
+   *   - ONLY operator-approved mutations apply: the call must carry the
+   *     approval (operator's words verbatim + date), and an existing queue
+   *     record gates every field (a mismatching verbatim text is refused —
+   *     operator-approved words are never approximated).
+   *   - Every refusal is a body-level verdict BEFORE any write (WI-074 E1):
+   *     no partial write, no state change — the summon stays armed for the
+   *     corrected re-call.
+   *   - The write is verified against the END-STATE, never the write's return:
+   *     the persona block is re-read from disk (marker + exact verbatim text),
+   *     the live roster is re-derived through pairCapabilityEntries (PR #68),
+   *     and the queue record transitions to `applied` only when both hold.
+   *   - No context-service surface is touched (W-090: nothing to declare) —
+   *     the executor reads its own directory layout directly.
+   *
+   * Consumption contract (spawnBatch's): success and terminal no-ops consume
+   * the summon; correctable refusals arm it.
+   */
+  evolveApply = (rawArgs: unknown): SummonOutcome => {
+    const args = (rawArgs ?? {}) as {
+      id?: unknown
+      target?: unknown
+      proposal?: unknown
+      approval?: unknown
+    }
+    // ── validation: everything happens before the first write ─────────────────
+    // id
+    const id = typeof args.id === "string" ? args.id.trim() : ""
+    if (!id) {
+      return {
+        consumed: false,
+        text:
+          "✗ refused: missing mutation `id` (a slug like 'retrain-orchestrator-charter-p2'). Nothing was written. " +
+          "Re-call with id/target/approval; the queue view from hive_evolve lists pending ids.",
+      }
+    }
+    const target = typeof args.target === "string" ? args.target.trim() : ""
+    if (!target) {
+      return {
+        consumed: false,
+        text: `✗ refused: missing mutation \`target\` (the capability whose charter grows). Nothing was written.`,
+      }
+    }
+    // Target capability resolution — THROUGH the roster pairing (PR #68: the
+    // single enumeration point; a re-glob of capabilities/ would re-double).
+    const caps = this.listCapabilities()
+    if (!caps.some((c) => c.name === target)) {
+      return {
+        consumed: false,
+        text:
+          `✗ refused: no capability "${target}" on the live roster (found ${caps.length ? caps.map((c) => c.name).join(", ") : "none"}). ` +
+          `Nothing was written. Re-target or spawn the capability first.`,
+      }
+    }
+    const personaFile = path.join(this.capabilitiesPath, target, "agent.cordis.yml")
+    if (!fs.existsSync(personaFile)) {
+      return {
+        consumed: false,
+        text:
+          `✗ refused: capability "${target}" carries no preset persona file (${personaFile}). ` +
+          `Only preset-dir capabilities with a spawn-rendered agent.cordis.yml can take a charter mutation. Nothing was written.`,
+      }
+    }
+    // Approval — required, verbatim, non-empty.
+    const approvalIn = (args.approval ?? {}) as { operator_verbatim?: unknown; approved_at?: unknown; evidence?: unknown }
+    const operatorVerbatim = typeof approvalIn.operator_verbatim === "string" ? approvalIn.operator_verbatim.trim() : ""
+    const approvedAt = typeof approvalIn.approved_at === "string" && approvalIn.approved_at.trim() !== "" ? approvalIn.approved_at.trim() : ""
+    if (!operatorVerbatim || !approvedAt) {
+      return {
+        consumed: false,
+        text:
+          `✗ refused (unapproved): no operator approval in the call — \`approval: { operator_verbatim, approved_at }\` is REQUIRED ` +
+          `and both fields must be non-empty (the operator's words VERBATIM, e.g. "Yes, evolve", plus the approval date; ` +
+          `archived evidence rides along). Only operator-approved mutations apply. Nothing was written.`,
+      }
+    }
+    // Existing record / proposal reconciliation.
+    const store = readMutations(this.directory)
+    const now = new Date().toISOString()
+    const existing = store.mutations.find((m) => m.id === id)
+    const proposalIn = (args.proposal ?? {}) as { text?: unknown; proposed_by?: unknown; proposed_at?: unknown; evidence?: unknown }
+    let mutation: CharterMutation
+    if (existing) {
+      // The verbatim guard runs FIRST — even an applied/voided record must
+      // refuse a call that tries to arrive with a DIFFERENT text: operator-
+      // approved words are never substituted, whatever the record's status.
+      const callText = typeof proposalIn.text === "string" && proposalIn.text.trim() !== "" ? proposalIn.text.trim() : undefined
+      if (callText !== undefined && callText !== existing.text) {
+        return {
+          consumed: false,
+          text:
+            `✗ refused: the carried proposal text does not match the queue record's VERBATIM text for "${id}". ` +
+            `Operator-approved words are never approximated — re-call WITHOUT the proposal object to apply the record's text as recorded.`,
+        }
+      }
+      if (existing.status === "applied") {
+        // Terminal no-op: the end-state already carries this mutation.
+        return {
+          consumed: true,
+          text:
+            `✓ already applied: mutation "${id}" hit "${existing.target}" at ${existing.applied?.at ?? "?"} — its verification: ${existing.applied?.verification ?? "(recorded)"}. ` +
+            `Nothing further to do; no files were touched this call.`,
+        }
+      }
+      if (existing.status === "voided") {
+        return {
+          consumed: true,
+          text: `✗ refused (terminal): mutation "${id}" was VOIDED${existing.history.length > 0 ? ` (${existing.history.at(-1)!.at})` : ""} — voided records never re-apply. The summon is retracted.`,
+        }
+      }
+      mutation = existing
+    } else {
+      // Cold start: the proposal rides the call (the /spawn-persona precedent —
+      // the whole manifest crosses one tool boundary, then lives in the store).
+      const text = typeof proposalIn.text === "string" ? proposalIn.text.trim() : ""
+      if (!text) {
+        return {
+          consumed: false,
+          text:
+            `✗ refused (missing proposal): no queue record "${id}" exists and the call carries no \`proposal.text\`. ` +
+            `Nothing was written. Recover the proposal from its ledger archive and re-call with proposal: { text, proposed_by, proposed_at, evidence } — ` +
+            `the text must be the approved words VERBATIM, never a paraphrase.`,
+        }
+      }
+      mutation = {
+        id,
+        target,
+        kind: "charter",
+        text,
+        proposed_by: typeof proposalIn.proposed_by === "string" && proposalIn.proposed_by.trim() !== "" ? proposalIn.proposed_by.trim() : "coordinator",
+        proposed_at: typeof proposalIn.proposed_at === "string" && proposalIn.proposed_at.trim() !== "" ? proposalIn.proposed_at.trim() : new Date().toISOString().slice(0, 10),
+        evidence: typeof proposalIn.evidence === "string" && proposalIn.evidence.trim() !== "" ? proposalIn.evidence.trim() : undefined,
+        status: "proposed",
+        history: [{ at: now, from: "", to: "proposed", by: typeof proposalIn.proposed_by === "string" && proposalIn.proposed_by.trim() !== "" ? proposalIn.proposed_by.trim() : "coordinator" }],
+      }
+    }
+    // Persona integration is a pure computation — do it BEFORE any write so a
+    // malformed persona block refuses without touching anything.
+    let newYml: string
+    try {
+      newYml = integrateCharterMutation(fs.readFileSync(personaFile, "utf8"), {
+        id: mutation.id,
+        approvedAt,
+        evidence: typeof approvalIn.evidence === "string" && approvalIn.evidence.trim() !== "" ? approvalIn.evidence.trim() : undefined,
+        text: mutation.text,
+      })
+    } catch (err) {
+      return {
+        consumed: false,
+        text: `✗ refused: ${err instanceof Error ? err.message : String(err)} — nothing was written.`,
+      }
+    }
+    // ── mutation: persona write → end-state verify → queue transition ─────────
+    const lines: string[] = []
+    fs.writeFileSync(personaFile, newYml, "utf8")
+    lines.push(`  ✓ persona updated: ${personaFile}`)
+    // W-047: verify against what ACTUALLY landed — re-read from disk.
+    const written = fs.readFileSync(personaFile, "utf8")
+    const endState = verifyCharterIntegration(written, { id: mutation.id, approvedAt, text: mutation.text })
+    if (!endState.ok) {
+      // Honest failure: the file is in an unknown state — report it, change the
+      // queue only by a history note (status stays non-applied).
+      const noted = transitionMutation(store, id, existing ? existing.status : "proposed", "hive_evolve_apply", `END-STATE VERIFY FAILED — ${endState.problem}`)
+      writeMutations(this.directory, noted)
+      return {
+        consumed: false,
+        text:
+          `✗ FAILED END-STATE VERIFICATION (nothing is reported as applied): ${endState.problem}\n\n` +
+          `The persona file was written but does not verify — re-read ${personaFile} and reconcile by hand before re-applying. ` +
+          `The queue record "${id}" was NOT transitioned to applied (a history note records the failure).`,
+      }
+    }
+    // Live roster view: the capability still lists, exactly once (W-047's
+    // "verify the live state", and the PR #68 pairing keeps the pair single).
+    const rosterAfter = this.listCapabilities()
+    const liveEntry = rosterAfter.find((c) => c.name === target)
+    const listed = rosterAfter.filter((c) => c.name === target).length
+    lines.push(
+      `  ✓ end-state verified: re-read persona contains the dated marker + the verbatim approved text (W-047)`
+    )
+    lines.push(
+      `  ✓ live roster: ${target} lists ${listed === 1 ? "exactly once" : `${listed}× (UNEXPECTED)`} — ` +
+        `energy ${liveEntry?.energy ?? "?"}, ${liveEntry?.description ?? "(no description)"}`
+    )
+    // Queue record: create-or-transition to applied, with the full lineage.
+    let next = store
+    if (!existing) {
+      // The creation line was seeded on `mutation` (proposed, by the proposer);
+      // from here the record only ever TRANSITIONS.
+      next = {
+        ...store,
+        mutations: [...store.mutations, { ...mutation } as CharterMutation],
+      }
+      next = transitionMutation(next, id, "approved", "operator", `operator verbatim: "${operatorVerbatim}"`, approvedAt ? new Date(approvedAt).toISOString() : now)
+    }
+    next = transitionMutation(next, id, "applied", "hive_evolve_apply", `operator verbatim: "${operatorVerbatim}"`)
+    const finalRecord = next.mutations.find((m) => m.id === id)!
+    finalRecord.approval = {
+      operator_verbatim: operatorVerbatim,
+      approved_at: approvedAt,
+      ...(typeof approvalIn.evidence === "string" && approvalIn.evidence.trim() !== "" ? { evidence: approvalIn.evidence.trim() } : {}),
+    }
+    finalRecord.applied = {
+      at: now,
+      files: [
+        path.relative(this.directory, personaFile),
+        path.relative(this.directory, mutationsPath(this.directory)),
+      ],
+      verification: "persona re-read contains the dated marker + verbatim text; roster pairing lists the target exactly once",
+    }
+    writeMutations(this.directory, next)
+    lines.push(`  ✓ queue record "${id}" → applied (${mutationsPath(this.directory)})`)
+    return {
+      consumed: true,
+      text:
+        `HIVE charter mutation "${id}" applied to "${target}" under operator approval "${operatorVerbatim}" (${approvedAt}).\n\n` +
+        lines.join("\n"),
     }
   }
 
