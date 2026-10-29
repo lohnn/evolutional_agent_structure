@@ -66,6 +66,7 @@ import { closeItem, releaseItem, reopenItem } from "@hive/dsh-board/lib/board-co
 import type { WorkItem } from "@hive/dsh-board/lib/board-store"
 import { parseCapabilityPersona, renderAgentCordisYml, type CapabilityPersona } from "./lib/persona.js"
 import { resolveCapabilityMaterial } from "./lib/material.js"
+import { pairCapabilityEntries } from "./lib/roster.js"
 import { optionalService } from "./lib/service-optional.js"
 import {
   resolveModelRoute,
@@ -143,26 +144,6 @@ export interface CapabilityInfo {
   name: string
   energy: number | null
   description: string | null
-}
-
-/**
- * Parse the `energy:` and `description:` frontmatter lines of a capability
- * markdown file. Mirrors the regexes the OpenCode plugin used (energy tick
- * reads/writes `energy:` in place; the roster reads both).
- */
-function readCapabilityFrontmatter(filePath: string): { energy: number | null; description: string | null } {
-  let content: string
-  try {
-    content = fs.readFileSync(filePath, "utf8")
-  } catch {
-    return { energy: null, description: null }
-  }
-  const energyMatch = content.match(/^energy:\s*(\d+)/m)
-  const descMatch = content.match(/^description:\s*(.+)/m)
-  return {
-    energy: energyMatch ? parseInt(energyMatch[1]!, 10) : null,
-    description: descMatch ? descMatch[1]!.trim() : null,
-  }
 }
 
 /**
@@ -2235,41 +2216,20 @@ export class Evolution extends Service {
 
   // ── capability presets ────────────────────────────────────────────────────
 
-  /** List active capabilities (non-`_`-prefixed subdirectories with a preset). */  listCapabilities = (): CapabilityInfo[] => {
+  /** List active capabilities (non-`_`-prefixed subdirectories with a preset). */
+  listCapabilities = (): CapabilityInfo[] => {
     let entries: fs.Dirent[]
     try {
       entries = fs.readdirSync(this.capabilitiesPath, { withFileTypes: true })
     } catch {
       return []
     }
-    const out: CapabilityInfo[] = []
-    for (const e of entries) {
-      if (e.name.startsWith("_")) continue
-      // Support BOTH layouts: a dsh preset DIRECTORY (<name>/preset.yml) and
-      // a legacy OpenCode capability markdown FILE (<name>.md). The markdown
-      // form is what the OpenCode plugin's energy.ts manages in place; the
-      // preset-directory form is what dsh spawns as a continuable child.
-      if (e.isDirectory()) {
-        const presetFile = path.join(this.capabilitiesPath, e.name, "preset.yml")
-        if (!fs.existsSync(presetFile)) continue
-        const agentFile = path.join(this.capabilitiesPath, e.name, "agent.cordis.yml")
-        const { description } = readCapabilityFrontmatter(presetFile)
-        // Energy lives in the capability's own file for the directory form
-        // too (energy.ts manages `<name>.md` files; for preset dirs we read
-        // the sibling energy from the legacy md when present, else from
-        // preset.yml's own `energy:` line).
-        const legacyMd = path.join(this.capabilitiesPath, `${e.name}.md`)
-        const energy = fs.existsSync(legacyMd)
-          ? readCapabilityFrontmatter(legacyMd).energy
-          : readCapabilityFrontmatter(agentFile).energy
-        out.push({ name: e.name, energy, description })
-      } else if (e.isFile() && e.name.endsWith(".md")) {
-        const name = e.name.replace(/\.md$/, "")
-        const { energy, description } = readCapabilityFrontmatter(path.join(this.capabilitiesPath, e.name))
-        out.push({ name, energy, description })
-      }
-    }
-    return out.sort((a, b) => a.name.localeCompare(b.name))
+    // WI-107: the dsh-era spawn materializes a PAIR per capability — the
+    // preset dir (manifest, dispatch material) plus the sibling `<name>.md`
+    // ledger (energy). Pair them by name so the roster lists each capability
+    // exactly ONCE — the dir form speaks for the pair (D7: preset wins), the
+    // ledger carries its energy. Full contract in lib/roster.ts.
+    return pairCapabilityEntries(entries, this.capabilitiesPath)
   }
 
   /** Build the capability roster text (systemPrompt section + /evolve). */
@@ -3006,6 +2966,10 @@ export default Evolution
 export { readHiveState, writeHiveState, markCapabilityUsed, tickEnergy, getCapabilitiesSummary }
 export { CAPABILITY_STANDING }
 export { resolveCapabilityMaterial } from "./lib/material.js"
+// WI-107: the roster pairing contract — exported for the tests (and any
+// future consumer that needs pair-by-name enumeration without the service).
+export { pairCapabilityEntries } from "./lib/roster.js"
+export type { CapabilityDirEntry } from "./lib/roster.js"
 // TOKEN-ECONOMY D1: the tier-routing surface — exported for the dispatch
 // tests and for any future consumer that needs to resolve routes without
 // booting the service.

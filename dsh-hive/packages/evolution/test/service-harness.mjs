@@ -80,7 +80,19 @@ if (assembly?.sections) {
 const dir = ctx.evolution.spawn("beta", "the beta capability")
 check("spawn.preset", fs.existsSync(path.join(dir, "preset.yml")) && fs.existsSync(path.join(dir, "agent.cordis.yml")), "spawn writes preset.yml + agent.cordis.yml")
 check("spawn.ledger", fs.readFileSync(path.join(synth, ".opencode/agents/capabilities/beta.md"), "utf8").includes("energy: 50"), "spawn seeds energy ledger at 50")
-check("spawn.roster", ctx.evolution.buildRoster().includes("beta"), "roster includes the spawned capability")
+// WI-107 regression guards — spawn materializes the PAIR (preset dir +
+// sibling energy ledger), and at this point the synth dir holds exactly one
+// ledger-only capability (alpha) plus one pair (beta). The pre-fix roster
+// double-listed every pair (W-124: 22 roster lines for 15 capabilities);
+// `.includes("beta")` — the check that lived here before — passed WITH the
+// double, which is how the bug survived this gate.
+const rosterLines = ctx.evolution.buildRoster().split("\n")
+const betaLines = rosterLines.filter((line) => line.trimStart().startsWith("beta") || line.includes("beta —"))
+check("spawn.roster", betaLines.length > 0, "roster includes the spawned capability")
+check("spawn.roster-single-entry", betaLines.length === 1, `the dir+ledger pair lists ONCE (found ${betaLines.length} beta lines)`)
+const capsList = ctx.evolution.listCapabilities()
+check("roster.mixed-layout-no-doubles", capsList.length === 2 && capsList.filter((c) => c.name === "beta").length === 1, `mixed md-only + pair layout enumerates each capability once (found ${capsList.length})`)
+check("roster.pair-energy-from-ledger", capsList.find((c) => c.name === "beta")?.energy === 50, "the paired entry takes its energy from the sibling ledger the tick manages")
 
 // Duplicate spawn refused.
 let refused = false
@@ -202,6 +214,10 @@ ctx.evolution.dissolve("beta")
 check("dissolve.moved", fs.existsSync(path.join(synth, ".opencode/agents/dissolved/beta.md")) && !fs.existsSync(path.join(synth, ".opencode/agents/capabilities/beta.md")), "dissolve archives the ledger")
 check("dissolve.dir-moved", fs.existsSync(path.join(synth, ".opencode/agents/dissolved/beta/preset.yml")) && !fs.existsSync(path.join(synth, ".opencode/agents/capabilities/beta")), "dissolve archives the preset dir")
 check("dissolve.roster", !ctx.evolution.buildRoster().includes("beta"), "roster no longer lists the dissolved capability")
+// WI-107: post-dissolve the remaining listing is alpha + gamma, each once —
+// a pairing bug that hidden-listed (or over-deleted) would show here.
+const postDissolve = ctx.evolution.listCapabilities()
+check("dissolve.roster-single", postDissolve.length === 2 && postDissolve.every((c) => c.name !== "beta"), `dissolve removes the PAIR as one capability (found ${JSON.stringify(postDissolve.map((c) => c.name))})`)
 
 // ── T2: dormant lifecycle commands refuse with the awaken hint (D2) ──────────
 {
