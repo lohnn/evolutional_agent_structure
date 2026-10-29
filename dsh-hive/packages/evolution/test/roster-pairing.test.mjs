@@ -18,6 +18,8 @@ import fs from "fs"
 import os from "os"
 import path from "path"
 import { pairCapabilityEntries } from "@hive/dsh-evolution"
+import { integrateCharterMutation } from "@hive/dsh-evolution/lib/mutations"
+import { renderAgentCordisYml } from "@hive/dsh-evolution/lib/persona"
 
 const dirEntry = (name) => ({ name, isDirectory: () => true, isFile: () => false })
 const fileEntry = (name) => ({ name, isDirectory: () => false, isFile: () => true })
@@ -109,4 +111,42 @@ test("real fs fixture: names sort, stray non-capability forms stay invisible", (
   )
   assert.equal(list.find((c) => c.name === "paired")?.energy, 42, "the pair's energy rides the ledger")
   assert.equal(list.find((c) => c.name === "ghost-with-ledger")?.energy, 9)
+})
+
+// WI-108: the mutation-apply executor integrates an approved charter mutation
+// into the pair's agent.cordis.yml persona block. The grown preset must still
+// pair as ONE capability — the roster reads preset.yml + the ledger, and the
+// appended persona section must not confuse the pairing (or its frontmatter).
+test("a pair whose persona carries an applied charter mutation still lists ONCE (WI-108)", () => {
+  const caps = mkCaps()
+  writeSpawnPair(caps, "grown", "grown capability", 61)
+  const ymlPath = path.join(caps, "grown", "agent.cordis.yml")
+  // The writeSpawnPair fixture above carries a simplified yml; the executor
+  // integrates the SPAWN-RENDERED shape, so materialize the persona the way
+  // spawn() does (renderAgentCordisYml — identity line, then the method).
+  fs.writeFileSync(ymlPath, renderAgentCordisYml("grown", "grown capability", {
+    enables: "enables grown work",
+    triggers: "when grown work appears",
+  }))
+  const ymlBefore = fs.readFileSync(ymlPath, "utf8")
+  const VERBATIM = "grown charter grows effective P2 — test-verbatim growth text."
+  const ymlAfter = integrateCharterMutation(ymlBefore, {
+    id: "grown-charter-p2",
+    approvedAt: "2026-10-29",
+    text: VERBATIM,
+  })
+  fs.writeFileSync(ymlPath, ymlAfter)
+  const list = pairCapabilityEntries([dirEntry("grown"), fileEntry("grown.md")], caps)
+  assert.deepEqual(
+    list,
+    [{ name: "grown", energy: 61, description: "grown capability" }],
+    "the persona-grown pair pairs exactly once, with preset description + ledger energy"
+  )
+  // The mutation is verbatim-additive: identity line rides above the appended
+  // Charter Mutations block; the marker + verbatim text are present verbatim.
+  assert.ok(ymlBefore.includes("You are the grown capability"), "pre-state sanity: spawn-rendered block")
+  assert.ok(ymlAfter.includes("You are the grown capability"))
+  assert.ok(ymlAfter.includes("## Charter Mutations"))
+  assert.ok(ymlAfter.includes("### grown-charter-p2 — operator-approved 2026-10-29"))
+  assert.ok(ymlAfter.includes(VERBATIM))
 })

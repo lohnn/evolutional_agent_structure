@@ -727,6 +727,159 @@ check("dissolve.roster-single", postDissolve.length === 2 && postDissolve.every(
   )
 }
 
+// ── WI-108: /evolve's mutation-apply path ───────────────────────────────────
+// The MUTATE lifecycle op was a no-op on dsh: permissions rode board ledgers,
+// the summoned hive_evolve was analysis-only, and approved charter mutations
+// never landed. The new arc drives the REAL summon machinery: /evolve now
+// summons hive_evolve (roster + energy + the mutation queue, read-only) AND
+// hive_evolve_apply (the executor). The executor's gates, in order:
+//   refusal verdicts (missing id / missing proposal / unapproved / unknown
+//   target / non-canonical persona) write NOTHING and stay armed for the
+//   corrected re-call; success integrates the approved text VERBATIM into the
+//   persona's agent.cordis.yml, verifies the END-STATE by re-reading the file
+//   and the live roster (W-047) BEFORE claiming success, writes the queue
+//   record, and consumes the summon; terminal states (already applied,
+//   voided) consume as no-ops. Target resolution routes through the roster
+//   pairing (PR #68) — never a re-glob.
+{
+  const evolveCmd108 = ctx.commands.find(undefined, "evolve")
+  const summonEvolveApply = async () => {
+    const before = followups.length
+    const out = await evolveCmd108.handler({ rawInput: "", agent: fakeAgent, commandId: `c_wi108_${before}`, attachments: [], signal: AbortSignal.timeout(2000) })
+    if (out.kind !== "success") console.log(`   [wi108 probe] summon said: ${out.kind}: ${out.text}`)
+    check(`wi108.summon.${before}`, out.kind === "success" && followups.length === before + 1, "/evolve summons the WI-108 pair and wakes the model")
+    check(
+      `wi108.brief.${before}`,
+      followups.at(-1).content[0].text.includes("hive_evolve") && followups.at(-1).content[0].text.includes("hive_evolve_apply"),
+      "the wake brief names both summoned tools (analysis + executor)"
+    )
+    return {
+      analysis: ctx.tools.get("hive_evolve", fakeAgent),
+      apply: ctx.tools.get("hive_evolve_apply", fakeAgent),
+    }
+  }
+  const gammaYml = path.join(synth, ".opencode/agents/capabilities/gamma/agent.cordis.yml")
+  const queueFile = path.join(synth, ".opencode/agents/hive-mutations.json")
+  const TEST_VERBATIM = "gamma charter grows for testing — the executor integrates this text VERBATIM and the roundtrip harness asserts it; (W-047) end-state read-back decides."
+  const gammaPayload = {
+    id: "gamma-charter-roundtrip",
+    target: "gamma",
+    proposal: {
+      text: TEST_VERBATIM,
+      proposed_by: "wi-108-test",
+      proposed_at: "2026-10-29",
+      evidence: "synthetic harness proposal (test fixtures carry no real evidence)",
+    },
+    approval: { operator_verbatim: "Yes, evolve", approved_at: "2026-10-29", evidence: "synthetic harness approval" },
+  }
+
+  // The empty-queue analysis view.
+  {
+    const { analysis } = await summonEvolveApply()
+    check("wi108.analysis.scoped", analysis !== undefined && ctx.tools.get("hive_evolve_apply", fakeAgent) !== undefined, "both WI-108 tools scoped on the coordinator")
+    const view = String(await analysis.execute({}, { agent: fakeAgent, signal: AbortSignal.timeout(2000) }))
+    check("wi108.analysis.roster", view.includes("## Active Capabilities") && view.includes("gamma"), "the analysis still returns the live roster")
+    check("wi108.analysis.empty-queue", view.includes("## Mutation Queue") && view.includes("no mutation records"), "the empty queue renders an honest state line")
+  }
+
+  // The refusal ladder — ONE summon serves every correctable refusal (WI-074:
+  // refusals do not consume), then the corrected call manifests. Nothing is
+  // written until the final call (asserted by file absence/byte-identity).
+  {
+    const { apply } = await summonEvolveApply()
+    const personaBefore = fs.readFileSync(gammaYml, "utf8")
+    const queueBefore = fs.existsSync(queueFile) ? fs.readFileSync(queueFile, "utf8") : null
+
+    const r1 = String(await apply.execute({}, { agent: fakeAgent, signal: AbortSignal.timeout(2000) }))
+    check("wi108.refuse.no-args", r1.includes("✗ refused") && r1.includes("`id`"), "missing id refused (nothing to correct without it)")
+    check("wi108.refuse.armed-1", ctx.tools.get("hive_evolve_apply", fakeAgent) !== undefined, "the refusal did NOT consume the summon (armed for the corrected re-call)")
+
+    const r2 = String(await apply.execute(
+      { id: "neg-no-proposal", target: "gamma", approval: gammaPayload.approval },
+      { agent: fakeAgent, signal: AbortSignal.timeout(2000) }
+    ))
+    check("wi108.refuse.missing-proposal", r2.includes("✗ refused") && r2.includes("missing proposal"), "unknown id + no proposal refused (negative case: missing proposal)")
+    check("wi108.refuse.armed-2", ctx.tools.get("hive_evolve_apply", fakeAgent) !== undefined, "missing-proposal refusal stays armed")
+    check("wi108.refuse.no-queue-write", fs.existsSync(queueFile) === (queueBefore !== null), "the missing-proposal refusal wrote NO queue record")
+
+    const r3 = String(await apply.execute(
+      { id: "neg-unapproved", target: "gamma", proposal: gammaPayload.proposal, approval: {} },
+      { agent: fakeAgent, signal: AbortSignal.timeout(2000) }
+    ))
+    check("wi108.refuse.unapproved", r3.includes("✗ refused") && r3.includes("unapproved"), "refused (unapproved): empty approval object carries no operator sanction")
+    check("wi108.refuse.armed-3", ctx.tools.get("hive_evolve_apply", fakeAgent) !== undefined, "unapproved refusal stays armed (the operator could approve next)")
+    check("wi108.refuse.no-persona-write", fs.readFileSync(gammaYml, "utf8") === personaBefore, "the unapproved refusal wrote NO persona change")
+
+    const r4 = String(await apply.execute(
+      { id: "neg-unknown-target", target: "nonexistent-cap", proposal: gammaPayload.proposal, approval: gammaPayload.approval },
+      { agent: fakeAgent, signal: AbortSignal.timeout(2000) }
+    ))
+    check("wi108.refuse.unknown-target", r4.includes("✗ refused") && r4.includes("nonexistent-cap") && r4.includes("live roster"), "unknown target refused — lookup rode the roster pairing (PR #68), not a re-glob")
+
+    // Corrected call: the full payload applies, verifies, records, retracts.
+    const ok = String(await apply.execute(gammaPayload, { agent: fakeAgent, signal: AbortSignal.timeout(2000) }))
+    check("wi108.apply.ok", ok.includes(`charter mutation "gamma-charter-roundtrip" applied to "gamma"`) && ok.includes("Yes, evolve"), "the corrected call applies the mutation under the carried operator approval")
+    const gammaAfter = fs.readFileSync(gammaYml, "utf8")
+    check("wi108.apply.verbatim-landing", gammaAfter.includes("### gamma-charter-roundtrip — operator-approved 2026-10-29") && gammaAfter.includes(TEST_VERBATIM), "the persona carries the dated marker + the VERBATIM approved text (read back from disk, not from the call)")
+    check("wi108.apply.ooo-identity-preserved", gammaAfter.startsWith("# The `gamma` capability preset — spawned by /spawn.") && gammaAfter.includes("- id: persona") && gammaAfter.includes("You are the gamma capability"), "the existing persona block is preserved — the mutation ONLY appends (never rewrites sections)")
+    const queueAfter = JSON.parse(fs.readFileSync(queueFile, "utf8"))
+    const gammaRec = queueAfter.mutations.find((m) => m.id === "gamma-charter-roundtrip")
+    check("wi108.apply.record", gammaRec?.status === "applied" && gammaRec?.approval?.operator_verbatim === "Yes, evolve" && gammaRec?.text === TEST_VERBATIM, "the queue record is applied, carries the verbatim text + the operator approval words")
+    check("wi108.apply.record-verification", gammaRec?.applied?.verification.includes("verbatim") && Array.isArray(gammaRec?.applied?.files) && gammaRec?.applied?.files.length === 2, "the record pins the W-047 verification + the written files")
+    check("wi108.apply.roster-single", ctx.evolution.listCapabilities().filter((c) => c.name === "gamma").length === 1, "post-mutation the dir+ledger pair still lists exactly once (PR #68 integrity)")
+    check("wi108.apply.retracted", ctx.tools.get("hive_evolve_apply", fakeAgent) === undefined, "success consumed the summon (retracted)")
+    check("wi108.apply.history-lineage", gammaRec?.history?.length >= 3 && gammaRec.history.some((h) => h.to === "approved") && gammaRec.history.some((h) => h.to === "applied"), "the record's history carries the proposed→approved→applied lineage")
+  }
+
+  // Second summon: terminal no-op + the verbatim-mismatch guard.
+  {
+    const personaBefore = fs.readFileSync(gammaYml, "utf8")
+    const queueBefore = fs.readFileSync(queueFile, "utf8")
+    const { apply } = await summonEvolveApply()
+
+    const noOp = String(await apply.execute(
+      { id: "gamma-charter-roundtrip", target: "gamma", approval: gammaPayload.approval },
+      { agent: fakeAgent, signal: AbortSignal.timeout(2000) }
+    ))
+    check("wi108.reapply.no-op", noOp.includes("already applied") && noOp.includes("Nothing further to do"), "re-apply is a terminal no-op (the identity test of the status gate)")
+    check("wi108.reapply.no-writes", fs.readFileSync(gammaYml, "utf8") === personaBefore && fs.readFileSync(queueFile, "utf8") === queueBefore, "the no-op wrote nothing (persona and queue byte-identical)")
+
+    const mismatch = ctx.evolution.evolveApply({
+      id: "gamma-charter-roundtrip",
+      target: "gamma",
+      proposal: { text: "DIFFERENT WORDS — a coordinator trying to substitute the operator-approved text" },
+      approval: gammaPayload.approval,
+    })
+    check("wi108.mismatch.refused", mismatch.consumed === false && mismatch.text.includes("does not match") && mismatch.text.includes("never approximated"), "a carried text that differs from the queue record's verbatim text is refused (operator words are never substituted)")
+    check("wi108.mismatch.no-writes", fs.readFileSync(gammaYml, "utf8") === personaBefore && fs.readFileSync(queueFile, "utf8") === queueBefore, "the mismatch refusal wrote nothing")
+  }
+
+  // Non-canonical persona (hand-shaped agent.cordis.yml without the spawn-
+  // rendered block): refused BEFORE any write, at body level.
+  {
+    fs.mkdirSync(path.join(synth, ".opencode/agents/capabilities/wonky"), { recursive: true })
+    fs.writeFileSync(path.join(synth, ".opencode/agents/capabilities/wonky/preset.yml"), "name: wonky\ndescription: the wonky capability\norder: 10\nmodel_tier: standard\n")
+    fs.writeFileSync(path.join(synth, ".opencode/agents/capabilities/wonky/agent.cordis.yml"), "not: a canonical persona block\npersona: prose\n")
+    const queueBefore = fs.readFileSync(queueFile, "utf8")
+    const wonky = ctx.evolution.evolveApply({
+      id: "wonky-charter",
+      target: "wonky",
+      proposal: { text: "wonky grows", proposed_by: "wi-108-test", proposed_at: "2026-10-29" },
+      approval: gammaPayload.approval,
+    })
+    check("wi108.wonky.refused", wonky.consumed === false && wonky.text.includes("canonical persona text block"), "a non-spawn-rendered persona refuses with the canonical-shape hint (no guessing)")
+    check("wi108.wonky.no-queue-write", fs.readFileSync(queueFile, "utf8") === queueBefore, "the non-canonical refusal wrote no queue record")
+  }
+
+  // The queue view once records exist: full verbatim text + statuses surface.
+  {
+    const { analysis } = await summonEvolveApply()
+    const view = String(await analysis.execute({}, { agent: fakeAgent, signal: AbortSignal.timeout(2000) }))
+    check("wi108.queue-view.lists", view.includes("gamma-charter-roundtrip → gamma [applied]") && view.includes('operator "Yes, evolve"'), "the queue view lists records with target + status + the approval words")
+    check("wi108.queue-view.verbatim", view.includes(TEST_VERBATIM), "the queue view carries the FULL verbatim text (the coordinator relays it, never re-authors it)")
+  }
+}
+
 fs.rmSync(synth, { recursive: true, force: true })
 const failed = results.filter((r) => !r.ok)
 console.log(`\n=== ${results.length - failed.length}/${results.length} passed ===`)
