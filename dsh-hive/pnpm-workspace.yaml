@@ -1,55 +1,54 @@
 packages:
   - packages/*
-# schemastery 3.18.4 (first release under ^3.18.2 after the 0.1.2-rc.1 lock)
-# breaks the tsc emit with TS2742 "inferred type of 'Config' cannot be named"
-# (painpoints prepare, 2026-09-22). The plugin's runtime face keeps
-# ^3.18.2 — this pins only the dsh-hive DEV resolution back to the baseline
-# the corridor was typechecked against. Profile/tarball installs are a
-# separate workspace and unaffected.
+# schemastery override: the published dsh 0.2.2-rc.1 corridor pins ~3.19.0, so the
+# dev resolution moved with it (was 3.18.5, the 2026-09-22 TS2742 baseline).
+# TS2742 re-verified absent at 3.19.0 during the 0.2.2-rc.1 cohort bump
+# (2026-11-06, `pnpm -r typecheck` green). Re-verify on any future bump.
 overrides:
-  # 3.18.2 was the 2026-09-22 TS2742 baseline; the dsh 0.2.1 corridor's own
-  # packages pin ~3.18.5 and use .volatile() schema builders, so the dev
-  # resolution MUST be >=3.18.5 for tests importing them. TS2742 not
-  # re-observed at 3.18.5 (re-verify typecheck on any future bump).
-  '@deepseek-ai/schemastery': 3.18.5
+  '@deepseek-ai/schemastery': 3.19.0
 minimumReleaseAgeExclude:
-  # The dsh 0.2.1-rc.2 cohort published 2026-10-17 08:36Z (rc.1 at 03:17Z the
-  # same morning) — inside every machine's minimumReleaseAge window the day it
-  # ships. Re-pointed from the 0.2.0-rc.2 rows in the dsh 0.2.1-rc.2 cohort
-  # bump; keep in sync with the lockfile's @deepseek-ai entries. The
-  # cordis-plugin-timer row is gone — the 0.2.1 corridor no longer routes the
-  # timer plugin through the resolved graph — and the dsh-invariants row is
-  # gone because the package itself was retracted in that corridor.
-  - '@deepseek-ai/cordis-plugin-include@1.0.9 || 1.0.10'
-  - '@deepseek-ai/cordis-plugin-loader@1.0.6'
-  - '@deepseek-ai/cosmokit@1.8.5 || 1.8.6'
-  - '@deepseek-ai/dsh-agent-preset-registry@0.2.1-rc.2'
-  - '@deepseek-ai/dsh-agent@0.2.1-rc.2'
-  - '@deepseek-ai/dsh-attachment@0.2.1-rc.2'
-  - '@deepseek-ai/dsh-brand@0.2.1-rc.2'
-  - '@deepseek-ai/dsh-chunked-list@0.2.1-rc.2'
-  - '@deepseek-ai/dsh-commands@0.2.1-rc.2'
-  - '@deepseek-ai/dsh-llm@0.2.1-rc.2'
-  - '@deepseek-ai/dsh-ptc-runtime@0.2.1-rc.2'
-  - '@deepseek-ai/dsh-sandbox-policy@0.2.1-rc.2'
-  - '@deepseek-ai/dsh-sandbox@0.2.1-rc.2'
-  - '@deepseek-ai/dsh-scope@0.2.1-rc.2'
-  - '@deepseek-ai/dsh-session-projection@0.2.1-rc.2'
-  - '@deepseek-ai/dsh-session@0.2.1-rc.2'
-  - '@deepseek-ai/dsh-skill@0.2.1-rc.2'
-  - '@deepseek-ai/dsh-subagent@0.2.1-rc.2'
-  - '@deepseek-ai/dsh-system-prompt@0.2.1-rc.2'
-  - '@deepseek-ai/dsh-timeout@0.2.1-rc.2'
-  - '@deepseek-ai/dsh-tools@0.2.1-rc.2'
-  - '@deepseek-ai/dsh-typert-protocol@0.2.1-rc.2'
-  - '@deepseek-ai/dsh-user-approval@0.2.1-rc.2'
-  - '@deepseek-ai/dsh-util-crypto@0.2.1-rc.2'
-  - '@deepseek-ai/dsh-util-time@0.2.1-rc.2'
-  - '@deepseek-ai/dsh-util-values@0.2.1-rc.2'
-  - '@deepseek-ai/schemastery@3.18.2 || 3.18.4'
-  - '@deepseek-ai/dsh-app-boot@0.2.1-rc.2'
-  - '@deepseek-ai/dsh-atomic-write@0.2.1-rc.2'
-  - '@deepseek-ai/dsh-home-paths@0.2.1-rc.2'
-  - '@deepseek-ai/dsh-launch-environment@0.2.1-rc.2'
-  - '@deepseek-ai/dsh-package-manifest@0.2.1-rc.2'
-  - '@deepseek-ai/dsh-web@0.2.1-rc.2'
+  # The dsh 0.2.2-rc.1 cohort published 2026-11-04 09:20Z. Re-pointed from the
+  # 0.2.1-rc.2 rows in the 0.2.2-rc.1 cohort bump; keep in sync with the
+  # lockfile's @deepseek-ai entries (audit evidence:
+  # container tmp/0.2.1rc2-to-0.2.2rc1/ from dsh-upgrade-audit, full paginated
+  # sweep 2026-11-06). The corridor's new closure members (config-editor, fs,
+  # fs-patch, official-bundles, settings) ride with their own rows.
+  - '@deepseek-ai/cordis-plugin-group@1.1.0'
+  - '@deepseek-ai/cordis-plugin-include@1.1.0'
+  - '@deepseek-ai/cordis-plugin-loader@1.1.0'
+  - '@deepseek-ai/cordis@4.1.0'
+  - '@deepseek-ai/cosmokit@1.9.0'
+  - '@deepseek-ai/dsh-agent-preset-registry@0.2.2-rc.1'
+  - '@deepseek-ai/dsh-agent@0.2.2-rc.1'
+  - '@deepseek-ai/dsh-app-boot@0.2.2-rc.1'
+  - '@deepseek-ai/dsh-atomic-write@0.2.2-rc.1'
+  - '@deepseek-ai/dsh-attachment@0.2.2-rc.1'
+  - '@deepseek-ai/dsh-brand@0.2.2-rc.1'
+  - '@deepseek-ai/dsh-chunked-list@0.2.2-rc.1'
+  - '@deepseek-ai/dsh-commands@0.2.2-rc.1'
+  - '@deepseek-ai/dsh-config-editor@0.2.2-rc.1'
+  - '@deepseek-ai/dsh-fs-patch@0.2.2-rc.1'
+  - '@deepseek-ai/dsh-fs@0.2.2-rc.1'
+  - '@deepseek-ai/dsh-home-paths@0.2.2-rc.1'
+  - '@deepseek-ai/dsh-launch-environment@0.2.2-rc.1'
+  - '@deepseek-ai/dsh-llm@0.2.2-rc.1'
+  - '@deepseek-ai/dsh-official-bundles@0.2.2-rc.1'
+  - '@deepseek-ai/dsh-package-manifest@0.2.2-rc.1'
+  - '@deepseek-ai/dsh-sandbox@0.2.2-rc.1'
+  - '@deepseek-ai/dsh-scope@0.2.2-rc.1'
+  - '@deepseek-ai/dsh-session-projection@0.2.2-rc.1'
+  - '@deepseek-ai/dsh-session@0.2.2-rc.1'
+  - '@deepseek-ai/dsh-settings@0.2.2-rc.1'
+  - '@deepseek-ai/dsh-skill@0.2.2-rc.1'
+  - '@deepseek-ai/dsh-subagent@0.2.2-rc.1'
+  - '@deepseek-ai/dsh-system-prompt@0.2.2-rc.1'
+  - '@deepseek-ai/dsh-timeout@0.2.2-rc.1'
+  - '@deepseek-ai/dsh-tools@0.2.2-rc.1'
+  - '@deepseek-ai/dsh-typert-protocol@0.2.2-rc.1'
+  - '@deepseek-ai/dsh-user-approval@0.2.2-rc.1'
+  - '@deepseek-ai/dsh-util-crypto@0.2.2-rc.1'
+  - '@deepseek-ai/dsh-util-time@0.2.2-rc.1'
+  - '@deepseek-ai/dsh-util-values@0.2.2-rc.1'
+  - '@deepseek-ai/dsh-web@0.2.2-rc.1'
+  - '@deepseek-ai/dsh-working-directory@0.2.2-rc.1'
+  - '@deepseek-ai/schemastery@3.19.0'

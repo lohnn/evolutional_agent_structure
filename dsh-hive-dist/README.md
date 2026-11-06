@@ -34,8 +34,10 @@ the updater-bootstrap + kit-freshness gates). CI fails a PR whose package source
 are newer than their committed tarball — the #59/#60 board-buttons miss (source
 merged twice, no repack, kit machines sat on 0.1.5).
 
-Prereqs for all ways: **Node 22+, pnpm 11, git** (Way A's cohort is
-git-hosted; pnpm `dlx` likewise needs it), and a model-provider credential —
+Prereqs for all ways: **Node ≥ 24.9, pnpm 11, git** (Way A's cohort is
+git-hosted; pnpm `dlx` likewise needs it. The node floor follows the dsh
+0.2.2-rc.1 cohort's `engines` requirement on the CLI package — was node 22+
+through the 0.2.1 corridor), and a model-provider credential —
 see "Shared notes" (the step people miss).
 
 ## Way A — `dsh plugin add` from git (recommended)

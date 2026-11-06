@@ -64,8 +64,11 @@ Facts checked against the live store packages, not assumed:
   provider/model as read-only diagnostics.
 - **F2 — The team profile REPLACES the subagent tools.**
   `dsh-experimental-agent-team-profile/cordis.patch.yml` disables
-  `tool-subagent`, `tool-subagent-control`, `tool-subagent-list-agents`,
-  `tool-subagent-fork` and installs `agent-team` + `tool-agent-team`.
+  `tool-subagent`, `tool-subagent-control`, `tool-subagent-fork` and installs
+  `agent-team` + `tool-agent-team`. Corridor note (0.2.2-rc.1 cohort): the
+  standalone `tool-subagent-list-agents` plugin identity was folded into
+  `tool-subagent-control` — the `list_agents` tool itself is unchanged, now
+  registered by the control plugin.
   Consequence: `list_agents`/`send_message` are **team-roster-scoped**; HIVE
   children spawned via `ctx.subagents.startContinuable` are likely NOT
   addressable through them in this profile (the `hive_dispatch` echo text
