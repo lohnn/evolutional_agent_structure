@@ -1,6 +1,6 @@
 {
   "name": "dsh-berget-usage",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "Berget provider plugin for the shared usage panel: a 'Berget' tab (rolling budget windows, per-model breakdown and caps, subscription period and API credits) fed by its own /api/berget-usage/snapshot route. Standalone-panel fallback when dsh-provider-usage is absent.",
   "type": "module",
