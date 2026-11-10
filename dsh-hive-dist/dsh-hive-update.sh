@@ -459,9 +459,24 @@ run_dsh_plugin() {
   # dsh-app-boot imports this peer at runtime. Keep this bootstrap invocation
   # aligned with the web service command: `pnpm dlx dsh` alone can resolve the
   # CLI but then fails before `plugin add` runs with ERR_MODULE_NOT_FOUND.
+  #
+  # Prefer a workspace-pinned runtime (<workspace>/.dsh-runtime) when the
+  # service has one: it is exactly the dsh the web service boots, with a
+  # complete, lockfile-resolved peer graph. A dlx graph silently drifted once
+  # (cordis-plugin-group@1.0.4 without its cordis-plugin-loader peer), so
+  # every `plugin add` crashed while the "keep existing install" branch below
+  # reported success — leaving a cohort built for the previous dsh, which the
+  # new dsh then disabled wholesale at boot.
+  local local_dsh="${DSH_WORKSPACE_ROOT:-}/.dsh-runtime/node_modules/.bin/dsh"
+  if [ -n "${DSH_WORKSPACE_ROOT:-}" ] && [ -x "$local_dsh" ]; then
+    DSH_HIVE_REF="$REF" DSH_HIVE_REPO="$REPO" PNPM_CONFIG_IGNORE_SCRIPTS="$IGNORE_PACKAGE_SCRIPTS" \
+      "$local_dsh" plugin --profile "$NAME" "$@"
+    return
+  fi
   DSH_HIVE_REF="$REF" DSH_HIVE_REPO="$REPO" PNPM_CONFIG_IGNORE_SCRIPTS="$IGNORE_PACKAGE_SCRIPTS" \
     pnpm \
       --package "@deepseek-ai/cordis-plugin-group@1.0.4" \
+      --package "@deepseek-ai/cordis-plugin-loader@^1.1.0" \
       --package "@deepseek-ai/dsh@$DSH_VERSION" \
       dlx \
       --allow-build=@deepseek-ai/dsh-subprocess-local \
@@ -479,6 +494,23 @@ has_usable_board() {
     [ -f "$PROFILE/node_modules/@hive/dsh-board/client.js" ]
 }
 
+# A kept install is only good if it IS the kit's cohort. A cohort from the
+# previous release is complete on disk but pinned to the previous dsh peers,
+# so the new dsh disables every row at boot. Keeping it while reporting
+# success hides that, so only the kit's exact versions count. Git mode has no
+# version manifest to compare against and keeps the old behaviour.
+installed_matches_kit() {
+  [ "$HAS_KIT_TARBALLS" = "1" ] && [ "${DSH_HIVE_GIT_MODE:-0}" != "1" ] || return 0
+  local archive base name want got stale=0
+  for archive in "${KIT_TARBALLS[@]}"; do
+    base="${archive%.tgz}"; want="${base##*-}"; base="${base%-*}"
+    case "$base" in hive-dsh-*) name="@hive/dsh-${base#hive-dsh-}" ;; *) name="$base" ;; esac
+    got="$(node -p "require('$PROFILE/node_modules/$name/package.json').version" 2>/dev/null || echo missing)"
+    if [ "$got" != "$want" ]; then warn "stale: $name installed=$got kit=$want"; stale=1; fi
+  done
+  return "$stale"
+}
+
 OUT="$(mktemp)"
 trap 'rm -f "$OUT"' EXIT
 # Output streams live (tee) AND is kept, so a failure can quote the actual
@@ -491,11 +523,11 @@ log "dsh plugin add — profile=$NAME (10 packages)"
 if ! ( cd "$PROFILE" && run_dsh_plugin add "${SPECS[@]}" 2>&1 ) | tee "$OUT"; then
   warn "add FAILED — last output lines:"
   tail -n 12 "$OUT" | while IFS= read -r l; do warn "  └ $l"; done
-  if [ -e "$PROFILE/node_modules/@hive/dsh-dream-archive/dist/index.js" ] && has_usable_board; then
-    warn "add FAILED but a complete board-capable install already exists — keeping it (was it offline? see lines above)"
+  if [ -e "$PROFILE/node_modules/@hive/dsh-dream-archive/dist/index.js" ] && has_usable_board && installed_matches_kit; then
+    warn "add FAILED but the kit's cohort is already installed — keeping it (was it offline? see lines above)"
     exit 0
   fi
-  die "add FAILED and no complete board-capable install exists — service start must be aborted"
+  die "add FAILED and the installed cohort is missing, incomplete or not the kit's versions — service start must be aborted"
 fi
 
 if [ "$HAS_KIT_TARBALLS" = "1" ] && [ "${DSH_HIVE_GIT_MODE:-0}" != "1" ]; then
