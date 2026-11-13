@@ -1909,11 +1909,9 @@ export class Evolution extends Service {
                 childId,
                 delivery: "caller",
                 signal: exec.signal,
-                request: {
-                  parent,
-                  prompt: [{ type: "text", text: def2.persona ? `${def2.persona}\n\n---\n\n# Dispatched task (one-shot consult — return the result inline)\n\n${taskPrompt}` : taskPrompt }] as ContentBlock[],
-                  ...(agentOptions ? { agentOptions } : {}),
-                },
+                parent,
+                prompt: [{ type: "text", text: def2.persona ? `${def2.persona}\n\n---\n\n# Dispatched task (one-shot consult — return the result inline)\n\n${taskPrompt}` : taskPrompt }] as ContentBlock[],
+                ...(agentOptions ? { agentOptions } : {}),
               })
               this.markUsed(target.id, String(activation.childId))
               this.usageLog.append({ kind: "dispatch-activated", childId: String(activation.childId), address, shape })
@@ -1955,13 +1953,11 @@ export class Evolution extends Service {
               childId,
               delivery: "parent",
               signal: exec.signal,
-              request: {
-                parent,
-                prompt: [{ type: "text", text: persona ? `${persona}\n\n---\n\n# Dispatched task\n\n${taskPrompt}` : taskPrompt }] as ContentBlock[],
-                // Orchestrator-chosen model route (AgentOptions: provider? +
-                // model; dsh merges it over the parent's route child-side).
-                ...(agentOptions ? { agentOptions } : {}),
-              },
+              parent,
+              prompt: [{ type: "text", text: persona ? `${persona}\n\n---\n\n# Dispatched task\n\n${taskPrompt}` : taskPrompt }] as ContentBlock[],
+              // Orchestrator-chosen model route (AgentOptions: provider? +
+              // model; dsh merges it over the parent's route child-side).
+              ...(agentOptions ? { agentOptions } : {}),
             })
             this.markUsed(target.id, String(start.childId))
             this.usageLog.append({ kind: "dispatch-activated", childId: String(start.childId), address, shape })
@@ -2046,8 +2042,14 @@ export class Evolution extends Service {
             if (!parentSessionId) throw new Error("hive_children: no resolvable session id on the calling agent")
             let children
             try {
-              const parentCatalog = parentSessionId as unknown as Parameters<typeof this.ctx.subagents.listChildren>[0]
-              children = await this.ctx.subagents.listChildren(parentCatalog, exec.signal)
+              // dsh 0.2.2-rc.2 (audit tmp/0.2.2rc1-to-0.2.2rc2/): the runtime's
+              // listChildren was replaced by the recursive listDescendants —
+              // direct children are the depth-1 'child' rows.
+              const listing = await this.ctx.subagents.listDescendants(parentSessionId as Parameters<typeof this.ctx.subagents.listDescendants>[0], exec.signal)
+              children = listing.filter(
+                (e): e is Extract<import("@deepseek-ai/dsh-subagent").SubagentDescendantListEntry, { kind: "child" }> =>
+                  e.kind === "child" && e.depth === 1,
+              )
             } catch (err) {
               return `Child catalog unavailable: ${err instanceof Error ? err.message : String(err)}`
             }
