@@ -21,11 +21,11 @@ const DreamArchiveSrv = (await import("@hive/dsh-dream-archive")).default
 const BoardSrv = (await import("@hive/dsh-board")).default
 
 const WS = fs.mkdtempSync(path.join(os.tmpdir(), "b6-seam-"))
-fs.mkdirSync(path.join(WS, ".opencode/agents"), { recursive: true })
-fs.mkdirSync(path.join(WS, ".opencode/dreams/active"), { recursive: true })
-fs.mkdirSync(path.join(WS, ".opencode/dreams/history"), { recursive: true })
-fs.mkdirSync(path.join(WS, ".opencode/board"), { recursive: true })
-for (const t of ["insights", "warnings", "songlines", "shadows"]) fs.mkdirSync(path.join(WS, ".opencode/dreams/artifacts", t), { recursive: true })
+fs.mkdirSync(path.join(WS, ".helm/agents"), { recursive: true })
+fs.mkdirSync(path.join(WS, ".helm/dreams/active"), { recursive: true })
+fs.mkdirSync(path.join(WS, ".helm/dreams/history"), { recursive: true })
+fs.mkdirSync(path.join(WS, ".helm/board"), { recursive: true })
+for (const t of ["insights", "warnings", "songlines", "shadows"]) fs.mkdirSync(path.join(WS, ".helm/dreams/artifacts", t), { recursive: true })
 
 const ctx = new Context()
 new SP(ctx, { includeHarnessIdentity: true, includeRuntimeContext: false, persona: "gate" })
@@ -98,7 +98,7 @@ const ownItem = async (sid, title) => {
 
   // the AUTHORITY assert: the board's artifacts equal the DRM file's buckets
   // (parsed from disk), not "whatever the handler received".
-  const historyFile = path.join(WS, ".opencode/dreams/history", `${drm}.yaml`)
+  const historyFile = path.join(WS, ".helm/dreams/history", `${drm}.yaml`)
   const drmText = fs.readFileSync(historyFile, "utf8")
   const fileInsights = [...drmText.matchAll(/^\s*insights:\s*\n?\s*[-:]\s*\[?\s*(I-\d+)/gm)].map((m) => m[1])
   if (fileInsights.length === 0) {
@@ -154,7 +154,7 @@ const ownItem = async (sid, title) => {
     listActiveDreams: () => ["DRM-990"],
     complete: (_exitTime, artifactIds) => ({
       dreamId: "DRM-990",
-      historyPath: path.join(WS, ".opencode/dreams/history/DRM-990.yaml"),
+      historyPath: path.join(WS, ".helm/dreams/history/DRM-990.yaml"),
       linkedArtifacts: { insights: artifactIds, warnings: [], songlines: [], shadows: [] },
       missingArtifacts: [],
     }),

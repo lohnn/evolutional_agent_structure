@@ -2,7 +2,7 @@
 
 > **What this is:** a generic, stdlib-only Python 3 process supervisor for the
 > dev container. Adding a long-lived service (a relay, a bot, a watcher) =
-> dropping ONE TOML file into `/workspace/.opencode/services/`. No entrypoint or
+> dropping ONE TOML file into `/workspace/.helm/services/`. No entrypoint or
 > image changes ever again.
 >
 > **Who this is for:** hive-infra, and anyone adding a background service to the
@@ -31,7 +31,7 @@ self-heal pattern hive-board uses):
 
 ```sh
 # ── svcwatch ── declarative process supervision (PID 1 subtree) ──────────────
-SVCDIR=/workspace/.opencode/services
+SVCDIR=/workspace/.helm/services
 SVCWATCH=/workspace/projects/evolutional_agent_structure/src/svcwatch/svcwatch.py
 SVCLOG=/var/log/svcwatch.log
 mkdir -p "$SVCDIR"
@@ -54,7 +54,7 @@ entrypoint change is ever needed to add/remove a service.
 
 ## Adding a service
 
-Drop `<name>.toml` into `/workspace/.opencode/services/`. The filename must
+Drop `<name>.toml` into `/workspace/.helm/services/`. The filename must
 equal the `name` inside. svcwatch scans every ~2s: new file → start, deleted →
 graceful stop (SIGTERM, 5s, SIGKILL), changed mtime → restart that service.
 
@@ -142,7 +142,7 @@ svcwatchctl tail <name>          # tail -f the service log
 | `src/svcwatch/svcwatch.py` | the watcher (~590 lines, stdlib-only) |
 | `src/svcwatch/svcwatchctl` | dashboard + control shim |
 | `src/svcwatch/examples/*.toml` | example service definitions |
-| `/workspace/.opencode/services/*.toml` | live service definitions (versioned) |
+| `/workspace/.helm/services/*.toml` | live service definitions (versioned) |
 | `/run/svc/status.json` | live status (runtime, never tracked) |
 | `/run/svc/logs/<name>.log` | per-service logs (runtime) |
 | `/run/svc/control.fifo` | control channel (runtime) |

@@ -58,7 +58,7 @@ single-writer discipline for the state it *does* own (dream I-105).
 ## Tech (settled — see OPEN-QUESTIONS Q4/Q6)
 
 TypeScript web app (runs under Bun; web layer TBD in Phase 1) that **renders read-only** from
-`.opencode/` files and the work-item cache — but is **not a read-only tool**: board-side transitions
+`.helm/` files and the work-item cache — but is **not a read-only tool**: board-side transitions
 (create/start+auto-awaken, pause, demote, manual done) are executed directly by the app through a
 **shared transition module** owned by hive-infra and exported from the plugin repo (locked storage,
 SCHEMA §4a). In-session transitions (bind, awaken auto-register) live in the HIVE plugin as

@@ -3,8 +3,8 @@
  * active/history lifecycle helpers.
  *
  * DRM files live at:
- *   .opencode/dreams/active/DRM-NNN.yaml    — DREAMING
- *   .opencode/dreams/history/DRM-NNN.yaml   — COMPLETE
+ *   .helm/dreams/active/DRM-NNN.yaml    — DREAMING
+ *   .helm/dreams/history/DRM-NNN.yaml   — COMPLETE
  *
  * Exact format (derived from real history/*.yaml files, DRM-013/014 as canon):
  *
@@ -117,7 +117,7 @@ export interface DreamState {
 // ── Paths ─────────────────────────────────────────────────────────────────────
 
 export function dreamsBase(directory: string): string {
-  return path.join(directory, ".opencode/dreams")
+  return path.join(directory, ".helm/dreams")
 }
 
 export function activeDreamPath(directory: string, id: string): string {
@@ -513,7 +513,7 @@ export function completeDream(
   // Validate artifact files exist; split into present/missing
   const missingArtifacts: string[] = []
   const presentIds: string[] = []
-  const artifactsBase = path.join(directory, ".opencode/dreams/artifacts")
+  const artifactsBase = path.join(directory, ".helm/dreams/artifacts")
   const prefixToSubdir: Record<string, string> = {
     I: "insights",
     W: "warnings",

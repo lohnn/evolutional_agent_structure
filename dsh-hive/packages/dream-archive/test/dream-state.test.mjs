@@ -15,9 +15,9 @@ import {
 let dir
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), "dream-state-test-"))
-  fs.mkdirSync(path.join(dir, ".opencode/dreams/active"), { recursive: true })
-  fs.mkdirSync(path.join(dir, ".opencode/dreams/history"), { recursive: true })
-  fs.mkdirSync(path.join(dir, ".opencode/dreams/artifacts/insights"), { recursive: true })
+  fs.mkdirSync(path.join(dir, ".helm/dreams/active"), { recursive: true })
+  fs.mkdirSync(path.join(dir, ".helm/dreams/history"), { recursive: true })
+  fs.mkdirSync(path.join(dir, ".helm/dreams/artifacts/insights"), { recursive: true })
 })
 afterEach(() => {
   fs.rmSync(dir, { recursive: true, force: true })
@@ -117,7 +117,7 @@ describe("pre_compaction lifecycle marker (WI-080)", () => {
 
     // A real artifact file so it validates present.
     fs.writeFileSync(
-      path.join(dir, ".opencode/dreams/artifacts/insights/I-001.yaml"),
+      path.join(dir, ".helm/dreams/artifacts/insights/I-001.yaml"),
       "insight_id: I-001\nsource_dream: " + dreamId + "\n",
       "utf8"
     )
@@ -156,12 +156,12 @@ describe("pre_compaction lifecycle marker (WI-080)", () => {
   it("completeDream REPLACES the empty artifacts template instead of stacking keys (DRM-043)", () => {
     const { dreamId, filePath } = beginDream(dir, baseIntent())
     for (const sub of ["warnings", "songlines", "shadows"]) {
-      fs.mkdirSync(path.join(dir, ".opencode/dreams/artifacts", sub), { recursive: true })
+      fs.mkdirSync(path.join(dir, ".helm/dreams/artifacts", sub), { recursive: true })
     }
-    fs.writeFileSync(path.join(dir, ".opencode/dreams/artifacts/insights/I-001.yaml"), "insight_id: I-001\n", "utf8")
-    fs.writeFileSync(path.join(dir, ".opencode/dreams/artifacts/warnings/W-001.yaml"), "warning_id: W-001\n", "utf8")
-    fs.writeFileSync(path.join(dir, ".opencode/dreams/artifacts/songlines/SNG-001.yaml"), "songline_id: SNG-001\n", "utf8")
-    fs.writeFileSync(path.join(dir, ".opencode/dreams/artifacts/shadows/SHADOW-001.yaml"), "shadow_id: SHADOW-001\n", "utf8")
+    fs.writeFileSync(path.join(dir, ".helm/dreams/artifacts/insights/I-001.yaml"), "insight_id: I-001\n", "utf8")
+    fs.writeFileSync(path.join(dir, ".helm/dreams/artifacts/warnings/W-001.yaml"), "warning_id: W-001\n", "utf8")
+    fs.writeFileSync(path.join(dir, ".helm/dreams/artifacts/songlines/SNG-001.yaml"), "songline_id: SNG-001\n", "utf8")
+    fs.writeFileSync(path.join(dir, ".helm/dreams/artifacts/shadows/SHADOW-001.yaml"), "shadow_id: SHADOW-001\n", "utf8")
 
     const result = completeDream(dir, "2026-08-12T00:00:00Z", ["I-001", "W-001", "SNG-001", "SHADOW-001"])
     assert.deepEqual(result.linkedArtifacts, {
@@ -232,7 +232,7 @@ describe("begin-time session identity (WI-085 / SHADOW-027)", () => {
   it("completion PRESERVES the owner lines (I-049 in-place rewrite path)", () => {
     const { filePath } = beginDream(dir, baseIntent({ owner_session: "session-abc-000" }))
     completeDream(dir, "2026-10-09T08:00:00Z", [])
-    const historyPath = path.join(dir, ".opencode/dreams/history", path.basename(filePath))
+    const historyPath = path.join(dir, ".helm/dreams/history", path.basename(filePath))
     const state = readDreamState(historyPath)
     assert.equal(state.status, "COMPLETE")
     assert.equal(state.owner_session, "session-abc-000")

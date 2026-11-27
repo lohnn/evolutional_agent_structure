@@ -46,13 +46,38 @@ const TEXT_OUT = {
   render: (_args: unknown, value: string): ContentBlock[] => [{ type: "text", text: value }],
 } as const
 
+// ── P2 dual-name alias cycle (helm-rebrand-design.md §2.5/§3) ────────────────
+// Each hive_*painpoint* tool ALSO registers its canonical helm_* name on the
+// SAME definition: the alias is a spread of the built ToolDefinition with only
+// name + description replaced, so compiled parameter schema, output schema,
+// output.render, and the exact execute closure are shared BY REFERENCE — never
+// a behavior fork. Old names stay live and untouched until the P5 alias
+// retirement; alias descriptions carry the dual-name note. No cross-package
+// import for one data table: the monorepo-wide census lives in
+// @hive/dsh-evolution HELM_TOOL_ALIASES, and
+// evolution/test/tool-gate-sync.test.mjs asserts this table stays in step.
+const HELM_PAINPOINT_ALIASES: Readonly<Record<string, string>> = {
+  hive_note_painpoint: "helm_note_painpoint",
+  hive_painpoints_list: "helm_painpoints_list",
+  hive_painpoints_harvest: "helm_painpoints_harvest",
+} as const
+
+const helmAliasNote = (legacy: string): string =>
+  ` [HELM dual-name cycle: legacy "${legacy}" stays live — both names run this same tool until the P5 alias retirement.]`
+
+const helmAlias = (def: import("@deepseek-ai/dsh-tools").ToolDefinition): import("@deepseek-ai/dsh-tools").ToolDefinition | undefined => {
+  const alias = HELM_PAINPOINT_ALIASES[def.name]
+  if (alias === undefined) return undefined
+  return { ...def, name: alias, description: def.description + helmAliasNote(def.name) }
+}
+
 export class Painpoints extends Service {
   // The dsh loader applies the DEFAULT export only and ignores its named
   // siblings — inject must live on the class itself (cordis reads static
   // `inject` from the plugin constructor).
   static inject = ["tools"]
   static Config = z.object({
-    // Workspace root (the dir containing `.opencode/`). Default: process cwd.
+    // Workspace root (the dir containing `.helm/`). Default: process cwd.
     directory: z.string().default(process.cwd()),
   })
 
@@ -63,7 +88,17 @@ export class Painpoints extends Service {
     this.directory = config.directory
 
     ctx.effect(() => {
-      const d1 = ctx.tools.register(defineTool({
+      // P2 dual-name alias cycle: this effect-local register() mounts the
+      // canonical helm_* twin of every definition it receives, on the SAME
+      // schema/execute (see HELM_PAINPOINT_ALIASES above) — the returned
+      // disposer lifts both spellings together.
+      const register = (def: import("@deepseek-ai/dsh-tools").ToolDefinition): (() => void) => {
+        const main = ctx.tools.register(def)
+        const alias = helmAlias(def)
+        const aliasDisposer = alias ? ctx.tools.register(alias) : undefined
+        return () => { main(); aliasDisposer?.() }
+      }
+      const d1 = register(defineTool({
         name: "hive_note_painpoint",
         description:
           "Jot down a HARNESS or WORKFLOW pain point the moment you hit it — a friction in the tools, environment, or process (NOT a bug in the code you're building). " +
@@ -89,7 +124,7 @@ export class Painpoints extends Service {
         },
       }))
 
-      const d2 = ctx.tools.register(defineTool({
+      const d2 = register(defineTool({
         name: "hive_painpoints_list",
         description:
           "List all currently-open HARNESS/WORKFLOW pain points across sessions (captured via hive_note_painpoint). " +
@@ -100,7 +135,7 @@ export class Painpoints extends Service {
         execute: async () => formatPainpointsForReview(this.list()),
       }))
 
-      const d3 = ctx.tools.register(defineTool({
+      const d3 = register(defineTool({
         name: "hive_painpoints_harvest",
         description:
           "Harvest all open HARNESS/WORKFLOW pain points for the dreamtime consolidation workflow, then archive them so the next session starts clean. " +

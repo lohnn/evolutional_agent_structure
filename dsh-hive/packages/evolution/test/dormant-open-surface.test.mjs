@@ -44,13 +44,26 @@ const sliceConst = (name) => {
   assert.ok(start >= 0, `${name} must exist in evolution src`)
   return indexSrc.slice(start, indexSrc.indexOf("]", start))
 }
+const evoSrc = indexSrc
+const aliasMap = new Map(
+  [...evoSrc.matchAll(/(hive_[a-z0-9_]+)\s*:\s*"(helm_[a-z0-9_]+)"/g)]
+    .slice(0, 40) // the HELM_TOOL_ALIASES census (matched only inside that block? guarded by the size assert below)
+    .map((m) => [m[1], m[2]])
+)
+assert.equal(aliasMap.size, 40, `HELM_TOOL_ALIASES census = 40 pairs (30 global + 10 summoned), found ${aliasMap.size}`)
+// P2 dual-name cycle: the deny base is the census (canonical) PLUS the alias
+// spellings; the dormant-open surface stays canonical and its alias twins ride
+// the twin's openness (pairwise, via expandWithAliases in the gate).
 const census = new Set([...sliceConst("HIVE_TOOL_NAMES").matchAll(/"(hive_[a-z0-9_]+)"/g)].map((m) => m[1]))
-const open = new Set([...sliceConst("HIVE_DORMANT_OPEN_TOOLS").matchAll(/"(hive_[a-z0-9_]+)"/g)].map((m) => m[1]))
-const masked = new Set([...census].filter((n) => !open.has(n)))
+const aliases = new Set(aliasMap.values())
+const denyBase = new Set([...census, ...aliases])
+const openCanonical = new Set([...sliceConst("HIVE_DORMANT_OPEN_TOOLS").matchAll(/"(hive_[a-z0-9_]+)"/g)].map((m) => m[1]))
+const open = new Set([...openCanonical, ...[...openCanonical].map((n) => aliasMap.get(n)).filter(Boolean)])
+const masked = new Set([...denyBase].filter((n) => !open.has(n)))
 
 // ── harness boot (mirror of service-harness.mjs / board-tools.test.mjs) ─────
 const FIX = fs.mkdtempSync(path.join(os.tmpdir(), "wi066-gate-"))
-fs.mkdirSync(path.join(FIX, ".opencode/agents/capabilities"), { recursive: true })
+fs.mkdirSync(path.join(FIX, ".helm/agents/capabilities"), { recursive: true })
 
 const ctx = new Context()
 const { createRequire } = await import("node:module")
@@ -108,8 +121,8 @@ const agentScope2 = (c, id, header = {}) => {
 // this composition now mounts board + dream + tools + painpoints + hivemind
 // (D4/D5 legs), so "registered+masked" names are gate evidence for BOTH the
 // dormant mask and the standing partitions that follow.
-const registeredHive = census.size > 0
-  ? [...census].filter((n) => ctx.tools.get(n) !== undefined)
+const registeredHive = denyBase.size > 0
+  ? [...denyBase].filter((n) => ctx.tools.get(n) !== undefined)
   : []
 
 // ── the dormant depth-0 session ──────────────────────────────────────────────
@@ -123,6 +136,16 @@ test("wi066: the dormant open surface is VISIBLE to an un-awakened depth-0 agent
   for (const name of OPEN_NAMES) {
     const def = ctx.tools.get(name, dormant)
     assert.ok(def, `${name} must resolve on the dormant agent's scope (the gate must not mask it)`)
+  }
+})
+
+test("p2 alias cycle: the open surface's helm_chart_* twins resolve for the dormant agent (twin-open rule)", () => {
+  for (const name of [...openCanonical]) {
+    const twin = aliasMap.get(name)
+    assert.ok(
+      twin && ctx.tools.get(twin, dormant) !== undefined,
+      `${twin}|${name}: the canonical spelling's helm_* twin is open iff the twin is open`,
+    )
   }
 })
 
@@ -155,7 +178,10 @@ test("wi066: the dormant explainer renders and NAMES the open tools (W-049 actio
   assert.ok(!names.includes("hive:doctrine"), "no doctrine for a dormant session")
   const text = String(assembly.sections.find((s) => s.name === "hive:dormant")?.text ?? "")
   assert.ok(!text.includes("{{"), "no unresolved placeholders")
-  for (const name of OPEN_NAMES) {
+  // The explainer names the CANONICAL spellings (P1 kept operational tool
+  // names literal; the helm_* twins are additive registrations the cycle
+  // serves — the actionable guidance stays the canonical name).
+  for (const name of [...openCanonical]) {
     assert.ok(text.includes(name), `dormant explainer must NAME ${name} (a tool that exists is actable on; W-049)`)
   }
   assert.ok(text.includes("hive_board_bind"), "dormant explainer names the border too (bind stays awakened-only)")
@@ -196,10 +222,13 @@ test("wi066: /awaken flips the session and bind resolves on its scope again", as
     signal: AbortSignal.timeout(5000),
   })
   assert.equal(out.kind, "success", `/awaken succeeded (${String(out.text).slice(0, 80)})`)
-  const ledger = JSON.parse(fs.readFileSync(path.join(FIX, ".opencode/agents/hive-sessions.json"), "utf8"))
+  const ledger = JSON.parse(fs.readFileSync(path.join(FIX, ".helm/agents/hive-sessions.json"), "utf8"))
   assert.ok(ledger.coordinators.ses_wi066_dormant, "ledger records the flip")
   assert.notEqual(ctx.tools.get("hive_board_bind", dormant), undefined, "bind lifted — resolvable on the now-awakened scope")
   assert.notEqual(ctx.tools.get("hive_dispatch", dormant), undefined, "dispatch lifted with the rest of the census")
+  // P2 alias cycle: the helm_* spellings lift with their twins.
+  assert.notEqual(ctx.tools.get("helm_chart_bind", dormant), undefined, "helm_chart_bind lifted with its twin")
+  assert.notEqual(ctx.tools.get("helm_crew_dispatch", dormant), undefined, "helm_crew_dispatch lifted with its twin")
   const names2 = (await ctx.systemPrompt.assemble({ scope: dormant })).sections.map((s) => s.name)
   assert.ok(names2.includes("hive:doctrine") && !names2.includes("hive:dormant"), `doctrine replaced the explainer (${names2.join(",")})`)
   assert.ok(followups.length === 1 && followups[0].content[0].text.includes("hive_awaken_spawn"), "awaken brief woken with the summon named")
@@ -217,8 +246,21 @@ const PARTITION = [
   "hive_dream_mark_stale",
   "hive_dream_detect_duplicates",
   "hive_painpoints_harvest",
+  // P2 alias cycle: the helm_* spellings of the SAME partition — masked iff
+  // their twin is masked (expandWithAliases in applyStandingRestrictions).
+  "helm_dream_begin",
+  "helm_dream_complete",
+  "helm_dream_artifact_create",
+  "helm_dream_harvest",
+  "helm_dream_supersede",
+  "helm_dream_mark_stale",
+  "helm_dream_detect_duplicates",
+  "helm_painpoints_harvest",
 ]
-const STANDING_DREAM = ["hive_dream_rank", "hive_dream_query", "hive_dream_list", "hive_dream_residue", "hive_note_painpoint", "hive_painpoints_list"]
+const STANDING_DREAM = [
+  "hive_dream_rank", "hive_dream_query", "hive_dream_list", "hive_dream_residue", "hive_note_painpoint", "hive_painpoints_list",
+  "helm_dream_rank", "helm_dream_query", "helm_dream_list", "helm_dream_residue", "helm_note_painpoint", "helm_painpoints_list",
+]
 
 test("d4: the awakened standing surface holds the mid-session dream tools but NOT the dreamtime partition", () => {
   for (const name of STANDING_DREAM) {
@@ -289,8 +331,8 @@ test("d4b: hive_dream_complete auto-closes the surface — no second /dream keys
   }
   // A REAL active dream via the dream-archive writer (the single-active
   // invariant: exactly one), through the package's compiled lib surface.
-  fs.mkdirSync(path.join(FIX, ".opencode/dreams/active"), { recursive: true })
-  fs.mkdirSync(path.join(FIX, ".opencode/dreams/history"), { recursive: true })
+  fs.mkdirSync(path.join(FIX, ".helm/dreams/active"), { recursive: true })
+  fs.mkdirSync(path.join(FIX, ".helm/dreams/history"), { recursive: true })
   const { beginDream } = await import("../../dream-archive/dist/lib/dream-state.js")
   const { dreamId } = beginDream(FIX, {
     depth: 2,
@@ -319,7 +361,7 @@ test("d4b: hive_dream_complete auto-closes the surface — no second /dream keys
   }
   // Completion semantics unchanged by the seam: archived to history.
   assert.ok(
-    fs.existsSync(path.join(FIX, ".opencode/dreams/history", `${dreamId}.yaml`)),
+    fs.existsSync(path.join(FIX, ".helm/dreams/history", `${dreamId}.yaml`)),
     "completed dream archived to history",
   )
 })
@@ -337,7 +379,7 @@ test("d4: /dream is awakened-only and top-level only (gate + depth guard)", asyn
   // requireAwake refuses a dormant session with the scripted /awaken move
   assert.ok(String(outDormant.text).includes("dormant") || String(outDormant.text).includes("/awaken"), "dormant /dream refused with the /awaken pointer")
   const child = agentScope("ses_wi066_dream_child", { delegationDepth: 1 })
-  const childLedger = JSON.parse(fs.readFileSync(path.join(FIX, ".opencode/agents/hive-sessions.json"), "utf8"))
+  const childLedger = JSON.parse(fs.readFileSync(path.join(FIX, ".helm/agents/hive-sessions.json"), "utf8"))
   // a depth>0 child is exempt from the gate by lineage (skip branch) — /dream's
   // OWN depth guard is the border for it (an awakened-ledger child is the edge
   // the doctrinal refusal covers)
@@ -358,7 +400,7 @@ test("d4: /dream is awakened-only and top-level only (gate + depth guard)", asyn
 // ── D5-B: hivemind:false strips the mailbox from the TOP-LEVEL surface ──────
 // A separate composition (default keeps the tools — no-behavior-change).
 const FIX2 = fs.mkdtempSync(path.join(os.tmpdir(), "d5b-hivemind-"))
-fs.mkdirSync(path.join(FIX2, ".opencode/agents/capabilities"), { recursive: true })
+fs.mkdirSync(path.join(FIX2, ".helm/agents/capabilities"), { recursive: true })
 const ctx2 = new Context()
 new SP(ctx2, { includeHarnessIdentity: true, includeRuntimeContext: false, persona: "gate" })
 new Tools(ctx2, {})
@@ -375,14 +417,16 @@ test("d5b: with hivemind:false the awakened top-level surface masks the 4 mailbo
   const awaken2 = ctx2.commands.find(undefined, "awaken")
   const out2 = await awaken2.handler({ rawInput: "hivemind off probe", agent: awake2, commandId: "c_d5b", attachments: [], signal: AbortSignal.timeout(5000) })
   assert.equal(out2.kind, "success")
-  for (const name of ["hive_signal", "hive_listen", "hive_sent", "hive_retire"]) {
-    assert.equal(ctx2.tools.get(name, awake2), undefined, `${name} masked on the standing surface (hivemind:false)`)
+  for (const name of ["hive_signal", "hive_listen", "hive_sent", "hive_retire",
+                      "helm_comms_signal", "helm_comms_listen", "helm_comms_sent", "helm_comms_retire"]) {
+    assert.equal(ctx2.tools.get(name, awake2), undefined, `${name} masked on the standing surface (hivemind:false, both spellings)`)
   }
   // Only registrations that exist in THIS composition count as standing
   // evidence (no dream tools plugins mounted here — their absence is
   // plugin-absence, proven in the main composition's d4 legs instead).
-  for (const name of ["hive_dispatch", "hive_send", "hive_children", "hive_board_list", "hive_board_search"]) {
-    assert.notEqual(ctx2.tools.get(name, awake2), undefined, `${name} stays standing`)
+  for (const name of ["hive_dispatch", "hive_send", "hive_children", "hive_board_list", "hive_board_search",
+                      "helm_crew_dispatch", "helm_crew_send", "helm_crew_children", "helm_chart_list", "helm_chart_search"]) {
+    assert.notEqual(ctx2.tools.get(name, awake2), undefined, `${name} stays standing (both spellings)`)
   }
 })
 

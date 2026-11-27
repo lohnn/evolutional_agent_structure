@@ -147,7 +147,7 @@ test("no child persona carries the capability roster (dsh injects it process-wid
 // a copy of it.
 function makeMaterialWorkspace() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "t5-material-"))
-  const caps = path.join(root, ".opencode/agents/capabilities")
+  const caps = path.join(root, ".helm/agents/capabilities")
   fs.mkdirSync(path.join(caps, "gamma"), { recursive: true })
   fs.writeFileSync(
     path.join(caps, "gamma", "agent.cordis.yml"),

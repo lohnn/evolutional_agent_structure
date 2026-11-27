@@ -36,7 +36,7 @@ Run it as a service:
 1. `pnpm install` in `dsh-hive/` is only needed to run this package's tests on
    dev machines; the service itself needs only `node` and the example TOML.
 2. Copy `dsh-hive-dist/dsh-hive-relay.toml` into the target machine's
-   `<workspace-root>/.opencode/services/` (same place as its sibling
+   `<workspace-root>/.helm/services/` (same place as its sibling
    `dsh-hive-web.toml`).
 3. Fill the machine-local values in the env line (workspace paths, your
    tailnet origin, ports) — the file documents each one right at the value.

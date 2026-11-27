@@ -311,7 +311,7 @@ fresh session.
 - **Ownership binding** → `hive_board_bind` stamps `owner_session` = current coordinator sessionID,
   resolved from plugin runtime + session map. (SCHEMA §2)
 - **Viewer stack** → TypeScript, reusing the plugin's YAML parsers + SDK client. (Q4)
-- **Work-item storage medium** → markdown+YAML under `.opencode/board/`. (SCHEMA §1)
+- **Work-item storage medium** → markdown+YAML under `.helm/board/`. (SCHEMA §1)
 - **Coupling** → tight: item ⇔ owning coordinator session ⇔ DRM. (DESIGN §2)
 - **Subtask source of truth** → mirror the owning session's TodoWrite (`session.todo`/`todo.updated`). (SCHEMA §4)
 - **Done gating** → DRM COMPLETE canonical; manual "done without dream" allowed but badged. (DESIGN §5.4)

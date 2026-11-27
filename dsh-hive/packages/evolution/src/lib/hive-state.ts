@@ -13,12 +13,12 @@ import { activeDreamPath, historyDreamPath, dreamsBase } from "@hive/dsh-dream-a
  * builder for `GET /api/hive-state/session`.
  *
  * Every field is a REAL dsh-hive-side record; nothing is synthesized:
- *   - awaken state ....... `.opencode/agents/hive-sessions.json` (lib/sessions.ts;
+ *   - awaken state ....... `.helm/agents/hive-sessions.json` (lib/sessions.ts;
  *     absence from `coordinators` IS the dormant state — D1)
- *   - usage marks ........ `.opencode/agents/hive-state.json` usageLog
+ *   - usage marks ........ `.helm/agents/hive-state.json` usageLog
  *     (lib/energy.ts — one entry per markUsed; a child's mark is its dispatch
  *     registration, so the route joins children × marks for milestones)
- *   - dream consults ..... `.opencode/dreams/index/telemetry/<bare id>.jsonl`
+ *   - dream consults ..... `.helm/dreams/index/telemetry/<bare id>.jsonl`
  *     (the dream tools' per-session telemetry stream, one row per tool call)
  *
  * v1.1 scope note (user decision): the panel is THIS-SESSION-ONLY. The
@@ -81,7 +81,7 @@ export interface SnapshotLimits {
 const MINIMAL_LIMITS: Required<SnapshotLimits> = { listCap: 50 }
 
 function readDreamTelemetry(directory: string, idBare: string): Array<{ ts: string; tool: string }> {
-  const file = path.join(directory, ".opencode", "dreams", "index", "telemetry", `${idBare}.jsonl`)
+  const file = path.join(directory, ".helm", "dreams", "index", "telemetry", `${idBare}.jsonl`)
   try {
     const lines = fs.readFileSync(file, "utf8").trim().split("\n").filter(Boolean)
     const out: Array<{ ts: string; tool: string }> = []

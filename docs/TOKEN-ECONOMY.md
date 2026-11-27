@@ -299,7 +299,7 @@ sessions that turn out to be Q&A.
 
 - Wire `dsh-session-stats` (present in the 0.2.0-rc.2 store) into a minimal
   per-child token accounting log at dispatch settle
-  (`.opencode/hive-usage.jsonl`: child, capability, model route, tokens
+  (`.helm/hive-usage.jsonl`: child, capability, model route, tokens
   in/out where available). Empirical tier calibration comes later; the log
   is the enabler. If the stats service doesn't expose per-child usage
   cleanly, land the dispatch-side skeleton and defer the reader.
@@ -338,7 +338,7 @@ sessions that turn out to be Q&A.
       (`childToolFilterFor`, dreamcatcher Recall sees only the 4 read tools).
 10. [x] D8 standing-report budget (outcome + next-move findings + retrieval
       pointers, ~40 lines).
-11. [x] D10 usage-log skeleton (`.opencode/hive-usage.jsonl`, fire-and-forget;
+11. [x] D10 usage-log skeleton (`.helm/hive-usage.jsonl`, fire-and-forget;
       dispatch lines both shapes, settle lines for one-shot). Named residual:
       resident settles are host-side until a settle hook exists — the reader
       and the cache-order spike (§D10) stay open, deliberately small.

@@ -2,7 +2,7 @@
  * @hive/dsh-dream-archive — the dream archive as a dsh Service.
  *
  * Exposes `ctx.dreamArchive`: the complete read/write surface over the
- * handrolled-YAML dream archive at `<workspace>/.opencode/dreams` (artifacts,
+ * handrolled-YAML dream archive at `<workspace>/.helm/dreams` (artifacts,
  * DRM state files, residue journals, rank, telemetry).
  *
  * The lib modules under `./lib/` are VERBATIM ports of the OpenCode HIVE
@@ -20,7 +20,7 @@ import { type RankedArtifact, type RankResult, type RankOptions } from "./lib/dr
 import { type SurfacedEvent } from "./lib/dream-telemetry.js";
 export interface DreamArchiveConfig {
     /**
-     * Workspace root — the directory that CONTAINS `.opencode/`.
+     * Workspace root — the directory that CONTAINS `.helm/`.
      * Defaults to the process cwd (dsh runs pinned to the workspace).
      */
     directory?: string;

@@ -7,7 +7,7 @@
  * executor's substrate:
  *
  *   - `hive-mutations.json` — the machine-readable mutation queue (the same
- *     ledger home as hive-state.json / hive-sessions.json: `.opencode/agents/`).
+ *     ledger home as hive-state.json / hive-sessions.json: `.helm/agents/`).
  *     One record per mutation: the VERBATIM approved text, the target
  *     capability, lifecycle status, the operator-approval evidence, and an
  *     append-only transition history.
@@ -73,7 +73,7 @@ export interface MutationStore {
 const EMPTY_STORE: MutationStore = { v: 1, updated_at: "", mutations: [] }
 
 export function mutationsPath(directory: string): string {
-  return path.join(directory, ".opencode/agents/hive-mutations.json")
+  return path.join(directory, ".helm/agents/hive-mutations.json")
 }
 
 export function readMutations(directory: string): MutationStore {

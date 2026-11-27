@@ -45,7 +45,7 @@
  *                   http://127.0.0.1:3080 — set your own public https origin)
  *
  * Zero dependencies; runs under plain node (v18+). Sourced as a plain file,
- * supervised by svcwatch (.opencode/services/dsh-relay.toml): stdout/stderr
+ * supervised by svcwatch (.helm/services/dsh-relay.toml): stdout/stderr
  * land in /run/svc/logs/dsh-relay.log, TERM/KILL handled by svcwatch's group
  * stop; no pipeline children, so a restart can never strand a sibling holding
  * the port.

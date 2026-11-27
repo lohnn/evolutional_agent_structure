@@ -42,7 +42,7 @@ export interface InboxEntry {
 // ── Paths ─────────────────────────────────────────────────────────────────────
 
 function hivemindPath(directory: string): string {
-  return path.join(directory, ".opencode/hivemind")
+  return path.join(directory, ".helm/hivemind")
 }
 
 function inboxPath(directory: string, recipient: string): string {
@@ -123,8 +123,8 @@ export function evaluateStaleness(directory: string, msg: HiveMessage, now: Date
       // dissolved by definition, no disk check needed.
       strong.push("dissolved-sender")
     } else {
-      const activeDir = path.join(directory, ".opencode/agents/capabilities")
-      const dissolvedDir = path.join(directory, ".opencode/agents/dissolved")
+      const activeDir = path.join(directory, ".helm/agents/capabilities")
+      const dissolvedDir = path.join(directory, ".helm/agents/dissolved")
       const inActive = fs.existsSync(path.join(activeDir, `${bare}.md`))
       const inDissolved = fs.existsSync(path.join(dissolvedDir, `${bare}.md`))
       // Dissolved (in dissolved/, not capabilities/) OR was-once-a-capability-
@@ -351,7 +351,7 @@ export function markAllRead(directory: string, capabilityName: string, groupId?:
  *   (same filter as getInbox). Pass undefined to count all pending messages.
  */
 export function listPendingInboxes(directory: string, groupId?: string): { recipient: string; count: number }[] {
-  const base = path.join(directory, ".opencode/hivemind/inbox")
+  const base = path.join(directory, ".helm/hivemind/inbox")
   let dirs: string[]
   try {
     dirs = fs.readdirSync(base).filter(
@@ -401,7 +401,7 @@ export function formatInboxForPrompt(messages: InboxEntry[]): string | null {
 // append-only log silently redefines every reader, so there is exactly ONE
 // entry shape and no versioning escape hatch):
 //
-//   .opencode/hivemind/retirement-log.jsonl   — one JSON object per line:
+//   .helm/hivemind/retirement-log.jsonl   — one JSON object per line:
 //     {
 //       v: 1,                          // entry-shape version, always 1
 //       at: string,                    // ISO timestamp of the retirement

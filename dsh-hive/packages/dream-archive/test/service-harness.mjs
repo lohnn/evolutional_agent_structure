@@ -16,16 +16,16 @@ const check = (id, ok, detail) => {
 
 // Real-archive copy (read-heavy methods hit this)
 const realCopy = fs.mkdtempSync(path.join(os.tmpdir(), "p1-real-"))
-fs.cpSync("/workspace/.opencode/dreams", path.join(realCopy, ".opencode/dreams"), { recursive: true })
+fs.cpSync("/workspace/.helm/dreams", path.join(realCopy, ".helm/dreams"), { recursive: true })
 
 // Synthetic workspace (write methods hit this — never the live archive)
 const synth = fs.mkdtempSync(path.join(os.tmpdir(), "p1-synth-"))
 for (const sub of ["insights", "warnings", "songlines", "shadows"]) {
-  fs.mkdirSync(path.join(synth, ".opencode/dreams/artifacts", sub), { recursive: true })
+  fs.mkdirSync(path.join(synth, ".helm/dreams/artifacts", sub), { recursive: true })
 }
-fs.mkdirSync(path.join(synth, ".opencode/dreams/active"), { recursive: true })
-fs.mkdirSync(path.join(synth, ".opencode/dreams/history"), { recursive: true })
-fs.mkdirSync(path.join(synth, ".opencode/dreams/raw"), { recursive: true })
+fs.mkdirSync(path.join(synth, ".helm/dreams/active"), { recursive: true })
+fs.mkdirSync(path.join(synth, ".helm/dreams/history"), { recursive: true })
+fs.mkdirSync(path.join(synth, ".helm/dreams/raw"), { recursive: true })
 
 // ── boot via class-plugin apply (loader shape) ─────────────────────────────
 const ctx = new Context()
@@ -95,7 +95,7 @@ const harvested = arc2.harvest(true)
 check("write.residue-harvest", harvested.length === 1 && harvested[0].content.includes("gate residue note"), `appendResidue+harvest → ${harvested.length} journal(s)`)
 
 arc2.recordSurfacedEvent("ses_gate", "rank", "gate", ["I-001"], 1)
-check("write.telemetry", fs.existsSync(path.join(synth, ".opencode/dreams/index/telemetry/ses_gate.jsonl")), "recordSurfacedEvent wrote jsonl")
+check("write.telemetry", fs.existsSync(path.join(synth, ".helm/dreams/index/telemetry/ses_gate.jsonl")), "recordSurfacedEvent wrote jsonl")
 
 // byte-identity spot check: the synthetic DRM file matches the serializer
 const drmRaw = fs.readFileSync(completeRes.historyPath, "utf8")

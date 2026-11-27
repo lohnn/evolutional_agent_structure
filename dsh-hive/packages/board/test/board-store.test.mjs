@@ -1,7 +1,7 @@
 // Port of the OpenCode plugin's test/board-store.test.ts (bun:test →
 // node:test). Semantics preserved 1:1 — the serialization dialect and the
 // lock/surgery behavior are the byte-compatibility contract with the live
-// .opencode/board store, so every assertion of the original suite matters.
+// .helm/board store, so every assertion of the original suite matters.
 // Only the runner and import targets changed (dist via the ./lib exports
 // map; subtests carry their own tmpdir).
 import test from "node:test"
@@ -465,7 +465,7 @@ test("listItemsInDir: reads an arbitrary dir with the same filename filter", asy
 test("listItemsInDir: the enumeration gate keeps non-contract dirs out (live-store co-tenants)", async () => {
   await withDir(async (dir) => {
     await createItem(dir, { ...fullItem() })
-    // The real .opencode/board/ carries .locks/ (the advisory lockfile) and
+    // The real .helm/board/ carries .locks/ (the advisory lockfile) and
     // attachments/ (session-staged images) — NEITHER may parse as an item.
     fs.mkdirSync(path.join(boardDir(dir), ".locks"), { recursive: true })
     fs.writeFileSync(path.join(boardDir(dir), ".locks", "board.lock"), String(process.pid))

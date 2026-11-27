@@ -75,6 +75,33 @@ const TEXT_OUT = {
   render: (_args: unknown, value: string): ContentBlock[] => [{ type: "text", text: value }],
 } as const
 
+// ── P2 dual-name alias cycle (helm-rebrand-design.md §2.5/§3) ────────────────
+// Each hive_* comms tool ALSO registers its canonical helm_comms_* name on the
+// SAME definition: the alias is a spread of the built ToolDefinition with only
+// name + description replaced, so compiled parameter schema, output schema,
+// output.render, and the exact execute closure are shared BY REFERENCE — never
+// a behavior fork. Old names stay live and untouched until the P5 alias
+// retirement; alias descriptions carry the dual-name note. The mailbox's
+// domain word is `comms` (the ratified slot, §2.1). No cross-package import
+// for one data table: the monorepo-wide census lives in @hive/dsh-evolution
+// HELM_TOOL_ALIASES, and evolution/test/tool-gate-sync.test.mjs asserts this
+// table stays in step.
+const HELM_COMMS_ALIASES: Readonly<Record<string, string>> = {
+  hive_signal: "helm_comms_signal",
+  hive_listen: "helm_comms_listen",
+  hive_sent: "helm_comms_sent",
+  hive_retire: "helm_comms_retire",
+} as const
+
+const helmAliasNote = (legacy: string): string =>
+  ` [HELM dual-name cycle: legacy "${legacy}" stays live — both names run this same tool until the P5 alias retirement.]`
+
+const helmAlias = (def: import("@deepseek-ai/dsh-tools").ToolDefinition): import("@deepseek-ai/dsh-tools").ToolDefinition | undefined => {
+  const alias = HELM_COMMS_ALIASES[def.name]
+  if (alias === undefined) return undefined
+  return { ...def, name: alias, description: def.description + helmAliasNote(def.name) }
+}
+
 /** Resolve the caller identity from a tool execution context. */
 function resolveCaller(exec: { agent?: unknown }): { worker: string; sessionID: string } {
   const agent = exec.agent as { session?: { id?: string }; id?: string } | undefined
@@ -97,7 +124,7 @@ function excerpt(content: string): string {
 export class Hivemind extends Service {
   static inject = ["tools"]
   static Config = z.object({
-    // Workspace root (the dir containing `.opencode/`). Default: process cwd.
+    // Workspace root (the dir containing `.helm/`). Default: process cwd.
     directory: z.string().default(process.cwd()),
   })
 
@@ -108,7 +135,17 @@ export class Hivemind extends Service {
     this.directory = config.directory
 
     ctx.effect(() => {
-      const d1 = ctx.tools.register(defineTool({
+      // P2 dual-name alias cycle: this effect-local register() mounts the
+      // canonical helm_comms_* twin of every definition it receives, on the
+      // SAME schema/execute (see HELM_COMMS_ALIASES above) — the returned
+      // disposer lifts both spellings together.
+      const register = (def: import("@deepseek-ai/dsh-tools").ToolDefinition): (() => void) => {
+        const main = ctx.tools.register(def)
+        const alias = helmAlias(def)
+        const aliasDisposer = alias ? ctx.tools.register(alias) : undefined
+        return () => { main(); aliasDisposer?.() }
+      }
+      const d1 = register(defineTool({
         name: "hive_signal",
         description:
           "Send a message to another capability in the HELM ecosystem. Use this when you need information from, or want to share information with, another capability. " +
@@ -140,7 +177,7 @@ export class Hivemind extends Service {
         },
       }))
 
-      const d2 = ctx.tools.register(defineTool({
+      const d2 = register(defineTool({
         name: "hive_listen",
         description:
           "Read pending messages from other capabilities addressed to you. Messages are also injected into your system prompt automatically, but use this tool to explicitly check for and acknowledge messages.",
@@ -165,7 +202,7 @@ export class Hivemind extends Service {
         },
       }))
 
-      const d3 = ctx.tools.register(defineTool({
+      const d3 = register(defineTool({
         name: "hive_sent",
         description:
           "Sender-side queue dashboard: every message YOU sent that was never read, with per-message staleness so live is told from sediment. " +
@@ -180,7 +217,7 @@ export class Hivemind extends Service {
         },
       }))
 
-      const d4 = ctx.tools.register(defineTool({
+      const d4 = register(defineTool({
         name: "hive_retire",
         description:
           "Retire stale comms messages: MOVE them out of the active inbox into retired/<recipient>/, with an INDIVIDUAL justification per message and an append-only audit trail. " +

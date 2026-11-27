@@ -89,10 +89,10 @@ Paste this block **before** the final `exec openchamber serve …`:
 
 ```sh
 # ── svcwatch ── declarative process supervision (PID 1 subtree) ──────────────
-# Adding a long-lived service = dropping ONE TOML into .opencode/services/.
+# Adding a long-lived service = dropping ONE TOML into .helm/services/.
 # See docs/SVCWATCH.md in the HIVE plugin. This is the ONLY entrypoint touch;
 # services never need entrypoint changes again.
-SVCDIR=/workspace/.opencode/services
+SVCDIR=/workspace/.helm/services
 SVCWATCH=/workspace/projects/evolutional_agent_structure/src/svcwatch/svcwatch.py
 SVCLOG=/var/log/svcwatch.log
 mkdir -p "$SVCDIR"
@@ -113,7 +113,7 @@ add/remove a service — only TOML files.
 
 ## 4. The service definition (already in the workspace)
 
-`/workspace/.opencode/services/oc-browser-bridge.toml`:
+`/workspace/.helm/services/oc-browser-bridge.toml`:
 
 ```toml
 name = "oc-browser-bridge"

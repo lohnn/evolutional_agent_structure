@@ -117,7 +117,7 @@ export type AwakenWorkspaceResolver = (path: string) => Promise<{ id: string } |
 
 /** Everything the handler needs; Board wires the real services, tests the fakes. */
 export interface AwakenDeps {
-  /** The workspace root (the dir containing `.opencode/`) created sessions start in. */
+  /** The workspace root (the dir containing `.helm/`) created sessions start in. */
   directory: string
   gateway: AwakenGatewayLike
   agents: AwakenAgentsLike

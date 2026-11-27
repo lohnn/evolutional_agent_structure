@@ -272,10 +272,10 @@ function todoSubStateLane(sub: TodoSubState | undefined): string {
  * — so this reads the log and shows nothing else.
  *
  * ── Why the archived body is NOT fetchable from here (a deliberate decision) ─
- * The payloads under `.opencode/board/<id>/<hash>.md` are plain markdown on
+ * The payloads under `.helm/board/<id>/<hash>.md` are plain markdown on
  * disk, and this viewer serves an UNAUTHENTICATED HTTP surface. A route taking
  * an item id and a hash and handing back file contents is precisely the shape
- * that turns into a path-traversal read of the operator's `.opencode/`, and it
+ * that turns into a path-traversal read of the operator's `.helm/`, and it
  * would exist to re-serve files the reader can already open. So: no route. The
  * hash and its on-disk path are surfaced in the tooltip instead, which makes
  * the payload REACHABLE (by hand, or via `readRevision`) while adding no new
@@ -295,9 +295,9 @@ function specRevisionHtml(item: WorkItem): string {
       const who = r.session ? ` <span class="mono dim">${esc(shortSes(r.session))}</span>` : ""
       // Name the payload and where it lives — reachable without a fetch route.
       // Path is relative to the BOARD DIRECTORY (SCHEMA §1's own notation), not
-      // hardcoded to `.opencode/board/`: this renderer is browser-side and does
+      // hardcoded to `.helm/board/`: this renderer is browser-side and does
       // not know the configured board dir, and in fixture mode it is not
-      // `.opencode/` at all. A relative path is true in every mode.
+      // `.helm/` at all. A relative path is true in every mode.
       const where = `superseded body — board/${item.id}/${r.supersededHash}.md`
       return `<li><span class="mono dim">${esc(fmtTime(r.at))}</span> ${esc(r.by)}${who} <span class="mono dim" title="${esc(where)}">${esc(r.supersededHash)}</span></li>`
     })

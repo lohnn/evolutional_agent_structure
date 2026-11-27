@@ -2,7 +2,7 @@
  * hive-board work-item storage — the SINGLE code path for all WI-*.md writes.
  *
  * Contract: docs/board-viewer/SCHEMA.md (v1.0, ratified 2026-07-10).
- * Storage layout: <workspace>/.opencode/board/WI-NNN.md — flat dir, markdown
+ * Storage layout: <workspace>/.helm/board/WI-NNN.md — flat dir, markdown
  * with ----fenced YAML frontmatter (same dialect as capability files), the
  * `status` field (not the path) drives the column.
  *
@@ -150,7 +150,7 @@ export interface WorkItem {
 // ── Paths & IDs ───────────────────────────────────────────────────────────────
 
 export function boardDir(directory: string): string {
-  return path.join(directory, ".opencode/board")
+  return path.join(directory, ".helm/board")
 }
 
 export function itemPath(directory: string, id: string): string {
@@ -469,7 +469,7 @@ export function listItems(directory: string): WorkItem[] {
 /**
  * List work items from an ARBITRARY directory (fixtures, tests). Owns the
  * filename filter (/^WI-\d+\.md$/ — .locks/ and temp files never match).
- * listItems(workspaceRoot) is the .opencode/board wrapper over this.
+ * listItems(workspaceRoot) is the .helm/board wrapper over this.
  */
 export function listItemsInDir(dir: string): WorkItem[] {
   let files: string[]
@@ -1010,7 +1010,7 @@ export function editItemUnlocked(directory: string, id: string, edit: ItemEdit):
 // ── Spec revision archive (WI-064) ────────────────────────────────────────────
 
 /**
- * Per-item revision directory: `.opencode/board/<id>/`.
+ * Per-item revision directory: `.helm/board/<id>/`.
  *
  * Safe alongside item files because `listItemsInDir` filters on
  * /^WI-\d+\.md$/ — a bare directory name never matches, so revisions are

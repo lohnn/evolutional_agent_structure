@@ -19,7 +19,7 @@ that the server responds.
 | Port | Bind | Owner | Notes |
 |---|---|---|---|
 | `3000` | `0.0.0.0` | OpenChamber | published |
-| `3080` | `0.0.0.0` | dsh web (socat relay → 127.0.0.1:4501) | published; the HELM-on-dsh workbench. Chain: Tailscale Serve (Mac 443) → Mac 127.0.0.1:3080 → compose publish `3080:3080` → this relay. Relay is svcwatch-managed (`.opencode/services/dsh-relay.toml`); dsh itself is `dsh-web.toml` (pinned version, boot log tee'd to `/tmp/dsh-web.log` for the rotating `?token=`). 2026-09-07: moved off 4500 so the prototype range stays prototypes. |
+| `3080` | `0.0.0.0` | dsh web (socat relay → 127.0.0.1:4501) | published; the HELM-on-dsh workbench. Chain: Tailscale Serve (Mac 443) → Mac 127.0.0.1:3080 → compose publish `3080:3080` → this relay. Relay is svcwatch-managed (`.helm/services/dsh-relay.toml`); dsh itself is `dsh-web.toml` (pinned version, boot log tee'd to `/tmp/dsh-web.log` for the rotating `?token=`). 2026-09-07: moved off 4500 so the prototype range stays prototypes. |
 | `4096` | `127.0.0.1` | opencode itself | internal — do not expose |
 | `4400` | `0.0.0.0` | hive-board viewer | published; see `projects/evolutional_agent_structure/docs/board-viewer/deploy/`. Ships inside the HELM plugin package (`src/board-viewer/`) — the old `projects/hive-board/` repo is gone. Binds loopback by DEFAULT; this deployment overrides it with `--host 0.0.0.0` and the server prints an exposure warning, which is expected here. |
 | `4500`–`4504` | `0.0.0.0` | **reserved — throwaway prototypes** | see below. (dsh briefly squatted 4500 during migration; freed 2026-09-07.) |
@@ -48,7 +48,7 @@ other. Five slots is arbitrary but cheap.
   See *Lifetime* below — this is what makes a killed server cheap to recover.
 - **Never serve from `/workspace` or from `/tmp/opencode` directly.** `python3 -m http.server`
   publishes its entire working directory with no authentication. Rooted at the workspace that
-  exposes `.opencode/` — credentials, session state, the lot — to anything on the LAN.
+  exposes `.helm/` — credentials, session state, the lot — to anything on the LAN.
 - Bind `0.0.0.0`.
 - Prefer self-contained single-file HTML (inline CSS/JS, no external assets). It survives
   being copied to a device and opened as a `file://` URL, which sidesteps ports entirely for

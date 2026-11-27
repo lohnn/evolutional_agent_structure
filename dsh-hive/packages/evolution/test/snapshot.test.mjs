@@ -24,7 +24,7 @@ function scratchWorkspace() {
 
 test("composeEcosystemSnapshot renders roster, energy, and the void from its source", () => {
   const dir = scratchWorkspace()
-  const dissolved = path.join(dir, ".opencode/agents/dissolved")
+  const dissolved = path.join(dir, ".helm/agents/dissolved")
   fs.mkdirSync(dissolved, { recursive: true })
   fs.writeFileSync(path.join(dissolved, "beta.md"), "---\nname: beta\n---\n", "utf8")
   fs.writeFileSync(path.join(dissolved, "beta"), "preset dir", "utf8")
@@ -35,21 +35,21 @@ test("composeEcosystemSnapshot renders roster, energy, and the void from its sou
       { name: "zeta", energy: null, description: null },
     ],
   })
-  assert.ok(text.includes("## HIVE Ecosystem Dossier"), "opens with the dossier header")
-  assert.ok(text.includes("### Roster (active capabilities)"), "names the roster section")
+  assert.ok(text.includes("## HELM Ecosystem Dossier"), "opens with the dossier header")
+  assert.ok(text.includes("### Crew Manifest (active capabilities)"), "names the roster section (crew manifest — P2 display word)")
   assert.ok(text.includes("alpha — energy: 60 — the alpha capability"), "renders a roster line with energy and description")
   assert.ok(text.includes("zeta — energy: ? — (no description)"), "renders unknown energy/description as placeholders")
   assert.ok(text.includes("### Energy") && text.includes("last tick: never (no tick has run yet)"), "renders the tick line (absent state file → never)")
-  assert.ok(text.includes("### The Void (dissolved capabilities)"), "names the void section")
+  assert.ok(text.includes("### The Harbor (dissolved capabilities)"), "names the dissolved section (the harbor — P2 display word)")
   assert.ok(text.includes("beta"), "lists the dissolved capability ONCE (dir + .md dedup)")
-  assert.ok(!/\bbeta\b.*\bbeta\b/.test(text), "no duplicate void line for the dir+ledger pair")
+  assert.ok(!/\bbeta\b.*\bbeta\b/.test(text), "no duplicate harbor line for the dir+ledger pair")
 })
 
 test("composeEcosystemSnapshot renders the empty-roster and empty-void forms", () => {
   const dir = scratchWorkspace() // no state file, no dissolved dir
   const text = composeEcosystemSnapshot({ directory: dir, listCapabilities: () => [] })
-  assert.ok(text.includes("(none — the roster is empty)"), "empty roster is said out loud")
-  assert.ok(text.includes("(the void holds nothing)"), "empty void is said out loud")
+  assert.ok(text.includes("(none — the crew manifest is empty)"), "empty roster is said out loud")
+  assert.ok(text.includes("(the harbor holds nothing)"), "empty harbor is said out loud")
 })
 
 test("POST_COMPACTION_DREAM_LIMIT stays the OpenCode hook's cap of 5", () => {
@@ -64,7 +64,7 @@ test("composePostCompactionContext renders summary + pointer lines + retrieval r
       { dreamId: "DRM-018", intention: "dispatch material transport", artifacts: [] },
     ],
   })
-  assert.ok(text.startsWith("== [HIVE] context restored after compaction"), "opens with the re-anchor header")
+  assert.ok(text.startsWith("== [HELM] context restored after compaction"), "opens with the re-anchor header")
   assert.ok(text.includes("Active capabilities:"), "carries the capability summary verbatim (with its own list header)")
   assert.ok(text.includes("- alpha (energy: 60) — the alpha capability"), "summary body untouched")
   assert.ok(text.includes("DRM-019 (pre-compaction, artifacts: I-048, W-019) — consolidate the /awaken port"), "pointer line keeps the dreamPointerLine shape with the artifact list")
@@ -93,7 +93,7 @@ test("composePostCompactionContext degrades honestly when the archive cannot be 
     capabilitySummary: "Active capabilities:\n- alpha (energy: 50) — x",
     dreamPointers: undefined,
   })
-  assert.ok(text.includes("== [HIVE] context restored after compaction"), "the body of the re-anchor still renders")
+  assert.ok(text.includes("== [HELM] context restored after compaction"), "the body of the re-anchor still renders")
   assert.ok(text.includes("- alpha (energy: 50) — x"), "capability summary still renders")
   assert.ok(text.includes("dream archive is not mounted"), "the fallback line says the archive is unreachable (not pretend there were no dreams)")
   assert.ok(!text.includes("(pre-compaction, artifacts:"), "zero pointer lines in the degraded block")
@@ -110,6 +110,6 @@ test("composePostCompactionContext distinguishes an empty pointer list from an a
 
 test("composePostCompactionContext renders an empty roster loudly instead of skipping the block", () => {
   const text = composePostCompactionContext({ capabilitySummary: null, dreamPointers: [] })
-  assert.ok(text.startsWith("== [HIVE] context restored after compaction"), "the re-anchor survives a null summary")
-  assert.ok(text.includes("(none — the roster is empty)"), "empty roster said out loud — 'the roster is empty' IS awareness")
+  assert.ok(text.startsWith("== [HELM] context restored after compaction"), "the re-anchor survives a null summary")
+  assert.ok(text.includes("(none — the crew manifest is empty)"), "empty crew manifest said out loud — 'the crew manifest is empty' IS awareness")
 })

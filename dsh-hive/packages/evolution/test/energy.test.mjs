@@ -14,19 +14,19 @@ import {
 
 function mkWorkspace() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "evo-energy-"))
-  fs.mkdirSync(path.join(dir, ".opencode/agents/capabilities"), { recursive: true })
+  fs.mkdirSync(path.join(dir, ".helm/agents/capabilities"), { recursive: true })
   return dir
 }
 
 function writeCapability(dir, name, energy) {
   fs.writeFileSync(
-    path.join(dir, ".opencode/agents/capabilities", `${name}.md`),
+    path.join(dir, ".helm/agents/capabilities", `${name}.md`),
     `---\nname: ${name}\ndescription: ${name} desc\nenergy: ${energy}\n---\n\n# ${name}\n`
   )
 }
 
 function readEnergy(dir, name) {
-  const content = fs.readFileSync(path.join(dir, ".opencode/agents/capabilities", `${name}.md`), "utf8")
+  const content = fs.readFileSync(path.join(dir, ".helm/agents/capabilities", `${name}.md`), "utf8")
   return parseInt(content.match(/^energy:\s*(\d+)/m)[1], 10)
 }
 
@@ -110,9 +110,9 @@ test("tick warns below the dissolve threshold", () => {
 
 test("legacy hive-state format migrates (usedCapabilities → empty usageLog)", () => {
   const dir = mkWorkspace()
-  fs.mkdirSync(path.join(dir, ".opencode/agents"), { recursive: true })
+  fs.mkdirSync(path.join(dir, ".helm/agents"), { recursive: true })
   fs.writeFileSync(
-    path.join(dir, ".opencode/agents/hive-state.json"),
+    path.join(dir, ".helm/agents/hive-state.json"),
     JSON.stringify({ lastTick: "2020-01-01T00:00:00.000Z", usedCapabilities: ["alpha"] })
   )
   const state = readHiveState(dir)

@@ -15,7 +15,7 @@ const check = (id, ok, detail) => {
 }
 
 const synth = fs.mkdtempSync(path.join(os.tmpdir(), "p2a-synth-"))
-fs.mkdirSync(path.join(synth, ".opencode/painpoints/raw"), { recursive: true })
+fs.mkdirSync(path.join(synth, ".helm/painpoints/raw"), { recursive: true })
 
 const ctx = new Context()
 
@@ -41,9 +41,12 @@ check("boot.service", ctx.painpoints?.directory === synth, "ctx.painpoints regis
 
 const visible = ctx.tools.view(undefined).visible
 const names = [...visible.keys()].filter((n) => n.includes("painpoint"))
-check("tools.registered", names.length === 3, `painpoint tools visible: ${names.join(", ") || "(none)"}`)
+// P2 dual-name alias cycle: the 3 canonical helm_* twins ride the SAME
+// definitions as the 3 hive_* names (alias parity is proven in
+// test/alias-cycle.test.mjs) — so the visible painpoint surface is 6.
+check("tools.registered", names.length === 6, `painpoint tools visible: ${names.join(", ") || "(none)"}`)
 
-if (names.length === 3) {
+if (names.length === 6) {
   const execStub = {
     signal: AbortSignal.timeout(5000),
     agent: { id: "gate-worker", session: { id: "ses_gate" } },
@@ -68,7 +71,7 @@ if (names.length === 3) {
 
   const harvested = await visible.get("hive_painpoints_harvest").execute({}, execStub)
   check("tool.harvest", harvested.includes("HARNESS-FIX CANDIDATES") && harvested.includes("gate friction"), "hive_painpoints_harvest archived")
-  check("tool.harvest-cleared", fs.readdirSync(path.join(synth, ".opencode/painpoints/raw")).filter((f) => f.endsWith(".md")).length === 0, "raw log archived away")
+  check("tool.harvest-cleared", fs.readdirSync(path.join(synth, ".helm/painpoints/raw")).filter((f) => f.endsWith(".md")).length === 0, "raw log archived away")
 
   const peeked = await visible.get("hive_painpoints_harvest").execute({ peek: true }, execStub)
   check("tool.harvest-empty", peeked.includes("No pain points harvested"), "post-harvest is empty")

@@ -6,7 +6,7 @@
  * → supersession-protection signal). Written server-side by tool
  * implementations as a side effect — no agent holds or needs this authority.
  *
- * Layout: .opencode/dreams/index/telemetry/<sessionID>.jsonl
+ * Layout: .helm/dreams/index/telemetry/<sessionID>.jsonl
  *   One file per session (per-writer separation, W-024 — concurrent sessions
  *   never share an append target). One JSON line per surfacing event.
  *   A future maintenance step compacts these into a summary via

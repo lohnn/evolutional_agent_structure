@@ -10,11 +10,11 @@ const dir = process.argv[2]
 if (!dir) { console.error("usage: node dsh-fixture-run.mjs <workspace>"); process.exit(1) }
 
 for (const sub of ["insights", "warnings", "songlines", "shadows"]) {
-  fs.mkdirSync(path.join(dir, ".opencode/dreams/artifacts", sub), { recursive: true })
+  fs.mkdirSync(path.join(dir, ".helm/dreams/artifacts", sub), { recursive: true })
 }
-fs.mkdirSync(path.join(dir, ".opencode/dreams/active"), { recursive: true })
-fs.mkdirSync(path.join(dir, ".opencode/dreams/history"), { recursive: true })
-fs.mkdirSync(path.join(dir, ".opencode/dreams/raw"), { recursive: true })
+fs.mkdirSync(path.join(dir, ".helm/dreams/active"), { recursive: true })
+fs.mkdirSync(path.join(dir, ".helm/dreams/history"), { recursive: true })
+fs.mkdirSync(path.join(dir, ".helm/dreams/raw"), { recursive: true })
 
 const ctx = new Context()
 const { createRequire } = await import("node:module")

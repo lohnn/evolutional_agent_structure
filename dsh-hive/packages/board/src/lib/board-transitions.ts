@@ -346,7 +346,7 @@ export function bindSession(
     const items = listItems(directory)
     const item = items.find((i) => i.id === id)
     if (!item) {
-      return { ok: false as const, reason: "NOT_FOUND", detail: `No work item ${id} in .opencode/board/.` }
+      return { ok: false as const, reason: "NOT_FOUND", detail: `No work item ${id} in .helm/board/.` }
     }
     if (item.owner_session === sessionID) {
       return { ok: true as const, action: "already-bound", item } // idempotent (Phase 3 start flow)
@@ -810,7 +810,7 @@ export function respecItem(
   return withBoardLock(directory, () => {
     const item = readItem(directory, id) // re-read inside the lock
     if (!item) {
-      return { ok: false as const, reason: "NOT_FOUND", detail: `No work item ${id} in .opencode/board/.` }
+      return { ok: false as const, reason: "NOT_FOUND", detail: `No work item ${id} in .helm/board/.` }
     }
     const refusal = ownershipRefusal(item, callerSession, "spec body")
     if (refusal) return refusal
@@ -865,7 +865,7 @@ export function retitleItem(
   return withBoardLock(directory, () => {
     const item = readItem(directory, id)
     if (!item) {
-      return { ok: false as const, reason: "NOT_FOUND", detail: `No work item ${id} in .opencode/board/.` }
+      return { ok: false as const, reason: "NOT_FOUND", detail: `No work item ${id} in .helm/board/.` }
     }
     const refusal = ownershipRefusal(item, callerSession, "title")
     if (refusal) return refusal
@@ -909,7 +909,7 @@ export function editItemTags(
   return withBoardLock(directory, () => {
     const item = readItem(directory, id)
     if (!item) {
-      return { ok: false as const, reason: "NOT_FOUND", detail: `No work item ${id} in .opencode/board/.` }
+      return { ok: false as const, reason: "NOT_FOUND", detail: `No work item ${id} in .helm/board/.` }
     }
     const norm = (xs: string[] | undefined) =>
       [...new Set((xs ?? []).map((t) => t.trim()).filter((t) => t !== ""))]
@@ -1063,7 +1063,7 @@ export async function startItem(
 
   // Pre-validate BEFORE creating a session, so refusals don't leak orphans.
   const pre = readItem(directory, id)
-  if (!pre) return { ok: false, reason: "NOT_FOUND", detail: `No work item ${id} in .opencode/board/.` }
+  if (!pre) return { ok: false, reason: "NOT_FOUND", detail: `No work item ${id} in .helm/board/.` }
   if (pre.status === "done") {
     return { ok: false, reason: "ALREADY_DONE", detail: `${id} is done — reopen via promoteItem (re-attaches the original session), never a fresh start.` }
   }

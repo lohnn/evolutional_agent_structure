@@ -10,7 +10,7 @@ produces the evidence is `dsh-upgrade-audit`.
 
 | Thing | Where | Discipline |
 |---|---|---|
-| harness host pin | `.opencode/services/dsh-web.toml` (studio) / `dsh-hive-web.toml` env `DSH_VERSION` (kit machines) | exact version, never a dist-tag — `alpha` lags `latest` |
+| harness host pin | `.helm/services/dsh-web.toml` (studio) / `dsh-hive-web.toml` env `DSH_VERSION` (kit machines) | exact version, never a dist-tag — `alpha` lags `latest` |
 | cohort peer pins | `dsh-hive/packages/*/package.json` + `dsh-hive-dist/package.json` | exact (`0.1.7-rc.2`); since 0.1.7-rc.2 these are **gate-enforced at boot** by `dsh-app-boot` — wrong pins silently skip the kit |
 | plugin package versions | `dsh-hive/packages/*/package.json` `version` + `dsh-hive-dist/*.tgz` names | see the reversion rule below |
 | lockfile + policy rows | `dsh-hive/pnpm-lock.yaml` + `pnpm-workspace.yaml` `minimumReleaseAgeExclude` | regenerate and re-point every cohort row |
@@ -64,7 +64,7 @@ whose package sources are newer than their committed tarball
    paths, zero stale-version refs outside intentionally historical comments.
    Commit the tarballs.
 6. **Merge the PR first; move the host pin last** — editing
-   `.opencode/services/dsh-web.toml` hot-restarts the service through
+   `.helm/services/dsh-web.toml` hot-restarts the service through
    svcwatch and kills agent sessions. Do it outside a working session (or
    restart the container after the edit).
 7. **First-boot proof**: `grep -E "skipping profile bundle|disabling profile

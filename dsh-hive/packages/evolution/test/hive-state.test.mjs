@@ -1,7 +1,7 @@
 // WI-083 (v1.1) — the HIVE-state snapshot builder + route payload shaping.
 //
 // Everything here reads LEDGER COPIES in a tmpdir (the real ledgers under
-// /workspace/.opencode are never touched). The goal/agent/subagent live
+// /workspace/.helm are never touched). The goal/agent/subagent live
 // facts are stubbed with structural doubles (the route reads them through
 // minimal faces), so the payload contract is testable without a host boot.
 import { test } from "node:test"
@@ -26,14 +26,14 @@ function mkWorkspace() {
 }
 
 function writeLedgers(dir, { coordinators = {}, marks = [], tick = null } = {}) {
-  const agentsDir = path.join(dir, ".opencode/agents")
+  const agentsDir = path.join(dir, ".helm/agents")
   fs.mkdirSync(agentsDir, { recursive: true })
   fs.writeFileSync(path.join(agentsDir, "hive-sessions.json"), JSON.stringify({ v: 1, coordinators }, null, 2))
   fs.writeFileSync(path.join(agentsDir, "hive-state.json"), JSON.stringify({ lastTick: tick, usageLog: marks }, null, 2))
 }
 
 function writeTelemetry(dir, idBare, rows) {
-  const tel = path.join(dir, ".opencode/dreams/index/telemetry")
+  const tel = path.join(dir, ".helm/dreams/index/telemetry")
   fs.mkdirSync(tel, { recursive: true })
   fs.writeFileSync(path.join(tel, `${idBare}.jsonl`), rows.map((r) => JSON.stringify(r)).join("\n") + "\n")
 }
@@ -88,7 +88,7 @@ test("dream telemetry rides the bare id and parses rows tolerantly", () => {
     { ts: "2026-10-08T08:00:00.000Z", tool: "rank" },
     { ts: "2026-10-08T08:01:00.000Z", tool: "query" },
   ])
-  fs.appendFileSync(path.join(dir, ".opencode/dreams/index/telemetry/abc123.jsonl"), "{broken\n")
+  fs.appendFileSync(path.join(dir, ".helm/dreams/index/telemetry/abc123.jsonl"), "{broken\n")
   const snap = buildSessionHiveSnapshot(dir, "session-abc123")
   assert.equal(snap.dreamEventTotal, 2)
   assert.equal(snap.dreamEvents.length, 2)
@@ -104,7 +104,7 @@ test("events of OTHER sessions never appear (telemetry keyed by id)", () => {
 })
 
 test("missing ledgers degrade to empty absences (tolerant reads)", () => {
-  const dir = mkWorkspace() // no .opencode at all
+  const dir = mkWorkspace() // no .helm at all
   const snap = buildSessionHiveSnapshot(dir, "session-abc123")
   assert.equal(snap.hive.isCoordinator, false)
   assert.equal(snap.usageTotal, 0)

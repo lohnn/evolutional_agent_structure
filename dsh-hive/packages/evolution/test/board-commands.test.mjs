@@ -16,7 +16,7 @@ import os from "os"
 import path from "path"
 
 const synth = fs.mkdtempSync(path.join(os.tmpdir(), "wi093-evo-"))
-fs.mkdirSync(path.join(synth, ".opencode/agents/capabilities"), { recursive: true })
+fs.mkdirSync(path.join(synth, ".helm/agents/capabilities"), { recursive: true })
 
 const ctx = new Context()
 const { createRequire } = await import("node:module")
@@ -44,7 +44,7 @@ await new Promise((r) => setTimeout(r, 50))
 // Mark sessions awakened in the ledger the requireAwake gate reads
 // (evolution OWNS the writes; the harness seeds it the normal way).
 const awaken = (sid) => {
-  const p = path.join(synth, ".opencode/agents/hive-sessions.json")
+  const p = path.join(synth, ".helm/agents/hive-sessions.json")
   const ledger = fs.existsSync(p)
     ? JSON.parse(fs.readFileSync(p, "utf8"))
     : { v: 1, coordinators: {} }
@@ -104,7 +104,7 @@ for (const n of ["board-close", "board-release", "board-reopen"]) {
   const out = await command("board-close", agent, `${id} shipped clean, corridor green`)
   check("close.summons", out.kind === "success", "/board-close summons the turn-scoped tool")
   check("close.woke-model", followups.some((f) => f.sid === "ses_cmd_a" && f.m.content[0].text.includes("hive_board_close")), "followup names hive_board_close")
-  check("close.advisory", followups.at(-1).m.content[0].text.includes(".opencode/board/"), "the advisory names the BOARD surface, not agents/")
+  check("close.advisory", followups.at(-1).m.content[0].text.includes(".helm/board/"), "the advisory names the BOARD surface, not agents/")
   const scoped = ctx.tools.get("hive_board_close", agent)
   check("close.scoped", scoped !== undefined, "hive_board_close visible on the agent scope only")
   check("close.not-global", ctx.tools.get("hive_board_close") === undefined, "hive_board_close absent from the global layer")

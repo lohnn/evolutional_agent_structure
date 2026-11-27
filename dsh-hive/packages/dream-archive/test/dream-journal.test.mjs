@@ -12,7 +12,7 @@ import {
 let dir
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), "dream-journal-test-"))
-  fs.mkdirSync(path.join(dir, ".opencode/dreams/raw"), { recursive: true })
+  fs.mkdirSync(path.join(dir, ".helm/dreams/raw"), { recursive: true })
 })
 afterEach(() => {
   fs.rmSync(dir, { recursive: true, force: true })
@@ -23,16 +23,16 @@ describe("appendResidue", () => {
     appendResidue(dir, "hive-infra", "ses_1", "first note", "insight")
     appendResidue(dir, "hive-infra", "ses_1", "second note")
     appendResidue(dir, "other-cap", "ses_2", "someone else")
-    const f = path.join(dir, ".opencode/dreams/raw/hive-infra.ses_1.md")
+    const f = path.join(dir, ".helm/dreams/raw/hive-infra.ses_1.md")
     const content = fs.readFileSync(f, "utf8")
     assert.ok(content.includes("## 20") && content.includes("[insight]"))
     assert.ok(content.includes("first note") && content.includes("second note"))
-    assert.ok(fs.existsSync(path.join(dir, ".opencode/dreams/raw/other-cap.ses_2.md")))
+    assert.ok(fs.existsSync(path.join(dir, ".helm/dreams/raw/other-cap.ses_2.md")))
   })
 
   it("sanitises path separators in the session id", () => {
     appendResidue(dir, "cap", "a/b\\c", "note")
-    assert.ok(fs.existsSync(path.join(dir, ".opencode/dreams/raw/cap.a_b_c.md")))
+    assert.ok(fs.existsSync(path.join(dir, ".helm/dreams/raw/cap.a_b_c.md")))
   })
 })
 
@@ -46,9 +46,9 @@ describe("harvestJournals", () => {
     assert.ok(byCap["hive-infra"].includes("note A"))
     assert.ok(byCap["builder"].includes("note B"))
     // raw dir cleared, harvested archive holds the files
-    const raw = fs.readdirSync(path.join(dir, ".opencode/dreams/raw")).filter((f) => f.endsWith(".md"))
+    const raw = fs.readdirSync(path.join(dir, ".helm/dreams/raw")).filter((f) => f.endsWith(".md"))
     assert.equal(raw.length, 0)
-    const harvested = fs.readdirSync(path.join(dir, ".opencode/dreams/raw/.harvested"))
+    const harvested = fs.readdirSync(path.join(dir, ".helm/dreams/raw/.harvested"))
     assert.equal(harvested.length, 2)
     assert.ok(harvested.every((f) => f.endsWith(".md")))
   })
@@ -57,7 +57,7 @@ describe("harvestJournals", () => {
     appendResidue(dir, "cap", "ses_x", "peek note")
     const entries = harvestJournals(dir, false)
     assert.equal(entries.length, 1)
-    assert.ok(fs.existsSync(path.join(dir, ".opencode/dreams/raw/cap.ses_x.md")))
+    assert.ok(fs.existsSync(path.join(dir, ".helm/dreams/raw/cap.ses_x.md")))
   })
 
   it("empty raw dir harvests to nothing", () => {
@@ -66,7 +66,7 @@ describe("harvestJournals", () => {
   })
 
   it("legacy <capability>.md filenames attribute with empty session", () => {
-    fs.writeFileSync(path.join(dir, ".opencode/dreams/raw/legacy-cap.md"), "old note\n", "utf8")
+    fs.writeFileSync(path.join(dir, ".helm/dreams/raw/legacy-cap.md"), "old note\n", "utf8")
     const entries = harvestJournals(dir, false)
     assert.equal(entries.length, 1)
     assert.equal(entries[0].capability, "legacy-cap")

@@ -16,12 +16,15 @@ Work items follow HIVE conventions exactly: markdown with `---`-fenced YAML fron
 no database, human-readable, git-friendly.
 
 ```
-.opencode/board/
+.helm/board/
 ├── WI-001.md
 ├── WI-002.md
 ├── WI-002/                  # spec-revision archive (only if the spec was ever revised)
 │   └── a3f91c2e5b70.md      #   a superseded body, named by its own specHash
 └── ...
+
+(state root was `.opencode/` before the 2026-11-27 harbor move; the legacy
+`/workspace/.opencode` symlink → `.helm` covers old-constant readers.)
 ```
 
 **Per-item revision directories (WI-064).** When a spec body is replaced, the body it replaced is
@@ -53,7 +56,7 @@ the stable key** — never infer identity from filename path or column.
 > (`session.get`, `session.todo`) may power only NAVIGATION ("Open" deep link) and EXISTENCE checks —
 > never rendered content.**
 
-**Why:** the board data (`.opencode/board/`) and the opencode sessions (a separate SQLite DB) are
+**Why:** the board data (`.helm/board/`) and the opencode sessions (a separate SQLite DB) are
 different stores. If you move the board to another machine, the sessions do **not** come with it. A
 work item must therefore be **fully self-describing without its session** — you can inspect what the
 work was, its spec, its subtasks, and what it produced, with zero session access. The session is a

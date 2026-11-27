@@ -159,7 +159,7 @@ That's the whole install.
 ## Exposure — read before publishing the port
 
 The viewer has **no authentication**. Anyone who can reach it can read your
-`.opencode/` state (work items, session titles, dream artifacts, HIVEmind
+`.helm/` state (work items, session titles, dream artifacts, HIVEmind
 messages) and `POST /transitions/*` to create, pause, demote and complete work
 items and spawn opencode sessions.
 
@@ -183,14 +183,14 @@ restart to apply.
 
 | Flag | Env | Default | Purpose | Same-container | Split-container |
 |---|---|---|---|---|---|
-| `--root` | `HIVE_BOARD_ROOT` | walk up from cwd to the first dir containing `.opencode/` | workspace root (everything else derives from it) | set explicitly in the fragment (`/workspace`) | **mandatory** |
+| `--root` | `HIVE_BOARD_ROOT` | walk up from cwd to the first dir containing `.helm/` | workspace root (everything else derives from it) | set explicitly in the fragment (`/workspace`) | **mandatory** |
 | `--host` | `HIVE_BOARD_HOST` | `127.0.0.1` (loopback) | bind address | **must set `0.0.0.0`** — the fragment does; the default is deliberately unreachable from outside the container (see *Exposure*) | **must set `0.0.0.0`** |
 | `--port` | `HIVE_BOARD_PORT` | `4400` | HTTP port (validated: integer 0–65535, fails fast otherwise) | default | default |
 | `--db` | `HIVE_BOARD_OPENCODE_DB` | `~/.local/share/opencode/opencode.db` | opencode's SQLite session DB, read **read-only** (session back-fill + existence checks) | default is right (same filesystem) | **mandatory mount** (see below) |
 | `--gui-url` | `HIVE_BOARD_GUI_URL` | `http://studio:3000` | web-GUI base for `?session=` deep links (pure link rendering, never fetched) | set if your GUI isn't at studio:3000 | same |
 | `--opencode-url` | `HIVE_BOARD_OPENCODE_URL` | auto-discovery via `/proc/$OPENCODE_PID/cmdline`, else unset | opencode server for session creation (Start / fresh promote) | **set explicitly** — discovery does NOT work from an entrypoint sibling (see Reference) | **mandatory** |
 | — | `HIVE_BOARD_OPENCODE_PASSWORD`, falls back to `OPENCODE_SERVER_PASSWORD` | unset | HTTP Basic password for the opencode server (username is literally `opencode`). Deliberately env-only — secrets don't belong in argv/`ps` output | present by construction (same env) | **mandatory** |
-| `--board` | `HIVE_BOARD_BOARD_DIR` | `<root>/.opencode/board` | **fixtures/dev mode only.** Pointing this anywhere non-default disables ALL writes (`writesEnabled: false`): the transition module always writes the workspace board, so a fixture view must never mutate | never set in deployment | never set |
+| `--board` | `HIVE_BOARD_BOARD_DIR` | `<root>/.helm/board` | **fixtures/dev mode only.** Pointing this anywhere non-default disables ALL writes (`writesEnabled: false`): the transition module always writes the workspace board, so a fixture view must never mutate | never set in deployment | never set |
 
 ## Future path: the board as its own container (NOT the current setup)
 
@@ -210,7 +210,7 @@ the board is ever split into its own service, three couplings become explicit
       `/proc`-based discovery is impossible across containers.
 - [ ] **`/workspace` volume mounted RW:** the board reads all HIVE state from
       it AND writes work items through the locked storage module
-      (`.opencode/board/` + `.locks/`). Same volume as opencode — the advisory
+      (`.helm/board/` + `.locks/`). Same volume as opencode — the advisory
       lock only coordinates writers on a shared filesystem.
 
 ## Verification honesty

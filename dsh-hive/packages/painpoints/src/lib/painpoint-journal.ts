@@ -9,8 +9,8 @@
  * the whole point of keeping this separate from residue.
  *
  * Layout:
- *   .opencode/painpoints/raw/<sessionID>.md              — active log, one per session
- *   .opencode/painpoints/raw/.harvested/<sid>-<ts>.md    — archived after harvest
+ *   .helm/painpoints/raw/<sessionID>.md              — active log, one per session
+ *   .helm/painpoints/raw/.harvested/<sid>-<ts>.md    — archived after harvest
  *
  * Per-session keying (mirroring dream-journal.ts) prevents concurrent sessions
  * from corrupting each other via interleaved appendFileSync calls. Atomic
@@ -30,7 +30,7 @@ import fs from "fs"
 // ── Paths ─────────────────────────────────────────────────────────────────────
 
 function rawDir(directory: string): string {
-  return path.join(directory, ".opencode/painpoints/raw")
+  return path.join(directory, ".helm/painpoints/raw")
 }
 
 function harvestedDir(directory: string): string {

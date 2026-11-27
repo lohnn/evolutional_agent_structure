@@ -39,7 +39,7 @@ const mkCtx = () => {
 
 // ── fixtures ─────────────────────────────────────────────────────────────────
 const FIX = fs.mkdtempSync(path.join(os.tmpdir(), "b4-tools-"))
-fs.mkdirSync(path.join(FIX, ".opencode/agents"), { recursive: true })
+fs.mkdirSync(path.join(FIX, ".helm/agents"), { recursive: true })
 
 // an un-owned item to bind against, and a tombstoned variant
 const ws = (await import("node:module")).createRequire(FIX + "/")
@@ -377,7 +377,7 @@ test("b4: sessions-read reads evolution's EXACT writer shape", () => {
 
 test("b4: sessions-read tolerates drifted shapes (fail-closed to the empty ledger)", () => {
   const drift = fs.mkdtempSync(path.join(os.tmpdir(), "b4-ledger-"))
-  fs.mkdirSync(path.join(drift, ".opencode/agents"), { recursive: true })
+  fs.mkdirSync(path.join(drift, ".helm/agents"), { recursive: true })
   const writeLedger = (content) => fs.writeFileSync(sessionsPath(drift), content, "utf8")
 
   writeLedger(JSON.stringify({ v: 1, coordinators: { ses_x: { agent: "a", awakenedAt: "t", lastAwakenInput: "" } } }))

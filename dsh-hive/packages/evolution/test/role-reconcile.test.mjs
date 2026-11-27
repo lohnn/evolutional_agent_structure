@@ -52,7 +52,7 @@ class FakeAgentPresets extends Service {
 }
 
 const FIX = fs.mkdtempSync(path.join(os.tmpdir(), "helm-role-reconcile-"))
-fs.mkdirSync(path.join(FIX, ".opencode/agents/capabilities"), { recursive: true })
+fs.mkdirSync(path.join(FIX, ".helm/agents/capabilities"), { recursive: true })
 
 const ctx = new Context()
 const { createRequire } = await import("node:module")
@@ -197,7 +197,7 @@ test("/awaken refuses a HELM role composition instead of flipping it", async () 
   })
   assert.equal(out.kind, "error", "/awaken must refuse on a role session")
   assert.match(String(out.text), /HELM role/, `refusal names the role gate: ${String(out.text)}`)
-  const ledgerPath = path.join(FIX, ".opencode/agents/hive-sessions.json")
+  const ledgerPath = path.join(FIX, ".helm/agents/hive-sessions.json")
   if (fs.existsSync(ledgerPath)) {
     const ledger = JSON.parse(fs.readFileSync(ledgerPath, "utf8"))
     assert.ok(!ledger.coordinators?.[HELM_SESSION], "no awaken ledger entry for the role session")
@@ -206,8 +206,8 @@ test("/awaken refuses a HELM role composition instead of flipping it", async () 
 
 // ── 4. the dispatch-filter listener cannot overlay a stale builtin row ──────
 const BOSUN_SESSION = "ses_helm_bosun_child"
-fs.mkdirSync(path.join(FIX, ".opencode"), { recursive: true })
-fs.writeFileSync(path.join(FIX, ".opencode", "hive-usage.jsonl"), `${JSON.stringify({
+fs.mkdirSync(path.join(FIX, ".helm"), { recursive: true })
+fs.writeFileSync(path.join(FIX, ".helm", "hive-usage.jsonl"), `${JSON.stringify({
   kind: "dispatch-activated",
   childId: BOSUN_SESSION,
   address: "builtin/dreamcatcher",

@@ -274,7 +274,7 @@ Two build facts pinned here because they were DISCOVERED, not assumed:
 
     DISCRIMINATION — one authoritative signal joins the registry:
     `hiveRunningAgents` = running rows whose `id: SessionId` is a member of HIVE's own
-    live-session ledger `<workspace>/.opencode/agents/hive-sessions.json` (the SAME registry the
+    live-session ledger `<workspace>/.helm/agents/hive-sessions.json` (the SAME registry the
     awaken/bind tools stamp — membership is authoritative; every id-keyed member map in the
     document is unioned, `coordinators` today, future sections honored without code change).
     Candidate B (dispatch-label prefixes on registry rows) was EVALUATED and DROPPED: the public
@@ -431,7 +431,7 @@ first visibility. Communicate the early visibility honestly to the user.
 
 Slice 5 (retire the standalone 4400 hive-board viewer + its svcwatch TOML) is **CANCELLED**
 by direct user decision. Two read-only surfaces now coexist deliberately over the ONE locked
-write path (the board store under `/workspace/.opencode/board`): the standalone 4400 viewer
+write path (the board store under `/workspace/.helm/board`): the standalone 4400 viewer
 and the dsh-web tab. The 4400 viewer **remains** for as long as the user works through OLD
 ACTIVE WORK ITEMS in the OLD HARNESS. Revisit trigger: a direct future user decision only —
 never an inference from "the tab exists". The capability method file's operating-protocol line

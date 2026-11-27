@@ -81,7 +81,7 @@ Two deliverables joined by one contract (the work-item schema).
 ```
 ┌────────────────────────────────────────────────────────────┐
 │  hive-board viewer  (plugin pkg: src/board-viewer/)         │
-│  • RENDERS read-only from .opencode/ + item cache          │
+│  • RENDERS read-only from .helm/ + item cache          │
 │  • Renders columns, cards, subtask lanes, dream links      │
 │  • Board-side transitions executed directly via the shared │
 │    transition module (owned by hive-infra — Q6)            │
@@ -89,7 +89,7 @@ Two deliverables joined by one contract (the work-item schema).
                 │  reads files          │ writes via shared module
                 ▼                       ▼  (locked storage, SCHEMA §4a)
 ┌────────────────────────────┐   ┌──────────────────────────────┐
-│  .opencode/ file tree      │   │  hive_board_* plugin tools    │
+│  .helm/ file tree      │   │  hive_board_* plugin tools    │
 │  (HIVE's ground truth)     │◄──│  (in the HIVE plugin repo)    │
 │  board/ dreams/ agents/    │   │  • bind item ↔ current session│
 │  hivemind/ nervous-system  │   │  • auto-register on /awaken   │
@@ -363,7 +363,7 @@ re-run (§5.3c scope note).
 
 ## 6. What the board reads (ground-truth map)
 
-All read-only, all from `<project>/.opencode/`. Reuse the plugin's own parsers where possible —
+All read-only, all from `<project>/.helm/`. Reuse the plugin's own parsers where possible —
 the DRM/artifact YAML is hand-rolled and a generic YAML lib may misparse it (dream SHADOW-005).
 
 | Board concern | Source | Notes |

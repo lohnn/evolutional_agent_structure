@@ -4,7 +4,7 @@
 //      webServer, and the handler serves the JSON payload (this is the throw
 //      surface W-090 describes: cross-package reads only surface in direct
 //      tests).
-// HARD RULE: the live store at /workspace/.opencode/board is NEVER written —
+// HARD RULE: the live store at /workspace/.helm/board is NEVER written —
 // every read here goes against a tmp COPY (same rule as service-harness.mjs).
 import { Context } from "@deepseek-ai/cordis"
 import Board from "@hive/dsh-board"
@@ -31,7 +31,7 @@ const mkCtx = () => {
 
 // Real-store copy: READ-ONLY over a copy of the live board.
 const realCopy = fs.mkdtempSync(path.join(os.tmpdir(), "board-tab-real-"))
-fs.cpSync("/workspace/.opencode/board", path.join(realCopy, ".opencode/board"), { recursive: true })
+fs.cpSync("/workspace/.helm/board", path.join(realCopy, ".helm/board"), { recursive: true })
 
 const ctx = mkCtx()
 ctx.plugin(Board, { directory: realCopy })
@@ -168,9 +168,9 @@ test("the handler stays ok-shaped when the payload builder throws", async () => 
   // A missing directory makes items() fall back to [] (store tolerates) — so
   // to force a throw through the handler we point the service at an UNREADABLE
   // path: a regular FILE, not a directory.
-  const blocker = path.join(realCopy, ".opencode/board-file-not-dir")
+  const blocker = path.join(realCopy, ".helm/board-file-not-dir")
   fs.writeFileSync(blocker, "not a directory")
-  routeCtx.plugin(Board, { directory: path.join(realCopy, ".opencode", "board-file-not-dir") })
+  routeCtx.plugin(Board, { directory: path.join(realCopy, ".helm", "board-file-not-dir") })
   await new Promise((r) => setTimeout(r, 100))
   const route = routes.find((r) => r.path === "/api/hive-board/index")
   assert.ok(route, "route registers even against a broken store path")
@@ -311,7 +311,7 @@ test("tabItem route — malformed ids refused at the handler, upstream-safe", as
 test("tabItem — spec body budget: truncated flag + full byte count, boards file untouched", async () => {
   // fixture board: one real WI copied shape, body padded far past the budget
   const fixtureBoard = fs.mkdtempSync(path.join(os.tmpdir(), "board-tab-item-"))
-  const dir = path.join(fixtureBoard, ".opencode", "board")
+  const dir = path.join(fixtureBoard, ".helm", "board")
   fs.mkdirSync(dir, { recursive: true })
   const longBody = "## Long spec\n\n" + ("lorem ipsum dolor sit amet. ".repeat(900)) // ~27k chars
   fs.writeFileSync(
@@ -320,7 +320,7 @@ test("tabItem — spec body budget: truncated flag + full byte count, boards fil
   )
   const ctx2 = mkCtx()
   // NOTE: the service's `directory` option is the WORKSPACE ROOT — it reads
-  // <root>/.opencode/board (the realCopy tests pass the tmp root the same way).
+  // <root>/.helm/board (the realCopy tests pass the tmp root the same way).
   ctx2.plugin(Board, { directory: fixtureBoard })
   await new Promise((r) => setTimeout(r, 100))
   const payload = ctx2.board.tabItem("WI-9001")
@@ -339,16 +339,16 @@ test("tabItem — spec body budget: truncated flag + full byte count, boards fil
 // 'idle' | 'running', @deepseek-ai/dsh-agent); the registry is LIVE-only, so
 // dissolved sessions cannot staleness the signal by construction. 3E splits
 // running rows by membership in HIVE's own ledger
-// (<root>/.opencode/agents/hive-sessions.json — id-keyed member maps, the
+// (<root>/.helm/agents/hive-sessions.json — id-keyed member maps, the
 // registry the awaken/bind tools stamp).
 
 const bootBoardWithAgents = async (rows, { ledgerIds, ledgerAbsent } = {}) => {
   // own tmp root per boot so ledger writes can never leak between tests (the
   // realCopy root stays shared and read-only for the pre-3D assertions)
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "board-tab-act-"))
-  fs.cpSync("/workspace/.opencode/board", path.join(root, ".opencode/board"), { recursive: true })
+  fs.cpSync("/workspace/.helm/board", path.join(root, ".helm/board"), { recursive: true })
   if (ledgerIds) {
-    const agentsDir = path.join(root, ".opencode", "agents")
+    const agentsDir = path.join(root, ".helm", "agents")
     fs.mkdirSync(agentsDir, { recursive: true })
     fs.writeFileSync(
       path.join(agentsDir, "hive-sessions.json"),

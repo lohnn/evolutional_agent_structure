@@ -56,7 +56,7 @@ Protocol, Boundaries — the method IS the capability.
 Call the summoned `{{ summon_name }}` tool ONCE with the approved
 capability list (name, description, optional model_tier, persona sections).
 The tool manifests each preset and reports line by line. Never hand-edit
-files under .opencode/agents/ — the tool performs every mutation. If the
+files under .helm/agents/ — the tool performs every mutation. If the
 user declines or picks a subset, spawn exactly that and let the rest wait
 for /spawn.
 
