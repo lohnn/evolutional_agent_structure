@@ -1,26 +1,40 @@
 # Canonical Workspace Structure
 
 The canonical folder-structure contract for a HELM workspace: the reproducible
-folder layout that surrounds the plugin, so any HELM setup — on any machine — has
+folder layout that surrounds the state root, so any HELM setup — on any machine — has
 the same, predictable shape.
 
+> **OpenCode retirement (2026-11-27):** the OpenCode plugin that bootstrapped and
+> owned the `.helm/` runtime was deleted from this repo — `src/index.ts` +
+> `bootstrapProject()`, `commands/`, `rules/`, `agents/`, `templates/`, and
+> `/workspace/opencode.json` (helm-rebrand design §5.5, DSH-only move). Composition
+> happens via the DSH profile; the `.helm/` runtime trees are owned by the DSH
+> plugins in `dsh-hive/packages/*` (board, dream-archive, hivemind, painpoints,
+> evolution). Sections describing the plugin's bootstrap machinery — §4, §5,
+> Appendix A, and the "gift is the plugin" framing — are kept as **historical
+> fact-records of the deleted code**. Live and still-true: the folder contract
+> (§2/§3, minus the retired design-shell rows), the per-project description
+> convention (§6), and the no-project-table rule (§8). The `.opencode → .helm`
+> compat symlink stays until one cycle passes.
+
 **What "canonical" means here:** the *folder contract* — the tier layout
-(`projects/`, `reference/`, `scratch/`) plus the tracked design shell — reproduced
-by **convention + this document + the plugin's bootstrap**. It is a layout
-convention, **independent of whether the workspace itself is version-controlled**.
-The workspace-root git repo (if any) is incidental and this-machine-only; it is
-**not** the distributable artifact (see "The gift is the plugin" below).
+(`projects/`, `reference/`, `scratch/`) — reproduced
+by **convention + this document** (the old-harness bootstrap that also generated it was
+retired 2026-11-27; the DSH plugins create the `.helm/` runtime trees they own). It is a
+layout convention, **independent of whether the workspace itself is version-controlled**.
+The workspace-root git repo (if any) is incidental and this-machine-only; this workspace
+does not keep one.
 
-### The gift is the plugin, not the workspace repo
+### The gift is the kit, not the workspace repo
 
-When HELM is given to another machine, **the gift artifact is the PUBLISHED
-PLUGIN** (a global OpenCode plugin package) — *not* this workspace's git repo. The
-workspace-root git here is incidental scaffolding for this one machine; it is not
-meant to be cloned, shared, or used as a clean template. So this document does
-**not** prescribe curating the workspace repo into a pristine template (e.g. it
-does not ask you to strip it down to only `_template.md`). What travels is the
-plugin; what the plugin needs around it is this *folder contract*, which any
-machine reproduces by convention + bootstrap regardless of its git state.
+**Historical framing (pre-2026-11-27, updated):** when HELM is given to another
+machine, the gift artifact is the **dsh-hive install kit** (`dsh-hive-dist/` —
+committed version-pinned tarballs wired by `dsh-hive-update.sh` + `.pnpmfile.cjs`,
+see `docs/DSH-UPDATE-RUNBOOK.md`) — *not* a workspace git repo. Before the DSH
+move this role belonged to a published OpenCode plugin package; that distribution
+channel is retired with the plugin. What travels is the kit; what it needs around
+it is this *folder contract* (the kit machines run DSH and materialize `.helm/` from
+the DSH plugins, not from a bootstrap).
 
 ---
 
@@ -39,26 +53,24 @@ machine reproduces by convention + bootstrap regardless of its git state.
 
 The boundary is hard and deliberate:
 
-- **The plugin owns everything *inside* `.helm/`.** `bootstrapProject()` (in
-  `src/index.ts`) runs on every session start and idempotently generates the
-  entire `.helm/` runtime tree — dreams, hivemind, painpoints, board,
-  capabilities/dissolved dirs, the `_template.md` seed, and the skills symlink.
-  You do **not** author those by hand, and this document does **not** specify
-  them beyond what bootstrap guarantees (see §5).
+- **The DSH plugins own everything *inside* `.helm/`.** Since the 2026-11-27 retirement
+  there is no bootstrap plugin: each runtime tree is created and owned by its DSH package
+  (`dsh-hive/packages/*` — board, dream-archive, hivemind, painpoints, evolution) from its
+  `directory: /workspace` cordis config. You do **not** author those by hand, and this
+  document does **not** specify them beyond what the packages guarantee.
 
 - **This document owns the *shell*** — the folder tiers around `.helm/` and
-  the ignore discipline that keeps work + runtime out of any workspace repo. The
-  design-shell files must pre-exist (they are the authored seed); the tier folders
-  are (re)created by bootstrap; the `.helm/` internals appear on first load.
+  the ignore discipline that keeps work + runtime out of any workspace repo.
 
-If you are looking for what lives *inside* `.helm/`, read `bootstrapProject()`
-— that is the source of truth, not this file.
+If you are looking for what lives *inside* `.helm/`, read the owning DSH package
+(`dsh-hive/packages/<board|dream-archive|hivemind|painpoints|evolution>`) — that is the
+source of truth, not this file.
 
 ---
 
 ## 2. The Folder Contract
 
-Four tiers plus the tracked design shell:
+Four tiers plus the (partly retired) design shell:
 
 - **`projects/`** — things actively worked on. Git-ignored by any workspace repo;
   each project is its **own** independent git repo (or a plain dir).
@@ -68,26 +80,28 @@ Four tiers plus the tracked design shell:
     source to read, not to modify).
   - **`reference/material/`** — non-code reference material (books, exports, notes).
 - **`scratch/`** — the user's own throwaway / scratch work. Git-ignored.
-- **the tracked design shell** — `opencode.json`, `.gitignore`, `AGENTS.md`,
-  `.helm/index.ts`, `.helm/rules/` — the authored seed.
+- **the design shell** — *retired with the plugin 2026-11-27*: `opencode.json` is
+  **deleted from this workspace**, and the `.helm/index.ts` boot plugin +
+  `.helm/rules/` never existed on this machine (gift-machine design only — see
+  the historical table below); `AGENTS.md` and `.gitignore` remain.
 
 ```
 <workspace-root>/
 │
-├── opencode.json                 ← TRACKED  (design) — plugin registration + permissions
-├── .gitignore                    ← TRACKED  (design) — "track design, ignore work+runtime"
-├── AGENTS.md                     ← TRACKED  (design) — workspace-wide agent instructions
+├── opencode.json                 ← RETIRED 2026-11-27 — plugin registration + permissions; deleted from this workspace
+├── .gitignore                    ← workspace-level — "track design, ignore work+runtime" discipline
+├── AGENTS.md                     ← workspace-wide agent instructions
 │
-├── .helm/                    ← MIXED — ignore the dir, re-include only design files
-│   ├── index.ts                  ← TRACKED  (design) — the BOOT plugin (see §4/§A3)
+├── .helm/                    ← MIXED — ignore the dir, re-include only design files (gift-machine git design; this workspace keeps no repo)
+│   ├── index.ts                  ← RETIRED design — the BOOT plugin (never present on this machine; see §A3)
 │   ├── rules/
-│   │   └── no-update.md          ← TRACKED  (design) — reserve /update for the user
+│   │   └── no-update.md          ← RETIRED design — reserve /update for the user (nothing runs /update anymore)
 │   ├── agents/
-│   │   ├── capabilities/         ← TRACKED  (design) — capability prompt defs
-│   │   │   └── _template.md      ← TRACKED  — the capability seed
-│   │   └── dissolved/            ← TRACKED  (design) — retired capability prompts
+│   │   ├── capabilities/         ← MUTABLE state — capability prompt defs (owned by the evolution package)
+│   │   │   └── _template.md      ← the capability seed (lives in state since the 2026-11-27 retirement of repo templates/)
+│   │   └── dissolved/            ← retired capability prompts
 │   │   └── …                     ← everything else under agents/ is IGNORED (runtime)
-│   ├── skills/                   ← IGNORED  — runtime symlink dir (dreamtime → plugin repo)
+│   ├── skills/                   ← IGNORED  — runtime symlink dir (dreamtime → skills/dreamtime in this repo)
 │   ├── dreams/                   ← IGNORED  (runtime) — artifacts, raw journals, DRM state
 │   ├── hivemind/                 ← IGNORED  (runtime) — live message inboxes
 │   ├── painpoints/               ← IGNORED  (runtime) — harness/workflow friction logs
@@ -111,14 +125,14 @@ Four tiers plus the tracked design shell:
 
 | Entry | Status | Why |
 |-------|--------|-----|
-| `opencode.json` | **Tracked (design)** | Registers the plugin + permission policy — the workspace's wiring |
-| `.gitignore` | **Tracked (design)** | The enforcing mechanism of the whole contract (§3) |
-| `AGENTS.md` | **Tracked (design)** | Workspace-wide agent instructions (tooling/conventions — no project table; see §7) |
-| `.helm/index.ts` | **Tracked (design)** | The **boot** plugin (restart log + `/update`) — separate from HELM (§4) |
-| `.helm/rules/no-update.md` | **Tracked (design)** | Safety rule reserving `/update` for the user |
-| `.helm/agents/capabilities/` | **Tracked (design)** | Capability prompt definitions incl. `_template.md` |
-| `.helm/agents/dissolved/` | **Tracked (design)** | Retired capability prompts |
-| everything else in `.helm/` | **Ignored (runtime)** | Generated by `bootstrapProject()` / live churn |
+| `opencode.json` | **RETIRED 2026-11-27** | Registered the OpenCode plugin; deleted from this workspace with the engine (design §5.5 step 4). DSH composition is via the profile, not this file |
+| `.gitignore` | kept | The enforcing mechanism of the folder contract (§3) — applies wherever a workspace repo exists |
+| `AGENTS.md` | kept | Workspace-wide agent instructions (tooling/conventions — no project table; see §8) |
+| `.helm/index.ts` | **RETIRED design** | The old **boot** plugin (restart log + `/update`) — nuclear design for gift machines; never present on this machine, OpenCode commands no longer exist |
+| `.helm/rules/no-update.md` | **RETIRED design** | Safety rule reserving `/update` for the user — same retirement |
+| `.helm/agents/capabilities/` | **State (owned by evolution pkg)** | Capability prompt definitions incl. `_template.md` — live in `.helm/`, owned by `dsh-hive/packages/evolution` |
+| `.helm/agents/dissolved/` | **State (owned by evolution pkg)** | Retired capability prompts |
+| everything else in `.helm/` | **Ignored (runtime)** | Owned/created by the DSH packages (no bootstrap since 2026-11-27) |
 | `projects/` | **Ignored (work)** | Each project is its own repo; not part of the setup |
 | `reference/repos/` | **Ignored (reference)** | Clones of other codebases you read but won't modify |
 | `reference/material/` | **Ignored (reference)** | Non-code reference material |
@@ -200,14 +214,19 @@ concrete:
    `agents/hive-state.json` stay ignored.
 
 **`skills/` is intentionally NOT tracked here.** It is a runtime symlink dir
-(`dreamtime → <plugin-repo>/skills/dreamtime`) whose *content* is versioned in the
-plugin repo, not in the workspace setup repo. It's covered by `/.helm/*` and
-also by a nested `.helm/.gitignore`. It is wired in at runtime by
-`bootstrapProject()` (see §A1, §5).
+(`dreamtime → <repo>/skills/dreamtime` — the target is `skills/dreamtime/` in THIS repo) whose
+*content* is versioned in this repo, not in a workspace setup repo. It's covered by `/.helm/*`
+and also by a nested `.helm/.gitignore`. It **was** wired in at runtime by the plugin's
+`bootstrapProject()` (see §A1, §5) — retired 2026-11-27; the existing symlink on this machine
+predates that and still resolves into this repo (`skills/dreamtime/` is kept).
 
 ---
 
 ## 4. Two Provisioning Modes
+
+> **RETIRED 2026-11-27.** This section described how the OpenCode plugin resolved its assets in
+> vendored vs published installs — `opencode.json`, `PACKAGE_ROOT`, published-plugin npm
+> distribution. All gone with the engine. Kept verbatim as a fact-record.
 
 The plugin resolves all of its *own* assets from its own module location
 (`import.meta.url`), not from a fixed workspace-relative path (see §A2). This is
@@ -242,6 +261,12 @@ The only residual caveats are environmental, not layout-related:
 ---
 
 ## 5. The Bootstrap Contract
+
+> **RETIRED 2026-11-27.** `bootstrapProject()` lived in the deleted `src/index.ts`. The trees it
+> used to create are now created/owned by the DSH packages themselves (board, dream-archive,
+> hivemind, painpoints, evolution — each from its `directory: /workspace` cordis config); the
+> skills symlink is the one survivor on this machine (kept, see §3). Kept verbatim as a
+> fact-record of the deleted mechanism.
 
 `bootstrapProject(directory)` runs on **every** session start (and on
 `hive-setup`). It is idempotent — safe to run repeatedly. It **generates
@@ -364,6 +389,9 @@ is the register.
 ---
 
 ## Appendix A — Part A Investigation Findings (fact-per-code)
+
+> **RETIRED 2026-11-27** — describes code (`src/index.ts`, `src/hooks.ts`) that no longer
+> exists. Kept verbatim as the fact-record of the deleted mechanism; do not cite as current.
 
 Grounded in `src/index.ts` and `src/hooks.ts` as they exist at the time of writing.
 Behavior stated is what the code does, not what is assumed.

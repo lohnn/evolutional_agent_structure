@@ -1,45 +1,11 @@
 {
   "name": "evolutional-agent-structure",
   "version": "0.4.62",
-  "description": "HIVE — Evolutional agent structure for OpenCode. Collective intelligence that spawns, merges, splits, mutates, and dissolves capabilities as needed.",
-  "main": "src/index.ts",
-  "type": "module",
-  "bin": {
-    "hive-board": "./src/board-viewer/server.ts"
-  },
-  "scripts": {
-    "typecheck": "tsc --noEmit",
-    "test": "bun test",
-    "board": "bun run src/board-viewer/server.ts"
-  },
-  "exports": {
-    ".": "./src/index.ts",
-    "./tui": "./src/tui.ts",
-    "./board-viewer": "./src/board-viewer/index.ts",
-    "./lib/dream-state": "./src/lib/dream-state.ts",
-    "./lib/dream-artifacts": "./src/lib/dream-artifacts.ts",
-    "./lib/frontmatter": "./src/lib/frontmatter.ts",
-    "./lib/hivemind": "./src/lib/hivemind.ts",
-    "./lib/board-store": "./src/lib/board-store.ts",
-    "./lib/board-transitions": "./src/lib/board-transitions.ts",
-    "./lib/board-reconcile": "./src/lib/board-reconcile.ts",
-    "./lib/board-reconcile-db": "./src/lib/board-reconcile-db.ts"
-  },
+  "description": "HELM — container for the dsh-hive DSH-plugin pnpm monorepo (dsh-hive/), its install kit (dsh-hive-dist/) and the plugin docs. The OpenCode plugin surface (src/, commands/, rules/, agents/, test/, fixtures/, the absorbed board viewer, svcwatch, oc-browser-bridge) was retired 2026-11-27 with the DSH-only move; the live DSH plugins are dsh-hive/packages/*, composed via the DSH profile, and the dsh-package-fit recommendation is the architecture of record.",
+  "private": true,
   "repository": {
     "type": "git",
     "url": "https://github.com/lohnn/evolutional_agent_structure.git"
   },
-  "keywords": ["opencode", "plugin", "agents", "hive"],
-  "license": "MIT",
-  "dependencies": {
-    "@opencode-ai/plugin": "^1.15.7",
-    "@opencode-ai/sdk": "^1.15.7"
-  },
-  "devDependencies": {
-    "@happy-dom/global-registrator": "^20.11.1",
-    "@types/bun": "^1.3.14",
-    "@types/node": "^25.9.1",
-    "happy-dom": "^20.11.1",
-    "typescript": "^6.0.3"
-  }
+  "license": "MIT"
 }

@@ -1,5 +1,15 @@
 # svcwatch — declarative process supervision
 
+> **RETIRED FROM REPO 2026-11-27.** The svcwatch source (`src/svcwatch/`) was deleted with the
+> OpenCode plugin surface (helm-rebrand-design §5.5, DSH-only move). The RUNNING watcher in this
+> container is entrypoint-owned and keeps supervising `dsh-web`, `dsh-relay`, `dsh-diag`,
+> `intellij-mcp-proxy`, `searxng` from memory. A preserved copy lives at
+> `/workspace/scratch/naming/svcwatch-preserved/` (scratch survives restarts); the durable home
+> is the entrypoint edit at the next maintenance-window container recreation. Until then a fresh
+> container recreation will NOT auto-start svcwatch. Everything below is still the live TOML
+> schema contract; the services dir is `.helm/services/` (`.opencode/services` resolves via the
+> compat symlink).
+
 > **What this is:** a generic, stdlib-only Python 3 process supervisor for the
 > dev container. Adding a long-lived service (a relay, a bot, a watcher) =
 > dropping ONE TOML file into `/workspace/.helm/services/`. No entrypoint or
