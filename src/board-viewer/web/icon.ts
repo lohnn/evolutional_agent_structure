@@ -364,7 +364,7 @@ export function faviconHref(icon: IconState): string {
 }
 
 /** Base document title, with no state prefix. */
-export const BASE_TITLE = "hive-board — mission control"
+export const BASE_TITLE = "HELM Chart — mission control"
 
 /**
  * The COUNT channel. `(2) hive-board — mission control`.

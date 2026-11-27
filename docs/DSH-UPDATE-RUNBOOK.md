@@ -1,4 +1,4 @@
-# DSH host + HIVE cohort update runbook
+# DSH host + HELM cohort update runbook
 
 Git-public on purpose (kit machines read this file). It is the authoritative
 sequence for moving the whole stack — harness host pin, cohort pins, and the

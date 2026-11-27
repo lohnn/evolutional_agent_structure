@@ -1,11 +1,11 @@
 ---
-description: The HIVE plugin itself (evolutional-agent-structure) — agent prompts, commands, custom tools, the dream/board/HIVEmind layers, bootstrap, AND the hive-board viewer. This is the reusable engine, distributed as a single published opencode plugin.
+description: The HELM plugin itself (evolutional-agent-structure) — agent prompts, commands, custom tools, the dream/board/comms layers, bootstrap, AND the board viewer. This is the reusable engine, distributed as a single published opencode plugin.
 ---
 # evolutional_agent_structure
 
-The HIVE plugin — the collective-intelligence coordinator for opencode. See `docs/WORKSPACE-STRUCTURE.md` for the canonical workspace folder contract this plugin expects and bootstraps.
+The HELM plugin — the collective-intelligence coordinator for opencode. See `docs/WORKSPACE-STRUCTURE.md` for the canonical workspace folder contract this plugin expects and bootstraps.
 
-**This package ships HIVE *and* the hive-board viewer as one dependency.** The viewer was absorbed
+**This package ships HELM *and* the board viewer as one dependency.** The viewer was absorbed
 from `projects/hive-board/` on 2026-08-03; that directory no longer holds the source.
 
 ## Layout
@@ -13,7 +13,7 @@ from `projects/hive-board/` on 2026-08-03; that directory no longer holds the so
 | Path | What | Owner |
 |---|---|---|
 | `src/index.ts`, `src/hooks.ts`, `src/tools.ts` | plugin runtime opencode loads every session | hive-infra |
-| `src/lib/` | shared modules: locked board store, transition module, dream/YAML parsers, HIVEmind | hive-infra |
+| `src/lib/` | shared modules: locked board store, transition module, dream/YAML parsers, comms | hive-infra |
 | `src/board-viewer/` | the hive-board viewer app | board-viewer |
 | `src/svcwatch/` | svcwatch — declarative process supervision for the dev container (PID 1 subtree) | hive-infra |
 | `src/oc-browser-bridge/` | headless OpenChamber browser pane (connects `openchamber_web` tools to container Chromium via svcwatch) | hive-infra |

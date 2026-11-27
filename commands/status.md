@@ -2,6 +2,8 @@
 description: View the current state of the capability ecosystem
 ---
 
+> **Naming note (2026-11-25):** HIVE → HELM rebrand ratified. This file's prose uses legacy terms; see scratch/naming/helm-rebrand-design.md §2.0 for the canonical mapping. Tool names and identifiers are unchanged until P2.
+
 # STATUS — Ecosystem Overview
 
 Observe the current state of all capabilities.

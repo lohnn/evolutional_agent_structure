@@ -1,4 +1,4 @@
-# Token Economy — making awakened HIVE sessions affordable
+# Token Economy — making awakened HELM sessions affordable
 
 Status: **in implementation** (branch `hive-token-economy`, off fresh `main` @ 9924968).
 Origin: user directive 2026-12 — "/awaken uses way too many tokens for not too
@@ -69,13 +69,13 @@ Facts checked against the live store packages, not assumed:
   standalone `tool-subagent-list-agents` plugin identity was folded into
   `tool-subagent-control` — the `list_agents` tool itself is unchanged, now
   registered by the control plugin.
-  Consequence: `list_agents`/`send_message` are **team-roster-scoped**; HIVE
+  Consequence: `list_agents`/`send_message` are **team-roster-scoped**; HELM
   children spawned via `ctx.subagents.startContinuable` are likely NOT
   addressable through them in this profile (the `hive_dispatch` echo text
   claiming otherwise predates the team profile — VERIFY, D5).
 - **F3 — `ctx.subagents.startContinuable` supports everything teams lack:**
   `persona`, `toolFilter`, `agentOptions` (provider/model route merge over
-  the parent's). HIVE's dispatch seam already uses all three.
+  the parent's). HELM's dispatch seam already uses all three.
 - **F4 — The underlying spawn machinery already accepts agent options**;
   the team service simply doesn't pass them through. An upstream patch adding
   optional `agentOptions` to `SpawnTeammateRequest` is small and well-scoped.
@@ -244,11 +244,11 @@ is NOT viable at 0.2.0-rc.2 without losing D1/D2 (model routing) and the
 read-only dreamcatcher. Phased instead:
 
 - **Phase A (this branch):** keep spawning via `startContinuable`. VERIFY
-  the F2 question live — can a HIVE child be reached by `send_message`
+  the F2 question live — can a HELM child be reached by `send_message`
   under the team profile? Correct the `hive_dispatch` echo text and the
   doctrine's steering instructions to the verified truth.
 - **Phase B (this branch):** adopt the teams *coordination patterns* inside
-  HIVE doctrine where they're free: contract-ownership as explicit
+  HELM doctrine where they're free: contract-ownership as explicit
   dependencies, peer-message-style reporting, shared task substrate via the
   board (hive_board items already carry ownership; doctrine teaches
   dependency naming in dispatch prompts).

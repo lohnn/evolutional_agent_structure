@@ -29,16 +29,16 @@ lifecycle, dreams, and messaging. hive-board introduces exactly one new concept 
 
 ---
 
-## 2. The governing constraint: item ⇔ HIVE coordinator session ⇔ dream
+## 2. The governing constraint: item ⇔ Helmsman session ⇔ dream
 
 This single rule, from the user, determines the whole architecture:
 
-> **A work item, once it enters `In Progress`, IS one full HIVE coordinator session** — the
+> **A work item, once it enters `In Progress`, IS one full Helmsman session** — the
 > top-level chat where you talk to HIVE. Not a subagent. Subagent/capability dispatches are just
 > *activity within* that session while the item is in progress. `Done` is reached when that
 > session's dream (DRM) completes.
 
-The board is therefore, first and foremost, **a semantic overlay on your HIVE coordinator
+The board is therefore, first and foremost, **a semantic overlay on your Helmsman
 sessions** — the thing your raw opencode session list can't tell you:
 
 - which sessions are **actively being worked** (or paused-but-intended-to-resume) → **In Progress**
@@ -50,7 +50,7 @@ sessions** — the thing your raw opencode session list can't tell you:
 
 ### Auto-registration (a hard requirement)
 
-Any HIVE coordinator session must appear on the board **automatically**, even if it was never
+Any Helmsman session must appear on the board **automatically**, even if it was never
 created as a work item first. Concretely: *if you open a fresh chat and run `/awaken`, that session
 appears in the In-Progress column* — the board back-fills a work item for it. Work items thus have
 **two birth paths** (see §5.2a):
@@ -63,7 +63,7 @@ appears in the In-Progress column* — the board back-fills a work item for it. 
 |---|---|---|---|
 | **Backlog** | no | any session (proposal-journal) | a plain idea file, no session, no dream |
 | **Todo** | no | any session (proposal-journal) | ready-to-start idea, still no session |
-| **In Progress** | **yes — one HIVE coordinator session owns it** | *only* the owning session (canonical) | an awakened top-level session (`parentID` absent); `owner_session` + `group_id` recorded |
+| **In Progress** | **yes — one Helmsman session owns it** | *only* the owning session (canonical) | an awakened top-level session (`parentID` absent); `owner_session` + `group_id` recorded |
 | **Analysis** | (phase inside In Progress) | owning session | the owning session's early phase |
 | **Done** | frozen (session may be archived) | derived transition only | the owning session's **DRM reached `COMPLETE`** |
 
@@ -210,7 +210,7 @@ Backlog is intent ("we will start this soon") and completeness of spec — not a
 ### 5.2a Two ways a work item is born
 1. **Idea-first (promotion):** an item exists in Backlog/Todo, then gets a coordinator session and
    moves to In Progress (§5.3).
-2. **Session-first (auto-registration):** a HIVE coordinator session is awakened directly (you open
+2. **Session-first (auto-registration):** a Helmsman session is awakened directly (you open
    a chat, run `/awaken`); the plugin auto-creates a work item for it, already in In Progress, owned
    by that session. This satisfies the hard requirement that *every* HIVE session shows up on the
    board whether or not it started as a card.
@@ -219,7 +219,7 @@ Both paths converge on the same end state: `status: in_progress`, `owner_session
 coordinator session's id.
 
 ### 5.3 In Progress  ← the pivotal state: item ↔ coordinator session
-An item is In Progress **iff** a HIVE coordinator session owns it. There are **three start paths**
+An item is In Progress **iff** a Helmsman session owns it. There are **three start paths**
 (all valid; the user wants all three available):
 
 - **(a) Bind current session.** From inside a HIVE session, `hive_board_bind(WI-007)` stamps
@@ -524,7 +524,7 @@ Phased so each stage is independently useful (dream I-051: build in phases, real
 
 - **Phase 0 — Contract.** Ratify `SCHEMA.md` (work-item fields, column↔status map, ID scheme). One
   canon file up front prevents multi-session drift (dreams I-065, I-051).
-- **Phase 1 — Read-only viewer.** Render existing HIVE state (capabilities+energy, dreams, active
+- **Phase 1 — Read-only viewer.** Render existing HELM state (capabilities+energy, dreams, active
   dream, message flow) with *no* work items yet. Immediately useful as the "mission control" HIVE
   lacks, and validates the parsers.
 - **Phase 1.5 — Session back-fill mirror (high value, low cost).** Render existing HIVE **coordinator

@@ -1,4 +1,4 @@
-# HIVE 🛸
+# HELM 🛸
 
 > Alien Intelligence, not Artificial Intelligence.
 
@@ -78,7 +78,7 @@ A capability is a crystallized competence. It exists when needed, dissolves when
 
 | Command | Purpose |
 |---------|---------|
-| `/awaken` | Initialize HIVE for a project — detect and spawn initial capabilities |
+| `/awaken` | Initialize HELM for a project — detect and spawn initial capabilities |
 | `/spawn` | Manifest a new capability |
 | `/status` | View active capabilities and their energy |
 | `/evolve` | Trigger self-analysis and evolution |
@@ -93,7 +93,7 @@ A capability is a crystallized competence. It exists when needed, dissolves when
 │   └── dissolved/               # Archived capabilities (returned to void)
 ```
 
-The HIVE coordinator agent and commands are provided by the evolutional-agent-structure plugin.
+The Helmsman agent and commands are provided by the evolutional-agent-structure plugin.
 
 ## How It Works
 
@@ -171,7 +171,7 @@ When a task arrives:
 2. **Recall relevant dreams** — delegate to the `dreamcatcher` agent in Recall mode: "The task is: [describe task]. The target capability domain is: [domain]. Run in Recall mode and return all relevant artifacts." This is NOT optional. Dreams contain hard-won insights, warnings, and patterns from prior sessions that prevent repeated mistakes and inform better work.
 3. If a matching capability exists — **dispatch it** using the appropriate method (see Dispatch Modes below). Include relevant dream artifacts in the prompt as context.
 4. If none exists — propose `/spawn` to the user, explaining what capability is needed
-5. Only do work directly if it's trivial coordination (answering questions, routing, minor edits to HIVE config)
+5. Only do work directly if it's trivial coordination (answering questions, routing, minor edits to HELM config)
 
 ### Dispatch Modes
 
@@ -207,15 +207,15 @@ In practice, blocking is appropriate almost exclusively for **fast read-only loo
 2. The task launches in the background — you are free to continue
 3. The capability runs independently (its prompt is automatically enriched with roster and pending messages by the plugin)
 4. When it finishes, you are auto-notified with the result and any routing information
-5. You read any HIVEmind messages, enrich context, and dispatch further as needed
+5. You read any comms messages, enrich context, and dispatch further as needed
 
 **Routing notifications:**
-When a background capability task completes, the plugin appends routing information to the task output showing any pending HIVEmind messages that need attention. Act on these: enrich context, dispatch the recipient, or propose a spawn.
+When a background capability task completes, the plugin appends routing information to the task output showing any pending comms messages that need attention. Act on these: enrich context, dispatch the recipient, or propose a spawn.
 
 **Prompt enrichment is automatic:**
 When you dispatch to a capability via the `Task` tool, the plugin automatically injects:
 - The full capability roster (so the capability knows who else exists)
-- Pending HIVEmind messages for that capability
+- Pending comms messages for that capability
 - Broadcast messages
 
 You do NOT need to manually include these in your prompt. Just provide the task-specific instructions and any dream recall artifacts.
@@ -230,7 +230,7 @@ The roster injection tells each capability who exists. It does not prime them to
 
 **Eventual consistency**: two capabilities dispatched simultaneously hit a session-registration race — a peer's session may not exist yet when the first signal fires. Signals queue to the peer's inbox and deliver on the next tool turn. Capabilities should not block waiting for an instant reply; that expectation belongs in their dispatch prompts.
 
-You remain the **synapse** (see HIVEmind Message Protocol below): when a signal carries a request you must fulfill, enrich it before routing. But assigning ownership in the dispatch prompt is what makes that loop fire in the first place.
+You remain the **synapse** (see Comms Message Protocol below): when a signal carries a request you must fulfill, enrich it before routing. But assigning ownership in the dispatch prompt is what makes that loop fire in the first place.
 
 ### Dream Recall Protocol
 
@@ -252,7 +252,7 @@ You do not route residue. It is written directly by the capability and persists 
 
 Capabilities **and you** record **harness/workflow friction** mid-task via the `hive_note_painpoint` tool (a stricter sibling of residue), which appends to a separate per-session log under `.opencode/painpoints/raw/`. You are a contributor here, not just the harvester — coordinator friction (locating projects, stale git state, phantom conflicts) is some of the richest, so log your own the moment the tooling/process gets in your way. The distinction: residue is a durable *learning about the work*; a pain point is *the harness itself getting in the way* (the tooling/process was the obstacle, not the work being wrong). These are captured problem-and-context only — no fix — and at dream time you harvest them via `hive_painpoints_harvest` as harness-fix candidates, kept distinct from dream feedstock.
 
-### HIVEmind Message Protocol
+### Comms Message Protocol
 
 Capabilities communicate by leaving structured JSON messages in `.opencode/hivemind/inbox/`. The coordinator is a **synapse** — it enriches messages before routing, not a dumb relay that passes them unchanged.
 
@@ -260,7 +260,7 @@ Capabilities communicate by leaving structured JSON messages in `.opencode/hivem
 
 The plugin **automatically** handles context injection when you dispatch via the `Task` tool:
 - **Capability roster** — injected into the capability's system prompt (via `system.transform`)
-- **Pending HIVEmind messages** — injected into the capability's prompt on first dispatch (via `tool.execute.before`)
+- **Pending comms messages** — injected into the capability's prompt on first dispatch (via `tool.execute.before`)
 - **Broadcast messages** — included alongside pending messages
 
 You do NOT need to manually build or inject roster/messages. Just provide task-specific instructions and dream recall artifacts.

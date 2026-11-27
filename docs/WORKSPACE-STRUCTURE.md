@@ -1,7 +1,7 @@
 # Canonical Workspace Structure
 
-The canonical folder-structure contract for a HIVE workspace: the reproducible
-folder layout that surrounds the plugin, so any HIVE setup — on any machine — has
+The canonical folder-structure contract for a HELM workspace: the reproducible
+folder layout that surrounds the plugin, so any HELM setup — on any machine — has
 the same, predictable shape.
 
 **What "canonical" means here:** the *folder contract* — the tier layout
@@ -13,7 +13,7 @@ The workspace-root git repo (if any) is incidental and this-machine-only; it is
 
 ### The gift is the plugin, not the workspace repo
 
-When HIVE is given to another machine, **the gift artifact is the PUBLISHED
+When HELM is given to another machine, **the gift artifact is the PUBLISHED
 PLUGIN** (a global OpenCode plugin package) — *not* this workspace's git repo. The
 workspace-root git here is incidental scaffolding for this one machine; it is not
 meant to be cloned, shared, or used as a clean template. So this document does
@@ -106,7 +106,7 @@ Four tiers plus the tracked design shell:
 | `opencode.json` | **Tracked (design)** | Registers the plugin + permission policy — the workspace's wiring |
 | `.gitignore` | **Tracked (design)** | The enforcing mechanism of the whole contract (§3) |
 | `AGENTS.md` | **Tracked (design)** | Workspace-wide agent instructions (tooling/conventions — no project table; see §7) |
-| `.opencode/index.ts` | **Tracked (design)** | The **boot** plugin (restart log + `/update`) — separate from HIVE (§4) |
+| `.opencode/index.ts` | **Tracked (design)** | The **boot** plugin (restart log + `/update`) — separate from HELM (§4) |
 | `.opencode/rules/no-update.md` | **Tracked (design)** | Safety rule reserving `/update` for the user |
 | `.opencode/agents/capabilities/` | **Tracked (design)** | Capability prompt definitions incl. `_template.md` |
 | `.opencode/agents/dissolved/` | **Tracked (design)** | Retired capability prompts |
@@ -131,9 +131,9 @@ per-entry, so those embedded/gitlink repos are reported correctly.)
 This is the enforcing mechanism of the entire contract. The governing rule, quoted
 from the workspace root `.gitignore`:
 
-> This repo versions the *workspace setup itself* — the OpenCode/HIVE config and
+> This repo versions the *workspace setup itself* — the OpenCode/HELM config and
 > agent prompt definitions — NOT the projects we work on (each has its own repo)
-> and NOT the live runtime state the HIVE generates as it runs.
+> and NOT the live runtime state the HELM generates as it runs.
 >
 > **Rule of thumb: track the *design* of the workspace, ignore everything we are
 > actively working on and everything generated at runtime.**
@@ -414,16 +414,16 @@ crashing. **No code path assumes the plugin lives at `projects/…`.**
     "./projects/opencode-discord-bridge/dist/index.js"
   ]
   ```
-  HIVE is registered by **relative src path** (vendored).
+  HELM is registered by **relative src path** (vendored).
 - **Published-install equivalent:** register by **package name**, e.g.
   `"evolutional-agent-structure"` in the `plugin` array (OpenCode resolves it from
   the installed plugin package).
-- **The boot plugin `.opencode/index.ts` is separate and unrelated to HIVE
+- **The boot plugin `.opencode/index.ts` is separate and unrelated to HELM
   (confirmed).** It is a small independent plugin that maintains
   `.opencode/restart.log` and registers a `/update` command (which runs
-  `opencode upgrade && kill 1`). It shares no code with HIVE and is registered as
+  `opencode upgrade && kill 1`). It shares no code with HELM and is registered as
   its own entry in the `plugin` array. On a gift machine it is part of the design
-  shell (tracked), but it is not the HIVE plugin.
+  shell (tracked), but it is not the HELM plugin.
 
 ### A4. Anything else that assumes the vendored layout
 

@@ -1,3 +1,5 @@
+> **Naming note (2026-11-25):** HIVE → HELM rebrand ratified. This file's prose uses legacy terms; see scratch/naming/helm-rebrand-design.md §2.0 for the canonical mapping. Tool names and identifiers are unchanged until P2.
+
 # oc-browser-bridge — setup
 
 > **What this is:** the container/image and entrypoint requirements for

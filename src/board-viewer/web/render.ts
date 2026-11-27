@@ -664,7 +664,7 @@ const QUIET_ICON: IconState = { session: "quiet", dreaming: false, count: 0 }
 
 export function renderMessagePage(title: string, fragments: string[]): string {
   return `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>hive-board — ${esc(title)}</title>
+<html lang="en"><head><meta charset="utf-8"><title>HELM Chart — ${esc(title)}</title>
 ${headIconTags(QUIET_ICON)}
 <style>${CSS}</style></head>
 <body><h1>${headerMark(QUIET_ICON)}${esc(title)}</h1>${fragments.join("\n")}</body></html>`
@@ -691,7 +691,7 @@ function headerMark(icon: IconState): string {
     // richer drawing, not a hard floor — the floor is where the mesh muddies,
     // which is why the reduced mark exists for 16/32.
     size: 40,
-    title: `hive-board — ${iconLabel(icon)}`,
+    title: `HELM Chart — ${iconLabel(icon)}`,
   })}</span>`
 }
 
@@ -1103,7 +1103,7 @@ export function renderBoardBody(state: BoardState, notices: Notice[] = []): stri
   // do nothing but render. It now executes board transitions (create, start,
   // pause, demote, done) through hive-infra's shared module via POST
   // /transitions/*, so the old subtitle understated what a click here does.
-  return `<h1>${headerMark(deriveIconState(state))}hive-board <span class="phase">HIVE state · board transitions</span></h1>
+  return `<h1>${headerMark(deriveIconState(state))}HELM Chart <span class="phase">HELM state · leg transitions</span></h1>
 <div class="meta mono">workspace ${esc(state.workspaceRoot)} · generated ${esc(state.generatedAt)} · live refresh 15s · ${buildBadge(state.buildSha)}</div>
 
 <h2>Board <span class="count">(${state.items.length} items · ${state.board.sessionOnly.length} session-only)</span> <span id="filter-count" class="count" title="how many work items the current filter shows / total — updated live by the filter bar"></span></h2>
@@ -1142,7 +1142,7 @@ ${
 <tbody>${historyRows}</tbody>
 </table></div></details>
 
-<h2>HIVEmind message flow <span class="count">(${messages.length} pending/delivered)</span></h2>
+<h2>Comms message flow <span class="count">(${messages.length} pending/delivered)</span></h2>
 ${
   messages.length === 0
     ? '<div class="empty">no live messages — all inboxes clear</div>'

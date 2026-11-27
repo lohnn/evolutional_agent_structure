@@ -90,7 +90,7 @@ work was, its spec, its subtasks, and what it produced, with zero session access
 id: WI-007                      # stable key, WI-NNN
 title: "Add push-notification opt-out to settings"  # CACHED: mirrored from session, stored on item (§1a)
 status: in_progress             # see §3 — the column driver
-owner_session: ses_10a2...      # HIVE COORDINATOR sessionID that OWNS this item; null until In Progress
+owner_session: ses_10a2...      # the Helmsman sessionID that OWNS this item; null until In Progress
                                 #   a LINK for navigation/existence only — NOT a data dependency (§1a)
 group_id: ses_0e30...           # dispatch group of the owning session (I-043)
 origin: session-first           # idea-first | session-first  (how the item was born, §5.2a)
@@ -210,7 +210,7 @@ names may differ from status values, but this table binds them.
    re-promote, resume-from-Paused, Done → In Progress): a session can only have become an owner by
    being awakened, and awakened status persists in `awakeSessions`. Awaken is triggered **only** by
    `hive_board_start` on a session it just created (DESIGN §5.3c).
-5. Every awakened HIVE coordinator session has exactly one work item (auto-registered if not
+5. Every awakened Helmsman session has exactly one work item (auto-registered if not
    created idea-first). Session ⟷ item is 1:1 (see OPEN-QUESTIONS Q7).
 6. **Bind-time absorption (Q15):** if `hive_board_bind` targets an idea item while the session's
    only owned item is a **pristine** session-first placeholder (`origin: session-first`,

@@ -1,4 +1,4 @@
-# HIVE Board → DSH web tab — pinned contract (WI-062 slice 1)
+# HELM Chart → DSH web tab — pinned contract (WI-062 slice 1)
 
 Re-verified against the **live** dsh **0.1.6-alpha.2** web boot on 2026-09-18 (not carried
 over from the 0.1.5-rc.2-era dream contract). Every load-bearing claim names its evidence.
@@ -165,7 +165,7 @@ Two build facts pinned here because they were DISCOVERED, not assumed:
   the icon (props `{size}` → svg per the twin's `PanelIcon`).
 - ⇒ Board (user decision 2, berget-usage standalone pattern) registers BOTH:
   - `slots.register({ name: 'main', key: 'hive-board' }, BoardPanel)`
-  - `slots.register({ name: 'sidebar.panellist', id: 'hive-board', order: 110, label: 'HIVE Board' }, (props) => <HiveBoardIcon props>)`
+  - `slots.register({ name: 'sidebar.panellist', id: 'hive-board', order: 110, label: 'HELM Chart' }, (props) => <HiveBoardIcon props>)`
     (order: highest seen today is 100/provider-usage — sort is `order ?? 0`.)
 - Child tabs (slice 3 depth views, the provider-usage pattern): declared **in the same `main`
   registration** — `children: { ['hive-board.view']: { kind: 'list', scope: 'root' } }` —

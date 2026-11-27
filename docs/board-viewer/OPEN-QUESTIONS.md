@@ -256,7 +256,7 @@ New fields: `title` reclassified as cached; `artifacts[]` added (SCHEMA §2).
 | Question | "Where is the work?" | "What's the health of the collective?" |
 | Organized by | **work item** | **capability** |
 | Analogy | Jira/Trello project board | Grafana / ops dashboard |
-| Shows | cards moving Backlog→In Progress→Done; subtasks; paused/live | per-capability **energy bars** (0–100), dissolve (<10) / split (>90) thresholds; dream-archive vitals (insight/warning/shadow counts, active DREAMING, DRM history); HIVEmind message flow / BLOCKED capabilities; the void (dissolved caps) |
+| Shows | cards moving Backlog→In Progress→Done; subtasks; paused/live | per-capability **energy bars** (0–100), dissolve (<10) / split (>90) thresholds; dream-archive vitals (insight/warning/shadow counts, active DREAMING, DRM history); comms message flow / BLOCKED capabilities; the void (dissolved caps) |
 
 The fleet view surfaces things the kanban structurally can't (capability energy, dream vitals,
 message backlog) because those aren't "work moving through columns" — they're the state of the
@@ -266,7 +266,7 @@ organism.
 separate tab/page later.** Rationale: the kanban is the actual ask and the priority; the fleet view
 is a valuable *second lens* but competes with core work. It's cheap to add later — it reads the same
 parsed files the board already loads. Not in v1 scope; keep the door open. (Note: Phase 1.5 already
-renders sessions read-only, and Phase 1 optionally renders some HIVE state to validate parsers — that
+renders sessions read-only, and Phase 1 optionally renders some HELM state to validate parsers — that
 is a stepping stone, not the full fleet view.)
 
 **Dogfooding note (user idea):** once the board can hold Backlog/Todo items, the fleet-status view
@@ -299,7 +299,7 @@ fresh session.
 ---
 
 ## Resolved (moved here from questions, kept for provenance)
-- **What a work item IS** → one full HIVE **coordinator session**, not a subagent. Subagent
+- **What a work item IS** → one full Helmsman **session**, not a subagent. Subagent
   dispatches are activity *within* it. (DESIGN §2)
 - **Only HIVE sessions on the board** → non-HIVE chats excluded; every awakened session auto-appears
   In Progress even if not created as a card first. (DESIGN §2, §5.2a)

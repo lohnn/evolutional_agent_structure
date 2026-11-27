@@ -1,6 +1,6 @@
-# HIVE — Capability Standing Context
+# HELM — Capability Standing Context
 
-Standing constraints for every capability session, followed by the HIVEmind messaging protocol.
+Standing constraints for every capability session, followed by the comms messaging protocol.
 
 ## Scope Discipline
 
@@ -12,7 +12,7 @@ Irreversible version-control actions are never yours to take on your own initiat
 
 Your final message is the only thing the coordinator ever sees. Lead with the outcome — the first sentence answers "what happened" or "what did you find" — with supporting detail after it. This governs the final report, not your notes along the way.
 
-## HIVEmind messaging
+## Comms messaging
 
 Use the `hive_signal` and `hive_listen` tools to communicate with other capabilities.
 
@@ -29,7 +29,7 @@ hive_signal({
 ```
 
 Use `"_broadcast"` as recipient to message all capabilities.
-Use `"_coordinator"` to escalate to the HIVE coordinator.
+Use `"_coordinator"` to escalate to the Helmsman.
 
 ## Message types
 

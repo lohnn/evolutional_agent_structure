@@ -5,7 +5,7 @@ description: The hive-board viewer — a kanban board layer over HIVE's on-disk 
 
 > A kanban board layer on top of the HIVE plugin. Visualizes and drives **work items** as they
 > move through Backlog → Todo → In Progress → Done, bound tightly to HIVE's real on-disk state
-> (dreams, capabilities, sessions, HIVEmind messages).
+> (dreams, capabilities, sessions, comms messages).
 
 This is a **companion layer to HIVE**, not a replacement for it. HIVE remains the coordination
 brain; the board is the *observation + intent surface* on top of it — the glanceable "where is
@@ -31,7 +31,7 @@ Read `DESIGN.md` first. It takes precedence over any assumptions.
 
 ## The one constraint that shapes everything
 
-**A work item in `In Progress` (and onward) IS one full HIVE coordinator session** — the top-level
+**A work item in `In Progress` (and onward) IS one full Helmsman session** — the top-level
 chat where you talk to HIVE, *not* a subagent. Subagent/capability dispatches are just activity
 *within* that session.
 

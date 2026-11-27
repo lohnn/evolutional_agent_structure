@@ -5,11 +5,11 @@ import type { CapabilityInfo } from "../index.js"
 
 /**
  * The ecosystem dossier composer (T2, shared with T6): one textual snapshot of
- * the HIVE ecosystem — active roster with energies, the tick status, and the
- * dissolved listing (the void). Consumed by /awaken's dossier, the re-awaken
+ * the HELM ecosystem — active roster with energies, the tick status, and the
+ * dissolved listing (the harbor). Consumed by /awaken's dossier, the re-awaken
  * analysis, and (T6) /status's summary screen above its summary tool.
  *
- * Format follows D5: a clean HIVE dossier block, NO hand-drawn ASCII state
+ * Format follows D5: a clean HELM dossier block, NO hand-drawn ASCII state
  * bars — the board panels (NEXT WORK) will own state rendering, the text
  * should not draw what a panel will show.
  *
@@ -26,7 +26,7 @@ export interface EcosystemSnapshotSource {
 }
 
 /**
- * Capability names in the void: the `dissolved/` dir holds the archived preset
+ * Capability names in the harbor: the `dissolved/` dir holds the archived preset
  * dirs and `.md` ledgers (both per dissolve()); the listing shows each NAME
  * once.
  */
@@ -103,7 +103,7 @@ export interface PostCompactionContextSource {
    * `getCapabilitiesSummary()` output (an "Active capabilities:" list) or
    * null when the roster is empty/unreadable — an empty roster re-anchors
    * loudly ("(none …)"), it does not silently skip the whole block: the
-   * re-anchor's job is to restore HIVE awareness, and "the roster is empty"
+   * re-anchor's job is to restore HELM awareness, and "the roster is empty"
    * IS awareness.
    */
   capabilitySummary: string | null

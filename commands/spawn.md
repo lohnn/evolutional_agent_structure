@@ -2,6 +2,8 @@
 description: Manifest a new capability from the void
 ---
 
+> **Naming note (2026-11-25):** HIVE → HELM rebrand ratified. This file's prose uses legacy terms; see scratch/naming/helm-rebrand-design.md §2.0 for the canonical mapping. Tool names and identifiers are unchanged until P2.
+
 # SPAWN — Manifest Capability
 
 A new capability is needed. The void will provide.

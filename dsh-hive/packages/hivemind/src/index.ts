@@ -111,7 +111,7 @@ export class Hivemind extends Service {
       const d1 = ctx.tools.register(defineTool({
         name: "hive_signal",
         description:
-          "Send a message to another capability in the HIVE ecosystem. Use this when you need information from, or want to share information with, another capability. " +
+          "Send a message to another capability in the HELM ecosystem. Use this when you need information from, or want to share information with, another capability. " +
           "Messages are delivered in real-time if the recipient is active, otherwise queued for their next session. " +
           "Check the Active Capabilities list in your system prompt to see valid recipients.",
         parameters: {
@@ -183,7 +183,7 @@ export class Hivemind extends Service {
       const d4 = ctx.tools.register(defineTool({
         name: "hive_retire",
         description:
-          "Retire stale HIVEmind messages: MOVE them out of the active inbox into retired/<recipient>/, with an INDIVIDUAL justification per message and an append-only audit trail. " +
+          "Retire stale comms messages: MOVE them out of the active inbox into retired/<recipient>/, with an INDIVIDUAL justification per message and an append-only audit trail. " +
           "This is NOT deletion and NOT bulk-mark-read — a retired message is preserved, inspectable, and the audit entry records WHY (which staleness signal fired, who retired it, when). " +
           "Call with NO message argument to DRY-RUN: lists every stale message the sweep finds with its signal(s), changing nothing. " +
           "Then retire a named subset by passing their filenames. A reason is REQUIRED to retire. " +
@@ -308,7 +308,7 @@ export class Hivemind extends Service {
       )
     }
     const lines = [
-      `## HIVEmind — Unread messages sent by ${sender}`,
+      `## Comms — Unread messages sent by ${sender}`,
       ``,
       `${live.length} live, ${stale.length} stale (sediment). Status read from disk; "delivered, unread" = injected live but never acknowledged.`,
       ``,
