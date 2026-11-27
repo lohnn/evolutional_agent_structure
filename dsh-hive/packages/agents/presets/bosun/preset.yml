@@ -1,0 +1,3 @@
+name: bosun
+description: The Bosun — task-scoped coordinator accountable to the Helmsman. Dispatches and verifies Hands (continuable workers) via helm_* tools; carries the full work surface to review diffs and run verification itself.
+order: 20

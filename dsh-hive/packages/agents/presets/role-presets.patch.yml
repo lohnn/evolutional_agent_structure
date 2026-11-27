@@ -1,0 +1,169 @@
+# @hive/dsh-agents bundle patch: HELM authority presets.
+# Registry declarations only. Host services and Host-global tool providers stay
+# in the profile. @hive/dsh-helm/role-gate subtracts every unapproved global.
+- insert:
+    - id: preset-helmsman
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: helmsman
+        name: Helmsman
+        description: Orchestrate Bosuns, read the chart, and use comms. No Hands tools.
+        order: 10
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: |-
+                You are the Helmsman, serving at the Helm station. You turn the Charter's mission into passage plans and coordinate through Bosuns; you never perform Hands' work yourself.
+
+                You have no shell, filesystem-editing, or generic worker tools. Read the chart only with hive_board_list, hive_board_search, and hive_board_read. Use hive_signal, hive_listen, hive_sent, and hive_retire for comms.
+
+                Use helm_dispatch to start continuable Bosun children, helm_status to inspect them, helm_prompt to steer them, helm_collect to collect their evidence, helm_resume for parked work, and helm_cancel when a Bosun must stop. The default and only permitted dispatch target is bosun. Never try to dispatch Hands directly: a Bosun dispatches and verifies Hands.
+
+                During the Sailing Master phase, produce the passage plan before dispatch. Keep the plan, child ids, routes, and acceptance evidence explicit. Collect every required Bosun result before reporting completion. The Underwriter is a service, not an agent; the Crew is the roster, not a set of presets.
+          - id: agent-instructions
+            name: '@deepseek-ai/dsh-agent-instructions'
+            config: { maxBytes: 65536 }
+          - id: time-context
+            name: '@deepseek-ai/dsh-time-context'
+          - id: helm
+            name: '@hive/dsh-helm'
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+              - id: command-compact
+                name: '@deepseek-ai/dsh-command-compact'
+              - id: tool-result-pruner
+                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+                config:
+                  thresholdChars: 8192
+                  headChars: 4096
+                  tailChars: 1024
+
+    - id: preset-bosun
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: bosun
+        name: Bosun
+        description: Task-scoped coordinator. Dispatches and verifies Hands; drill/debug consoles may select it.
+        order: 20
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: |-
+                You are a Bosun, a task-scoped coordinator accountable to the Helmsman. Decompose your assigned leg, dispatch Hands, inspect their real work, and return integrated evidence rather than unverified claims.
+
+                helm_dispatch defaults to hands and may target only hands. Use helm_status, helm_prompt, helm_collect, helm_resume, and helm_cancel to manage the children you own. You have shell, filesystem, search, job, todo, and web tools so you can review diffs and run relevant verification yourself. Do not dispatch another Bosun and do not seek a generic subagent or workflow escape around that boundary.
+
+                Give every Hand a self-contained brief and acceptance criteria. While work runs, do independent work that does not duplicate it. Review the final diff and run the relevant tests before integrating. Report outcomes, residual risks, exact file paths, and verification evidence to the Helmsman.
+          - id: agent-instructions
+            name: '@deepseek-ai/dsh-agent-instructions'
+            config: { maxBytes: 65536 }
+          - id: time-context
+            name: '@deepseek-ai/dsh-time-context'
+          - id: helm
+            name: '@hive/dsh-helm'
+          - id: tool-bash
+            name: '@deepseek-ai/dsh-tool-bash'
+            disabled: !!js process.platform === 'win32'
+          - id: tool-pwsh
+            name: '@deepseek-ai/dsh-tool-pwsh'
+            disabled: !!js process.platform !== 'win32'
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+            config: { applyPatch: false }
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config: { sampleOverCapGlobResults: false }
+          - id: tool-jobs
+            name: '@deepseek-ai/dsh-tool-jobs'
+          - id: tool-todo
+            name: '@deepseek-ai/dsh-tool-todo'
+            config: { allowParallelInProgress: true }
+          - id: tool-web
+            name: '@deepseek-ai/dsh-tool-web'
+            config: { fetch: true, searchTimeoutMs: 60000 }
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+              - id: command-compact
+                name: '@deepseek-ai/dsh-command-compact'
+              - id: tool-result-pruner
+                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+                config:
+                  thresholdChars: 8192
+                  headChars: 4096
+                  tailChars: 1024
+
+    - id: preset-hands
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: hands
+        name: Hands
+        description: Dispatch-only worker composition. No dispatch or agent-control tools.
+        # Requires the dispatchOnly-aware registry in §4.4 for clean production mounting.
+        dispatchOnly: true
+        order: 90
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: |-
+                You are a Hand, a dispatched worker accountable to your Bosun. Perform only the assigned task with the available work tools. You have no dispatch, subagent, agent-control, or workflow tools and cannot create another agent.
+
+                Stay inside the brief and acceptance criteria. Make routine implementation judgments, but report a genuine boundary or missing dependency instead of silently crossing it. Inspect your final diff and run the smallest relevant verification. Return the outcome, files changed, exact test evidence, and any blockers to your Bosun. Do not claim unrun checks and do not modify role presets, dispatch policy, profiles, or services to widen your authority.
+          - id: agent-instructions
+            name: '@deepseek-ai/dsh-agent-instructions'
+            config: { maxBytes: 65536 }
+          - id: time-context
+            name: '@deepseek-ai/dsh-time-context'
+          - id: tool-bash
+            name: '@deepseek-ai/dsh-tool-bash'
+            disabled: !!js process.platform === 'win32'
+          - id: tool-pwsh
+            name: '@deepseek-ai/dsh-tool-pwsh'
+            disabled: !!js process.platform !== 'win32'
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+            config: { applyPatch: false }
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config: { sampleOverCapGlobResults: false }
+          - id: tool-jobs
+            name: '@deepseek-ai/dsh-tool-jobs'
+          - id: tool-todo
+            name: '@deepseek-ai/dsh-tool-todo'
+            config: { allowParallelInProgress: true }
+          - id: tool-web
+            name: '@deepseek-ai/dsh-tool-web'
+            config: { fetch: true, searchTimeoutMs: 60000 }
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+              - id: command-compact
+                name: '@deepseek-ai/dsh-command-compact'
+              - id: tool-result-pruner
+                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+                config:
+                  thresholdChars: 8192
+                  headChars: 4096
+                  tailChars: 1024

@@ -68,6 +68,14 @@ import { parseCapabilityPersona, renderAgentCordisYml, type CapabilityPersona } 
 import { resolveCapabilityMaterial } from "./lib/material.js"
 import { pairCapabilityEntries } from "./lib/roster.js"
 import { optionalService } from "./lib/service-optional.js"
+// Pure HELM role-policy tables (@hive/dsh-helm/roles) — the §2.4 role
+// detection. Import-type-clean discipline does NOT apply here: roles.ts is a
+// monorepo HIVE module (zero runtime @deepseek-ai imports of its own), the
+// twin of the @hive/dsh-board lib imports above. The dsh-agent-preset-registry
+// FACE is type-only (declare-module augmentation via import type below), so
+// no runtime dsh specifier appears in this module.
+import { isRolePreset } from "@hive/dsh-helm/roles"
+import type {} from "@deepseek-ai/dsh-agent-preset-registry"
 import {
   resolveModelRoute,
   readPresetModelSpec,
@@ -667,7 +675,7 @@ export class Evolution extends Service {
       return undefined
     })
 
-    // ── Awaken gate (T2 / D1–D2) ─────────────────────────────────────────────
+    // ── Awaken gate (T2 / D1–D2), role-aware (HELM role presets §2.4) ───────
     // SECOND `agent/created` listener (the tick above is the first; serial
     // listeners coexist in registration order, and this one never touches the
     // tick's data). Per D1 a session is aware-but-dormant until /awaken flips
@@ -676,6 +684,17 @@ export class Evolution extends Service {
     // AND refuse execution, while the dormant explainer keeps the model aware
     // that HIVE exists here and that asking the user to run /awaken is the one
     // scripted move.
+    //
+    // ROLE EXEMPTION (§2.4): an agent composed as a HELM role preset
+    // (helmsman/bosun/hands) is governed by the @hive/dsh-helm/role-gate —
+    // it receives NO dormant doctrine, NO dormant restriction, and NO standing
+    // dream mask, because those masks intersect the role policy (a dormant
+    // mask would hide comms from a Helmsman; the standing dream mask would
+    // fight the role census). Detection reads the COMPOSED preset id through
+    // the pure roles module (import-type-clean, W-044). This runs BEFORE the
+    // gate decision, per §2.4. Held dormant holds are lifted on entry
+    // (idempotent when none) so a Standard→role selection cannot keep a stale
+    // mask; the role gate composes from there on.
     //
     // Child exemption (why `decideGate` skips depth > 0): a delegated child
     // may be a HIVE dispatch worker whose coordinator persona drives dispatch
@@ -713,96 +732,47 @@ export class Evolution extends Service {
       // typed again — fulfilling the standing instruction left by the
       // previous corridor (0.1.2-rc.1 declared `{ agent }` only).
       const source = payload.source
-      switch (decideGate(depth, isAwakened(this.directory, sessionId))) {
-        case "skip":
-          // Exempt child (depth > 0) — participants by lineage. No section, no
-          // restriction, no state. (D1: dormant sessions leave no state.)
-          return
-        case "doctrine": {
-          // Awakened coordinator: scoped standing section at 55 — after the
-          // process-wide hive:roster (50), before tool guidance (100+).
-          agent.ctx?.systemPrompt?.section({
-            name: "hive:doctrine",
-            order: 55,
-            text: () => COORDINATOR_DOCTRINE,
-          })
-          // ── Standing dream-surface restriction (TOKEN-ECONOMY D4) ──────────
-          // The dreamtime partition vanishes from the standing surface; the
-          // user's /dream toggles it (see the command below). Applied on every
-          // publication — including the flip (the /awaken handler calls the
-          // same helper, since an awakened agent's post-flip publication only
-          // happens on the next resume) and including a cold-resume MID-dream
-          // (the surface re-masks: re-run /dream; a documented edge, the
-          // dream state is safe on disk).
-          this.applyStandingRestrictions(sessionId, agent)
-          // ── Compaction seam (T6) ────────────────────────────────────────────
-          // dsh publishes no standalone compaction event; a session that was
-          // just summarized RE-PUBLISHES through this same event with
-          // `source: "compact"`. When that happens to an AWAKENED top-level
-          // coordinator — gate decision "doctrine", the only session kind
-          // that owns pre-compaction HIVE state (dreams, board work items) —
-          // register a second scoped section with the re-anchor block above
-          // doctrine-adjacent guidance (56). Register-and-forget, same scoped
-          // lifecycle as the dormant section: it belongs to this agent
-          // instance and unwinds with it. One-shot by construction — the next
-          // resume publishes source "resume", never "compact", so the fresh
-          // scoped world re-anchors exactly once; no Map, no lift: /awaken
-          // has nothing to lift from an awakened session and a double
-          // registration only names-collides if the runtime ever
-          // double-publishes compact for one scope, which it does not.
-          if (source === "compact") {
-            agent.ctx?.systemPrompt?.section({
-              name: "hive:post-compaction",
-              order: 56,
-              text: () => this.postCompactionContext(),
-            })
-          }
-          return
-        }
-        case "deny": {
-          // Dormant top-level agent: hive tools vanish (restrict returns the
-          // exact disposer that lifts the restriction) + the dormant
-          // explainer at 51, just below the roster. Held for /awaken to lift.
-          //
-          // WI-066 refinement of D2: the deny mask is the census MINUS the
-          // dormant OPEN surface (HIVE_DORMANT_OPEN_TOOLS) — the board's
-          // discovery/authoring tools stay usable pre-awaken, so the dormant
-          // session can read the wall and file on it; bind and every other
-          // hive tool here still reads as absent. The subtraction happens
-          // BEFORE the registration filter below: an open name never reaches
-          // restrict() at all (so a board-less install cannot throw on it),
-          // and a masked name that this process did not register filters out.
-          //
-          // deny-mask filtering: tools.restrict() VALIDATES its names against
-          // the process's registered globals and THROWS on unknowns — and a
-          // throw inside this serial listener fails agent publication. The
-          // deny mask is therefore filtered to what THIS process registered:
-          // the full cohort (production) restricts all of it; a
-          // standalone-evolution install (some other profile shape) degrades
-          // to masking only the tools that exist. tool-gate-sync.test.mjs
-          // pins BOTH the mask and the open surface to the cohort source so
-          // this filter is a safety net, not a whitelist license.
-          const openNames: readonly string[] = HIVE_DORMANT_OPEN_TOOLS
-          const deny = HIVE_TOOL_NAMES.filter((name) => !openNames.includes(name)).filter((name) => {
-            try {
-              return ctx.tools.get(name) !== undefined
-            } catch {
-              return false
-            }
-          })
-          if (deny.length > 0) {
-            const lift = agent.ctx?.tools?.restrict({ deny })
-            if (lift) this.gateRestrictions.set(sessionId, lift)
-          }
-          const dropDormant = agent.ctx?.systemPrompt?.section({
-            name: "hive:dormant",
-            order: 51,
-            text: () => DORMANT_NOTICE,
-          })
-          if (dropDormant) this.dormantSections.set(sessionId, dropDormant)
-          return
-        }
+      // Live-face map for committed selection events: `agent-preset/selected`
+      // carries (sessionId, presetId) only, and entering a role from a blank
+      // Standard session must lift held dormant holds (§2.4) — that needs the
+      // AGENT face. Keyed by session; overwritten per publication; dropped on
+      // agent/disposed.
+      this.composedAgents.set(sessionId, agent)
+      if (this.isRoleComposed(agent)) {
+        this.liftDormantHoldsForRole(sessionId)
+        return
       }
+      this.applyAwakenGate(sessionId, agent, depth, source)
+      return
+    })
+
+    // ── Role/preset selection reconciliation (§2.4) ─────────────────────────
+    // The preset registry emits (sessionId, presetId) AFTER a committed
+    // selection (it recomposes the LIVE agent — no republish, so
+    // agent/created will not fire here). Evolution follows the composition:
+    // entering a role lifts any dormant/dream holds; leaving a role re-enters
+    // the ordinary decideGate path for the new non-role preset. A session
+    // event cannot veto the selection (session commits before containing
+    // observer failures) — this listener recomposes, never judges.
+    ctx.on("agent-preset/selected", (sessionId, presetId): undefined => {
+      const sid = String(sessionId)
+      const agent = this.composedAgents.get(sid)
+      if (agent === undefined) {
+        ctx.logger.warn?.("[evolution] preset selection for an unpublished session — holds reconcile on next publication", {
+          sessionId: sid,
+          presetId,
+        })
+        return undefined
+      }
+      if (isRolePreset(String(presetId))) {
+        this.liftDormantHoldsForRole(sid)
+      } else {
+        // Leaves-a-role (or any non-role selection on a held session): the
+        // ordinary gate path re-decides for the new composition. Registrations
+        // here are FRESH — a role session held no evolution sections/masks.
+        this.applyAwakenGate(sid, agent, agent.session?.header?.delegationDepth, undefined)
+      }
+      return undefined
     })
 
     // ── Dispatch-scoped tool filters (I-070; dsh 0.2.1 corridor) ─────────────
@@ -825,6 +795,10 @@ export class Evolution extends Service {
       const agent = payload.agent
       const sessionId = String(agent.session?.id ?? agent.id)
       if (!sessionId) return
+      // Role exemption (§2.4): a HELM role child's surface is the role gate's
+      // exact census — an old dispatch-filter record must never silently
+      // subtract required role tools from it.
+      if (this.isRoleComposed(agent)) return undefined
       const seen = this.dispatchToolFilters.get(sessionId) ?? dispatchFilterFromLedgerRecords(this.usageLog.read(), sessionId)
       if (!seen) return
       const resolvable = (name: string): boolean => {
@@ -877,6 +851,7 @@ export class Evolution extends Service {
         map.delete(sessionId)
       }
       this.dispatchToolFilters.delete(sessionId)
+      this.composedAgents.delete(sessionId)
       this.dreamSurfaceAgents.delete(sessionId)
     })
 
@@ -1013,9 +988,9 @@ export class Evolution extends Service {
       // depth>0 by design, so a child-flipped registry entry is incoherent
       // state). /awaken carries the same guard: a child cannot self-awaken.
       const requireAwake = (
-        inv: { agent?: { session?: { id?: unknown; header?: { delegationDepth?: unknown } } | unknown; id?: unknown } | undefined }
+        inv: { agent?: { session?: { id?: unknown; header?: { delegationDepth?: unknown } } | unknown; id?: unknown; ctx?: unknown } | undefined }
       ): { kind: "error"; text: string } | undefined => {
-        const agent = inv.agent as { session?: { id?: unknown; header?: { delegationDepth?: unknown } }; id?: unknown } | undefined
+        const agent = inv.agent as { session?: { id?: unknown; header?: { delegationDepth?: unknown } }; id?: unknown; ctx?: unknown } | undefined
         if (agent) {
           const depth = agent.session?.header?.delegationDepth
           if (typeof depth === "number" && depth > 0) {
@@ -1025,6 +1000,19 @@ export class Evolution extends Service {
                 `HIVE commands belong to top-level sessions — this is a dispatched child (lineage ` +
                 `participant, D2): it works the task it was handed and routes coordination through its ` +
                 `parent. Run this in a top-level session instead.`,
+            }
+          }
+          // HELM role presets (§2.4): a role-composed session is governed by
+          // the @hive/dsh-helm/role-gate — the HIVE dormant world does not
+          // apply to it, and none of these commands may install doctrine or
+          // masks that fight the role census.
+          if (this.isRoleComposed(agent)) {
+            return {
+              kind: "error" as const,
+              text:
+                `This session runs under a HELM role preset (${this.composedPresetOf(agent)}) — the ` +
+                `HIVE coordination/dormant surface does not apply here (the session is governed by ` +
+                `the HELM role gate).`,
             }
           }
         }
@@ -1282,6 +1270,16 @@ export class Evolution extends Service {
                   `participant, D2). It was awakened BY its dispatch, not by a command; route ` +
                   `coordination through the parent session.`,
               }
+            }
+          }
+          // HELM role presets (§2.4): a role composition is governed by the
+          // HELM role gate; the dormant-flip machinery must not apply to it.
+          if (this.isRoleComposed(agent)) {
+            return {
+              kind: "error" as const,
+              text:
+                `/awaken does not apply to a HELM role composition (${this.composedPresetOf(agent)}): ` +
+                `that surface is governed by the HELM role presets, not the HIVE dormant world.`,
             }
           }
           // Same stub-defensive session read as the gate (runtime face always
@@ -2245,6 +2243,49 @@ export class Evolution extends Service {
   private dormantSections = new Map<string, () => void>()
 
   /**
+   * HELM role presets (§2.4) — the live agent face per session, recorded at
+   * every publication and consulted by the `agent-preset/selected`
+   * reconciliation (that event carries only sessionId). Dropped on
+   * agent/disposed; overwritten by every fresh publication.
+   */
+  private composedAgents = new Map<string, Agent>()
+
+  /** The agent's composed preset id, optional-service read (W-090 form): */
+  private composedPresetOf(agent: { ctx?: unknown }): string | undefined {
+    const presets = optionalService<{ composedPreset(ctx: unknown): string | undefined }>(this.ctx, "agentPresets")
+    try {
+      return presets?.composedPreset(agent.ctx)
+    } catch {
+      // A half-mounted registry must not break the ordinary gate path.
+      return undefined
+    }
+  }
+
+  /** True when the agent's composed preset is a HELM role (helmsman/bosun/hands). */
+  private isRoleComposed(agent: { ctx?: unknown }): boolean {
+    return isRolePreset(this.composedPresetOf(agent) ?? "")
+  }
+
+  /**
+   * Entering a role lifts exactly the holds the dormant/dream machinery
+   * could otherwise leave stale (§2.4): the dormant deny mask, the dormant
+   * explainer section, and the standing dream-surface mask. /summon and
+   * dispatch-filter holds are lifecycle-owned and never stale here.
+   */
+  private liftDormantHoldsForRole(sessionId: string): void {
+    for (const map of [this.gateRestrictions, this.dormantSections, this.standingDreamRestrictions]) {
+      const disposer = map.get(sessionId)
+      if (disposer === undefined) continue
+      try {
+        disposer()
+      } catch {
+        // already unwound with the agent's scoped world
+      }
+      map.delete(sessionId)
+    }
+  }
+
+  /**
    * WI-108 — one LIVE summon per session. An unfired turn-scoped tool never
    * retracts by itself (only first-execute or agent disposal ends it), so a
    * REPEAT lifecycle command in the same live session collided with the stale
@@ -2300,6 +2341,111 @@ export class Evolution extends Service {
    * apply-on-publication only. Returns the disposer it stored (or undefined
    * when nothing was masked).
    */
+  /**
+   * The awaken-gate decision body (T2/D1–D2), extracted so BOTH the
+   * agent/created listener and the preset-selection reconciliation can
+   * drive it (§2.4). Called only for NON-role compositions; see the
+   * role exemption in the second agent/created listener.
+   */
+  private applyAwakenGate(
+    sessionId: string,
+    agent: Agent,
+    depth: number | undefined,
+    source: string | undefined,
+  ): void {
+    const ctx = this.ctx
+    switch (decideGate(depth, isAwakened(this.directory, sessionId))) {
+      case "skip":
+        // Exempt child (depth > 0) — participants by lineage. No section, no
+        // restriction, no state. (D1: dormant sessions leave no state.)
+        return
+      case "doctrine": {
+        // Awakened coordinator: scoped standing section at 55 — after the
+        // process-wide hive:roster (50), before tool guidance (100+).
+        agent.ctx?.systemPrompt?.section({
+          name: "hive:doctrine",
+          order: 55,
+          text: () => COORDINATOR_DOCTRINE,
+        })
+        // ── Standing dream-surface restriction (TOKEN-ECONOMY D4) ──────────
+        // The dreamtime partition vanishes from the standing surface; the
+        // user's /dream toggles it (see the command below). Applied on every
+        // publication — including the flip (the /awaken handler calls the
+        // same helper, since an awakened agent's post-flip publication only
+        // happens on the next resume) and including a cold-resume MID-dream
+        // (the surface re-masks: re-run /dream; a documented edge, the
+        // dream state is safe on disk).
+        this.applyStandingRestrictions(sessionId, agent)
+        // ── Compaction seam (T6) ────────────────────────────────────────────
+        // dsh publishes no standalone compaction event; a session that was
+        // just summarized RE-PUBLISHES through this same event with
+        // `source: "compact"`. When that happens to an AWAKENED top-level
+        // coordinator — gate decision "doctrine", the only session kind
+        // that owns pre-compaction HIVE state (dreams, board work items) —
+        // register a second scoped section with the re-anchor block above
+        // doctrine-adjacent guidance (56). Register-and-forget, same scoped
+        // lifecycle as the dormant section: it belongs to this agent
+        // instance and unwinds with it. One-shot by construction — the next
+        // resume publishes source "resume", never "compact", so the fresh
+        // scoped world re-anchors exactly once; no Map, no lift: /awaken
+        // has nothing to lift from an awakened session and a double
+        // registration only names-collides if the runtime ever
+        // double-publishes compact for one scope, which it does not.
+        if (source === "compact") {
+          agent.ctx?.systemPrompt?.section({
+            name: "hive:post-compaction",
+            order: 56,
+            text: () => this.postCompactionContext(),
+          })
+        }
+        return
+      }
+      case "deny": {
+        // Dormant top-level agent: hive tools vanish (restrict returns the
+        // exact disposer that lifts the restriction) + the dormant
+        // explainer at 51, just below the roster. Held for /awaken to lift.
+        //
+        // WI-066 refinement of D2: the deny mask is the census MINUS the
+        // dormant OPEN surface (HIVE_DORMANT_OPEN_TOOLS) — the board's
+        // discovery/authoring tools stay usable pre-awaken, so the dormant
+        // session can read the wall and file on it; bind and every other
+        // hive tool here still reads as absent. The subtraction happens
+        // BEFORE the registration filter below: an open name never reaches
+        // restrict() at all (so a board-less install cannot throw on it),
+        // and a masked name that this process did not register filters out.
+        //
+        // deny-mask filtering: tools.restrict() VALIDATES its names against
+        // the process's registered globals and THROWS on unknowns — and a
+        // throw inside this serial listener fails agent publication. The
+        // deny mask is therefore filtered to what THIS process registered:
+        // the full cohort (production) restricts all of it; a
+        // standalone-evolution install (some other profile shape) degrades
+        // to masking only the tools that exist. tool-gate-sync.test.mjs
+        // pins BOTH the mask and the open surface to the cohort source so
+        // this filter is a safety net, not a whitelist license.
+        const openNames: readonly string[] = HIVE_DORMANT_OPEN_TOOLS
+        const deny = HIVE_TOOL_NAMES.filter((name) => !openNames.includes(name)).filter((name) => {
+          try {
+            return this.ctx.tools.get(name) !== undefined
+          } catch {
+            return false
+          }
+        })
+        if (deny.length > 0) {
+          const lift = agent.ctx?.tools?.restrict({ deny })
+          if (lift) this.gateRestrictions.set(sessionId, lift)
+        }
+        const dropDormant = agent.ctx?.systemPrompt?.section({
+          name: "hive:dormant",
+          order: 51,
+          text: () => DORMANT_NOTICE,
+        })
+        if (dropDormant) this.dormantSections.set(sessionId, dropDormant)
+        return
+      }
+    }
+  }
+
   private applyStandingRestrictions(sessionId: string, agent: Agent): (() => void) | undefined {
     const standing: readonly string[] =
       this.hivemind === false

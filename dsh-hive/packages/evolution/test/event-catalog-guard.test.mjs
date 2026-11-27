@@ -40,7 +40,21 @@ const SRC_DIR = fileURLToPath(new URL("../src", import.meta.url))
 //     Event.listEvents inspect catalog, or the Events interfaces in the
 //     @deepseek-ai/dsh-* shipped .d.ts) — never trust this list across a
 //     version boundary.
-const LISTENED_EVENTS_ALLOWLIST = ["agent/created", "agent/disposed"]
+const LISTENED_EVENTS_ALLOWLIST = [
+  "agent/created",
+  "agent/disposed",
+  // Re-derived against the pinned corridor (0.2.2-rc.2) per clause (c):
+  // `@deepseek-ai/dsh-agent-preset-registry` ships the event in its Events
+  // augmentation (lib/types/types.d.ts: `'agent-preset/selected'(sessionId:
+  // SessionId, agentPreset: string)`; the d.ts source declares
+  // `@mode emit`) and publishes it from its session-event listener
+  // (src/index.ts:76-77) on every COMMITTED preset selection, i.e. after
+  // `session.append('agent-preset/selected', ...)` in select(). The
+  // HELM role-presets reconciliation (§2.4) consumes that committed truth —
+  // it cannot veto (session observers are contained after commit) and
+  // recomposes the gate/holds instead.
+  "agent-preset/selected",
+]
 
 // The lookbehind excludes longer identifiers ending in `ctx` (e.g.
 // `agentCtx.on(...)`); the group accepts both `ctx.on(...)` and the service
