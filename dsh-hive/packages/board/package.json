@@ -1,6 +1,6 @@
 {
   "name": "@hive/dsh-board",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "private": true,
   "files": [
     "dist",
