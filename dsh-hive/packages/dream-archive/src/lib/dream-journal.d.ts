@@ -5,8 +5,8 @@
  * feed the dreamtime consolidation workflow.
  *
  * Layout:
- *   .opencode/dreams/raw/<capability>.<sessionID>.md   — active journal, one per (capability, session)
- *   .opencode/dreams/raw/.harvested/<cap>.<sid>-<ts>.md — archived after harvest
+ *   .helm/dreams/raw/<capability>.<sessionID>.md   — active journal, one per (capability, session)
+ *   .helm/dreams/raw/.harvested/<cap>.<sid>-<ts>.md — archived after harvest
  *
  * Per-(capability, session) keying prevents concurrent same-capability sessions
  * from corrupting each other via interleaved appendFileSync calls.  A resumed

@@ -72,7 +72,7 @@ export function closeItem(
   return withBoardLock(directory, () => {
     const item = listItems(directory).find((i) => i.id === id)
     if (!item) {
-      return { ok: false as const, reason: "NOT_FOUND", detail: `No work item ${id} in .opencode/board/.` }
+      return { ok: false as const, reason: "NOT_FOUND", detail: `No work item ${id} in .helm/board/.` }
     }
     if (item.status === "done") {
       return { ok: false as const, reason: "ALREADY_DONE", detail: `${id} is already done.` }
@@ -138,7 +138,7 @@ export function releaseItem(
   return withBoardLock(directory, () => {
     const item = listItems(directory).find((i) => i.id === id)
     if (!item) {
-      return { ok: false as const, reason: "NOT_FOUND", detail: `No work item ${id} in .opencode/board/.` }
+      return { ok: false as const, reason: "NOT_FOUND", detail: `No work item ${id} in .helm/board/.` }
     }
     if (item.owner_session === null) {
       return {
@@ -244,7 +244,7 @@ export function reopenItem(
   return withBoardLock(directory, () => {
     const item = listItems(directory).find((i) => i.id === id)
     if (!item) {
-      return { ok: false as const, reason: "NOT_FOUND", detail: `No work item ${id} in .opencode/board/.` }
+      return { ok: false as const, reason: "NOT_FOUND", detail: `No work item ${id} in .helm/board/.` }
     }
     if (item.released_sessions.includes(actingSessionID)) {
       return {

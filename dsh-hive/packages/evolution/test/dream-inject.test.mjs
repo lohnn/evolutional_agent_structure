@@ -24,7 +24,7 @@ import {
 
 function mkArchive() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dream-inject-"))
-  const base = path.join(dir, ".opencode/dreams/artifacts")
+  const base = path.join(dir, ".helm/dreams/artifacts")
   for (const sub of ["insights", "warnings", "songlines", "shadows"]) fs.mkdirSync(path.join(base, sub), { recursive: true })
   fs.writeFileSync(path.join(base, "insights/I-012.yaml"), "insight_id: I-012\ncontent: the pattern discovered\ndomain_tags: [a]\n", "utf8")
   fs.writeFileSync(path.join(base, "warnings/W-007.yaml"), "warning_id: W-007\ncontent: the risk\nstale: true\n", "utf8")
@@ -69,7 +69,7 @@ test("resolves across all four types", () => {
 test("a service pathForId wins when mounted (the mounted-archive path)", () => {
   const dir = mkArchive()
   const [r] = resolveDreamArtifacts(dir, "I-012", {
-    pathForId: (id) => path.join(dir, ".opencode/dreams/artifacts/songlines", `${id}.yaml`),
+    pathForId: (id) => path.join(dir, ".helm/dreams/artifacts/songlines", `${id}.yaml`),
   })
   assert.equal(r.ok, false, "the fake pathForId routes insights to songlines/ — and the miss is reported, not thrown")
   assert.match(r.detail, /not found/)
@@ -78,7 +78,7 @@ test("a service pathForId wins when mounted (the mounted-archive path)", () => {
 test("a mounted service that resolves correctly is used verbatim", () => {
   const dir = mkArchive()
   const [r] = resolveDreamArtifacts(dir, "I-012", {
-    pathForId: (id) => path.join(dir, ".opencode/dreams/artifacts/insights", `${id}.yaml`),
+    pathForId: (id) => path.join(dir, ".helm/dreams/artifacts/insights", `${id}.yaml`),
   })
   assert.equal(r.ok, true)
   assert.match(r.text, /the pattern discovered/)

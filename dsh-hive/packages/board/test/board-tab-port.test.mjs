@@ -103,7 +103,14 @@ test("port drift: render.ts differs ONLY by the documented deltas", (t) => {
   assert.ok(bannerIdx > 0, "TAB ADDITION banner present in body")
   const localBody = withoutBlankRuns(localBodyFull.slice(0, bannerIdx))
   const upBody = withoutBlankRuns(up)
-  assert.equal(localBody, upBody, "drift beyond the documented export/Notice/inline-type deltas")
+  // documented delta 4 (harbor-move P4 reader wave, 2026-11-27): the state-root
+  // token in prose — local says `.helm` (native constants after the state-root
+  // move), upstream still says `.opencode` (retirement-leg keep). Abstract BOTH
+  // sides to one token; this renderer holds no functional path joins (all four
+  // sites are comments), so nothing real can be masked. REMOVE with the compat
+  // symlink retirement wave.
+  const abstractStateRoot = (s) => s.replaceAll(".helm", ".opencode")
+  assert.equal(abstractStateRoot(localBody), abstractStateRoot(upBody), "drift beyond the documented export/Notice/inline-type deltas")
   void exportKeywords
 })
 

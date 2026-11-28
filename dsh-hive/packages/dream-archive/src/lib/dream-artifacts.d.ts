@@ -3,7 +3,7 @@
  *
  * Handrolled — zero YAML dependencies, consistent with the plugin's philosophy.
  *
- * Artifact schemas (from actual files in .opencode/dreams/artifacts/):
+ * Artifact schemas (from actual files in .helm/dreams/artifacts/):
  *
  * INSIGHT   (.../insights/I-NNN.yaml)
  *   insight_id, source_dream, confidence, domain_tags (flow), content (quoted),

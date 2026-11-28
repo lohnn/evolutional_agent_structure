@@ -15,7 +15,7 @@ import { UsageLog } from "@hive/dsh-evolution"
 test("usage log: append/read roundtrip with ts stamping; corrupt lines skipped", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "usage-log-"))
   const log = new UsageLog(dir)
-  assert.equal(log.file, path.join(dir, ".opencode", "hive-usage.jsonl"))
+  assert.equal(log.file, path.join(dir, ".helm", "hive-usage.jsonl"))
   assert.deepEqual(log.read(), [], "fresh log reads empty")
   log.append({ kind: "dispatch", shape: "resident", address: "capability/x" })
   log.append({ kind: "settle", shape: "one-shot", address: "builtin/dreamcatcher", ms: 4210, outcome: "completed" })

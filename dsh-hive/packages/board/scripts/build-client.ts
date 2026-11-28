@@ -108,7 +108,7 @@ const wrapper = `;window.__ModuleLoader__.load({
         });
         slots.inject('sidebar.panellist', () => {
           slots.register(
-            { name: 'sidebar.panellist', id: 'hive-board', order: 110, label: 'HIVE Board' },
+            { name: 'sidebar.panellist', id: 'hive-board', order: 110, label: 'HELM Chart' },
             (props) => React.createElement('span', {
               className: 'hvb-icon',
               dangerouslySetInnerHTML: { __html: E.ICON_SVG(props && typeof props.size === 'number' ? props.size : 20) },

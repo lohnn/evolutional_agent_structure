@@ -11,7 +11,7 @@ let dir
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), "dream-rank-test-"))
   for (const sub of ["insights", "warnings", "songlines", "shadows"]) {
-    fs.mkdirSync(path.join(dir, ".opencode/dreams/artifacts", sub), { recursive: true })
+    fs.mkdirSync(path.join(dir, ".helm/dreams/artifacts", sub), { recursive: true })
   }
 })
 afterEach(() => {
@@ -69,7 +69,7 @@ describe("rankArtifacts (token-v1 backend)", () => {
   it("lifecycle flags surface (stale, superseded_by)", () => {
     seed()
     fs.appendFileSync(
-      path.join(dir, ".opencode/dreams/artifacts/insights/I-001.yaml"),
+      path.join(dir, ".helm/dreams/artifacts/insights/I-001.yaml"),
       "stale: true\n",
       "utf8"
     )
@@ -94,7 +94,7 @@ describe("recordSurfacedEvent", () => {
   it("appends one jsonl line per event, creating dirs, never throwing", () => {
     recordSurfacedEvent(dir, "ses_1", "rank", "q text", ["I-001", "W-001"], 10)
     recordSurfacedEvent(dir, "ses_1", "query", "ids:I-001", ["I-001"], 1)
-    const f = path.join(dir, ".opencode/dreams/index/telemetry/ses_1.jsonl")
+    const f = path.join(dir, ".helm/dreams/index/telemetry/ses_1.jsonl")
     const lines = fs.readFileSync(f, "utf8").trim().split("\n").map((l) => JSON.parse(l))
     assert.equal(lines.length, 2)
     assert.equal(lines[0].tool, "rank")
@@ -105,7 +105,7 @@ describe("recordSurfacedEvent", () => {
 
   it("caps surfaced ids and query length", () => {
     recordSurfacedEvent(dir, "s", "rank", "q".repeat(500), Array.from({ length: 80 }, (_, i) => `I-${i}`), 100)
-    const f = path.join(dir, ".opencode/dreams/index/telemetry/s.jsonl")
+    const f = path.join(dir, ".helm/dreams/index/telemetry/s.jsonl")
     const ev = JSON.parse(fs.readFileSync(f, "utf8").trim())
     assert.equal(ev.surfaced.length, 50)
     assert.equal(ev.surfaced_count, 80)

@@ -3,7 +3,7 @@
 // exercise the B1 read surface against a real-store COPY plus a synthetic
 // workspace. Mirrors packages/dream-archive/test/service-harness.mjs.
 //
-// HARD RULE: the live store at /workspace/.opencode/board is NEVER written —
+// HARD RULE: the live store at /workspace/.helm/board is NEVER written —
 // this harness only ever cpSync's it into two tmp dirs and reads the copies.
 import { Context } from "@deepseek-ai/cordis"
 import Board from "@hive/dsh-board"
@@ -21,7 +21,7 @@ const check = (id, ok, detail) => {
 
 // Real-store copy: READ-ONLY methods over a copy of the live 78-entry board.
 const realCopy = fs.mkdtempSync(path.join(os.tmpdir(), "p-b1-real-"))
-fs.cpSync("/workspace/.opencode/board", path.join(realCopy, ".opencode/board"), { recursive: true })
+fs.cpSync("/workspace/.helm/board", path.join(realCopy, ".helm/board"), { recursive: true })
 
 // Synthetic workspace: write-adjacent reads (empty board) — never the live store.
 const synth = fs.mkdtempSync(path.join(os.tmpdir(), "p-b1-synth-"))
@@ -104,7 +104,7 @@ check("read.recency-total", items.every((it) => ctx.board.recency(it).length > 0
   const synthBoard = synthCtx.board
   check("read.empty-board", Array.isArray(synthBoard.items()) && synthBoard.items().length === 0, "items() over an empty workspace returns [] (no crash)")
   check("read.missing-dir-tolerated",
-    listItemsInDir(path.join(synth, ".opencode/board/never-existed")).length === 0,
+    listItemsInDir(path.join(synth, ".helm/board/never-existed")).length === 0,
     "wiping/missing board dir is tolerated (store creates on demand)")
 }
 

@@ -19,7 +19,7 @@ export interface TickResult {
 }
 
 function getStatePath(directory: string): string {
-  return path.join(directory, ".opencode/agents/hive-state.json")
+  return path.join(directory, ".helm/agents/hive-state.json")
 }
 
 export function readHiveState(directory: string): HiveState {
@@ -62,7 +62,7 @@ function updateFrontmatterEnergy(filePath: string, newEnergy: number): void {
 }
 
 export function tickEnergy(directory: string): { results: TickResult[]; warnings: TickResult[]; skipped: boolean } {
-  const capabilitiesPath = path.join(directory, ".opencode/agents/capabilities")
+  const capabilitiesPath = path.join(directory, ".helm/agents/capabilities")
   const state = readHiveState(directory)
   const usageLog = state.usageLog || []
 

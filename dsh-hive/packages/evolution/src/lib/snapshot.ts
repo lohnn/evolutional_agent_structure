@@ -5,11 +5,11 @@ import type { CapabilityInfo } from "../index.js"
 
 /**
  * The ecosystem dossier composer (T2, shared with T6): one textual snapshot of
- * the HIVE ecosystem — active roster with energies, the tick status, and the
- * dissolved listing (the void). Consumed by /awaken's dossier, the re-awaken
+ * the HELM ecosystem — active roster with energies, the tick status, and the
+ * dissolved listing (the harbor). Consumed by /awaken's dossier, the re-awaken
  * analysis, and (T6) /status's summary screen above its summary tool.
  *
- * Format follows D5: a clean HIVE dossier block, NO hand-drawn ASCII state
+ * Format follows D5: a clean HELM dossier block, NO hand-drawn ASCII state
  * bars — the board panels (NEXT WORK) will own state rendering, the text
  * should not draw what a panel will show.
  *
@@ -19,21 +19,21 @@ import type { CapabilityInfo } from "../index.js"
  */
 
 export interface EcosystemSnapshotSource {
-  /** Workspace root — the directory that CONTAINS `.opencode/` (as on Evolution). */
+  /** Workspace root — the directory that CONTAINS `.helm/` (as on Evolution). */
   directory: string
   /** The live roster (as on Evolution). */
   listCapabilities: () => CapabilityInfo[]
 }
 
 /**
- * Capability names in the void: the `dissolved/` dir holds the archived preset
+ * Capability names in the harbor: the `dissolved/` dir holds the archived preset
  * dirs and `.md` ledgers (both per dissolve()); the listing shows each NAME
  * once.
  */
 function listDissolved(directory: string): string[] {
   let entries: fs.Dirent[]
   try {
-    entries = fs.readdirSync(path.join(directory, ".opencode/agents/dissolved"), { withFileTypes: true })
+    entries = fs.readdirSync(path.join(directory, ".helm/agents/dissolved"), { withFileTypes: true })
   } catch {
     return []
   }
@@ -49,10 +49,10 @@ export function composeEcosystemSnapshot(source: EcosystemSnapshotSource): strin
   const state = readHiveState(source.directory)
   const dissolved = listDissolved(source.directory)
 
-  const lines: string[] = ["## HIVE Ecosystem Dossier", ""]
-  lines.push("### Roster (active capabilities)", "")
+  const lines: string[] = ["## HELM Ecosystem Dossier", ""]
+  lines.push("### Crew Manifest (active capabilities)", "")
   if (caps.length === 0) {
-    lines.push("  (none — the roster is empty)")
+    lines.push("  (none — the crew manifest is empty)")
   } else {
     for (const c of caps) {
       const energy = c.energy === null ? "?" : String(c.energy)
@@ -63,9 +63,9 @@ export function composeEcosystemSnapshot(source: EcosystemSnapshotSource): strin
   lines.push("### Energy", "")
   lines.push(`  last tick: ${state.lastTick ?? "never (no tick has run yet)"}`)
   lines.push("")
-  lines.push("### The Void (dissolved capabilities)", "")
+  lines.push("### The Harbor (dissolved capabilities)", "")
   if (dissolved.length === 0) {
-    lines.push("  (the void holds nothing)")
+    lines.push("  (the harbor holds nothing)")
   } else {
     for (const name of dissolved) lines.push(`  ${name}`)
   }
@@ -103,7 +103,7 @@ export interface PostCompactionContextSource {
    * `getCapabilitiesSummary()` output (an "Active capabilities:" list) or
    * null when the roster is empty/unreadable — an empty roster re-anchors
    * loudly ("(none …)"), it does not silently skip the whole block: the
-   * re-anchor's job is to restore HIVE awareness, and "the roster is empty"
+   * re-anchor's job is to restore HELM awareness, and "the roster is empty"
    * IS awareness.
    */
   capabilitySummary: string | null
@@ -132,10 +132,10 @@ function intentionExcerpt(intention: string): string {
  * WHETHER to anchor, never how.
  */
 export function composePostCompactionContext(source: PostCompactionContextSource): string {
-  const lines: string[] = ["== [HIVE] context restored after compaction", ""]
+  const lines: string[] = ["== [HELM] context restored after compaction", ""]
   lines.push("Active capabilities:")
   if (source.capabilitySummary === null) {
-    lines.push("  (none — the roster is empty)")
+    lines.push("  (none — the crew manifest is empty)")
   } else {
     lines.push(source.capabilitySummary)
   }

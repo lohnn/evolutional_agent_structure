@@ -1,56 +1,76 @@
 # Canonical Workspace Structure
 
-The canonical folder-structure contract for a HIVE workspace: the reproducible
-folder layout that surrounds the plugin, so any HIVE setup — on any machine — has
+The canonical folder-structure contract for a HELM workspace: the reproducible
+folder layout that surrounds the state root, so any HELM setup — on any machine — has
 the same, predictable shape.
 
+> **OpenCode retirement (2026-11-27):** the OpenCode plugin that bootstrapped and
+> owned the `.helm/` runtime was deleted from this repo — `src/index.ts` +
+> `bootstrapProject()`, `commands/`, `rules/`, `agents/`, `templates/`, and
+> `/workspace/opencode.json` (helm-rebrand design §5.5, DSH-only move). Composition
+> happens via the DSH profile; the `.helm/` runtime trees are owned by the DSH
+> plugins in `dsh-hive/packages/*` (board, dream-archive, hivemind, painpoints,
+> evolution). Sections describing the plugin's bootstrap machinery — §4, §5,
+> Appendix A, and the "gift is the plugin" framing — are kept as **historical
+> fact-records of the deleted code**. Live and still-true: the folder contract
+> (§2/§3, minus the retired design-shell rows), the per-project description
+> convention (§6), and the no-project-table rule (§8). The `.opencode → .helm`
+> compat symlink stays until one cycle passes.
+
 **What "canonical" means here:** the *folder contract* — the tier layout
-(`projects/`, `reference/`, `scratch/`) plus the tracked design shell — reproduced
-by **convention + this document + the plugin's bootstrap**. It is a layout
-convention, **independent of whether the workspace itself is version-controlled**.
-The workspace-root git repo (if any) is incidental and this-machine-only; it is
-**not** the distributable artifact (see "The gift is the plugin" below).
+(`projects/`, `reference/`, `scratch/`) — reproduced
+by **convention + this document** (the old-harness bootstrap that also generated it was
+retired 2026-11-27; the DSH plugins create the `.helm/` runtime trees they own). It is a
+layout convention, **independent of whether the workspace itself is version-controlled**.
+The workspace-root git repo (if any) is incidental and this-machine-only; this workspace
+does not keep one.
 
-### The gift is the plugin, not the workspace repo
+### The gift is the kit, not the workspace repo
 
-When HIVE is given to another machine, **the gift artifact is the PUBLISHED
-PLUGIN** (a global OpenCode plugin package) — *not* this workspace's git repo. The
-workspace-root git here is incidental scaffolding for this one machine; it is not
-meant to be cloned, shared, or used as a clean template. So this document does
-**not** prescribe curating the workspace repo into a pristine template (e.g. it
-does not ask you to strip it down to only `_template.md`). What travels is the
-plugin; what the plugin needs around it is this *folder contract*, which any
-machine reproduces by convention + bootstrap regardless of its git state.
+**Historical framing (pre-2026-11-27, updated):** when HELM is given to another
+machine, the gift artifact is the **dsh-hive install kit** (`dsh-hive-dist/` —
+committed version-pinned tarballs wired by `dsh-hive-update.sh` + `.pnpmfile.cjs`,
+see `docs/DSH-UPDATE-RUNBOOK.md`) — *not* a workspace git repo. Before the DSH
+move this role belonged to a published OpenCode plugin package; that distribution
+channel is retired with the plugin. What travels is the kit; what it needs around
+it is this *folder contract* (the kit machines run DSH and materialize `.helm/` from
+the DSH plugins, not from a bootstrap).
 
 ---
 
 ## 1. Purpose & Scope
 
-**Canonical here means the workspace folder *shell* AROUND `.opencode/` — NOT the
-`.opencode/` internals.**
+**Canonical here means the workspace folder *shell* AROUND `.helm/` — NOT the
+`.helm/` internals.**
+
+> **State-root name (harbor move, 2026-11-27):** the state root was renamed
+> `.opencode/` → `.helm/`. Documents, code constants, and fixtures in this
+> repo speak `.helm/` natively; the legacy `/workspace/.opencode` path survives
+> as a **compat symlink → `.helm`** (covered by tools/test/layout-probe.test.mjs,
+> to be removed with the symlink itself). The old-harness plugin (retirement
+> pending) still materializes `.opencode` on fresh machines — through the
+> symlink both names address the same tree.
 
 The boundary is hard and deliberate:
 
-- **The plugin owns everything *inside* `.opencode/`.** `bootstrapProject()` (in
-  `src/index.ts`) runs on every session start and idempotently generates the
-  entire `.opencode/` runtime tree — dreams, hivemind, painpoints, board,
-  capabilities/dissolved dirs, the `_template.md` seed, and the skills symlink.
-  You do **not** author those by hand, and this document does **not** specify
-  them beyond what bootstrap guarantees (see §5).
+- **The DSH plugins own everything *inside* `.helm/`.** Since the 2026-11-27 retirement
+  there is no bootstrap plugin: each runtime tree is created and owned by its DSH package
+  (`dsh-hive/packages/*` — board, dream-archive, hivemind, painpoints, evolution) from its
+  `directory: /workspace` cordis config. You do **not** author those by hand, and this
+  document does **not** specify them beyond what the packages guarantee.
 
-- **This document owns the *shell*** — the folder tiers around `.opencode/` and
-  the ignore discipline that keeps work + runtime out of any workspace repo. The
-  design-shell files must pre-exist (they are the authored seed); the tier folders
-  are (re)created by bootstrap; the `.opencode/` internals appear on first load.
+- **This document owns the *shell*** — the folder tiers around `.helm/` and
+  the ignore discipline that keeps work + runtime out of any workspace repo.
 
-If you are looking for what lives *inside* `.opencode/`, read `bootstrapProject()`
-— that is the source of truth, not this file.
+If you are looking for what lives *inside* `.helm/`, read the owning DSH package
+(`dsh-hive/packages/<board|dream-archive|hivemind|painpoints|evolution>`) — that is the
+source of truth, not this file.
 
 ---
 
 ## 2. The Folder Contract
 
-Four tiers plus the tracked design shell:
+Four tiers plus the (partly retired) design shell:
 
 - **`projects/`** — things actively worked on. Git-ignored by any workspace repo;
   each project is its **own** independent git repo (or a plain dir).
@@ -60,26 +80,28 @@ Four tiers plus the tracked design shell:
     source to read, not to modify).
   - **`reference/material/`** — non-code reference material (books, exports, notes).
 - **`scratch/`** — the user's own throwaway / scratch work. Git-ignored.
-- **the tracked design shell** — `opencode.json`, `.gitignore`, `AGENTS.md`,
-  `.opencode/index.ts`, `.opencode/rules/` — the authored seed.
+- **the design shell** — *retired with the plugin 2026-11-27*: `opencode.json` is
+  **deleted from this workspace**, and the `.helm/index.ts` boot plugin +
+  `.helm/rules/` never existed on this machine (gift-machine design only — see
+  the historical table below); `AGENTS.md` and `.gitignore` remain.
 
 ```
 <workspace-root>/
 │
-├── opencode.json                 ← TRACKED  (design) — plugin registration + permissions
-├── .gitignore                    ← TRACKED  (design) — "track design, ignore work+runtime"
-├── AGENTS.md                     ← TRACKED  (design) — workspace-wide agent instructions
+├── opencode.json                 ← RETIRED 2026-11-27 — plugin registration + permissions; deleted from this workspace
+├── .gitignore                    ← workspace-level — "track design, ignore work+runtime" discipline
+├── AGENTS.md                     ← workspace-wide agent instructions
 │
-├── .opencode/                    ← MIXED — ignore the dir, re-include only design files
-│   ├── index.ts                  ← TRACKED  (design) — the BOOT plugin (see §4/§A3)
+├── .helm/                    ← MIXED — ignore the dir, re-include only design files (gift-machine git design; this workspace keeps no repo)
+│   ├── index.ts                  ← RETIRED design — the BOOT plugin (never present on this machine; see §A3)
 │   ├── rules/
-│   │   └── no-update.md          ← TRACKED  (design) — reserve /update for the user
+│   │   └── no-update.md          ← RETIRED design — reserve /update for the user (nothing runs /update anymore)
 │   ├── agents/
-│   │   ├── capabilities/         ← TRACKED  (design) — capability prompt defs
-│   │   │   └── _template.md      ← TRACKED  — the capability seed
-│   │   └── dissolved/            ← TRACKED  (design) — retired capability prompts
+│   │   ├── capabilities/         ← MUTABLE state — capability prompt defs (owned by the evolution package)
+│   │   │   └── _template.md      ← the capability seed (lives in state since the 2026-11-27 retirement of repo templates/)
+│   │   └── dissolved/            ← retired capability prompts
 │   │   └── …                     ← everything else under agents/ is IGNORED (runtime)
-│   ├── skills/                   ← IGNORED  — runtime symlink dir (dreamtime → plugin repo)
+│   ├── skills/                   ← IGNORED  — runtime symlink dir (dreamtime → skills/dreamtime in this repo)
 │   ├── dreams/                   ← IGNORED  (runtime) — artifacts, raw journals, DRM state
 │   ├── hivemind/                 ← IGNORED  (runtime) — live message inboxes
 │   ├── painpoints/               ← IGNORED  (runtime) — harness/workflow friction logs
@@ -103,14 +125,14 @@ Four tiers plus the tracked design shell:
 
 | Entry | Status | Why |
 |-------|--------|-----|
-| `opencode.json` | **Tracked (design)** | Registers the plugin + permission policy — the workspace's wiring |
-| `.gitignore` | **Tracked (design)** | The enforcing mechanism of the whole contract (§3) |
-| `AGENTS.md` | **Tracked (design)** | Workspace-wide agent instructions (tooling/conventions — no project table; see §7) |
-| `.opencode/index.ts` | **Tracked (design)** | The **boot** plugin (restart log + `/update`) — separate from HIVE (§4) |
-| `.opencode/rules/no-update.md` | **Tracked (design)** | Safety rule reserving `/update` for the user |
-| `.opencode/agents/capabilities/` | **Tracked (design)** | Capability prompt definitions incl. `_template.md` |
-| `.opencode/agents/dissolved/` | **Tracked (design)** | Retired capability prompts |
-| everything else in `.opencode/` | **Ignored (runtime)** | Generated by `bootstrapProject()` / live churn |
+| `opencode.json` | **RETIRED 2026-11-27** | Registered the OpenCode plugin; deleted from this workspace with the engine (design §5.5 step 4). DSH composition is via the profile, not this file |
+| `.gitignore` | kept | The enforcing mechanism of the folder contract (§3) — applies wherever a workspace repo exists |
+| `AGENTS.md` | kept | Workspace-wide agent instructions (tooling/conventions — no project table; see §8) |
+| `.helm/index.ts` | **RETIRED design** | The old **boot** plugin (restart log + `/update`) — nuclear design for gift machines; never present on this machine, OpenCode commands no longer exist |
+| `.helm/rules/no-update.md` | **RETIRED design** | Safety rule reserving `/update` for the user — same retirement |
+| `.helm/agents/capabilities/` | **State (owned by evolution pkg)** | Capability prompt definitions incl. `_template.md` — live in `.helm/`, owned by `dsh-hive/packages/evolution` |
+| `.helm/agents/dissolved/` | **State (owned by evolution pkg)** | Retired capability prompts |
+| everything else in `.helm/` | **Ignored (runtime)** | Owned/created by the DSH packages (no bootstrap since 2026-11-27) |
 | `projects/` | **Ignored (work)** | Each project is its own repo; not part of the setup |
 | `reference/repos/` | **Ignored (reference)** | Clones of other codebases you read but won't modify |
 | `reference/material/` | **Ignored (reference)** | Non-code reference material |
@@ -131,9 +153,9 @@ per-entry, so those embedded/gitlink repos are reported correctly.)
 This is the enforcing mechanism of the entire contract. The governing rule, quoted
 from the workspace root `.gitignore`:
 
-> This repo versions the *workspace setup itself* — the OpenCode/HIVE config and
+> This repo versions the *workspace setup itself* — the OpenCode/HELM config and
 > agent prompt definitions — NOT the projects we work on (each has its own repo)
-> and NOT the live runtime state the HIVE generates as it runs.
+> and NOT the live runtime state the HELM generates as it runs.
 >
 > **Rule of thumb: track the *design* of the workspace, ignore everything we are
 > actively working on and everything generated at runtime.**
@@ -159,47 +181,52 @@ A single `/reference/` rule covers both `reference/repos/` and
 under it) — there are no per-item root rules to drift. `/scratch/` covers the
 throwaway tier. `projects/` is unchanged.
 
-### `.opencode/`: ignore the directory, then **re-include** the design files
+### `.helm/`: ignore the directory, then **re-include** the design files
 
-`.opencode/` is mixed — mostly runtime, a few design files. The discipline is:
+`.helm/` is mixed — mostly runtime, a few design files. The discipline is:
 ignore the whole directory, then re-include exactly the design entries with `!`
 re-include rules. This is the "track the design, ignore the runtime" pattern made
 concrete:
 
 ```gitignore
 # Ignore the whole directory…
-/.opencode/*
+/.helm/*
 
 # …then re-include the config + plugin wiring
-!/.opencode/index.ts
-!/.opencode/rules/
-!/.opencode/agents/
+!/.helm/index.ts
+!/.helm/rules/
+!/.helm/agents/
 
 # Within agents/, track only the prompt definitions, not runtime state files
-/.opencode/agents/*
-!/.opencode/agents/capabilities/
-!/.opencode/agents/dissolved/
+/.helm/agents/*
+!/.helm/agents/capabilities/
+!/.helm/agents/dissolved/
 ```
 
 **Re-include mechanics — read them in order:**
 
-1. `/.opencode/*` ignores every top-level entry in `.opencode/`.
-2. `!/.opencode/index.ts`, `!/.opencode/rules/`, `!/.opencode/agents/`
+1. `/.helm/*` ignores every top-level entry in `.helm/`.
+2. `!/.helm/index.ts`, `!/.helm/rules/`, `!/.helm/agents/`
    un-ignore only the design entries.
-3. `/.opencode/agents/*` then re-ignores everything *inside* `agents/`…
-4. …and `!/.opencode/agents/capabilities/` + `!/.opencode/agents/dissolved/`
+3. `/.helm/agents/*` then re-ignores everything *inside* `agents/`…
+4. …and `!/.helm/agents/capabilities/` + `!/.helm/agents/dissolved/`
    re-include only the two prompt-definition subtrees — so runtime files like
    `agents/hive-state.json` stay ignored.
 
 **`skills/` is intentionally NOT tracked here.** It is a runtime symlink dir
-(`dreamtime → <plugin-repo>/skills/dreamtime`) whose *content* is versioned in the
-plugin repo, not in the workspace setup repo. It's covered by `/.opencode/*` and
-also by a nested `.opencode/.gitignore`. It is wired in at runtime by
-`bootstrapProject()` (see §A1, §5).
+(`dreamtime → <repo>/skills/dreamtime` — the target is `skills/dreamtime/` in THIS repo) whose
+*content* is versioned in this repo, not in a workspace setup repo. It's covered by `/.helm/*`
+and also by a nested `.helm/.gitignore`. It **was** wired in at runtime by the plugin's
+`bootstrapProject()` (see §A1, §5) — retired 2026-11-27; the existing symlink on this machine
+predates that and still resolves into this repo (`skills/dreamtime/` is kept).
 
 ---
 
 ## 4. Two Provisioning Modes
+
+> **RETIRED 2026-11-27.** This section described how the OpenCode plugin resolved its assets in
+> vendored vs published installs — `opencode.json`, `PACKAGE_ROOT`, published-plugin npm
+> distribution. All gone with the engine. Kept verbatim as a fact-record.
 
 The plugin resolves all of its *own* assets from its own module location
 (`import.meta.url`), not from a fixed workspace-relative path (see §A2). This is
@@ -209,9 +236,9 @@ what makes both modes work from the same code.
 |--------|-----------------------------------------------|-----------------------------------------|
 | Plugin location | Vendored at `projects/evolutional_agent_structure/` | Installed as a published/global OpenCode plugin package |
 | `opencode.json` registration | Relative src path: `"./projects/evolutional_agent_structure/src/index.ts"` | Package name: `"evolutional-agent-structure"` |
-| `PACKAGE_ROOT` resolves to | `…/projects/evolutional_agent_structure/` (sibling of `.opencode/`) | The global package install dir (wherever the plugin manager put it) |
+| `PACKAGE_ROOT` resolves to | `…/projects/evolutional_agent_structure/` (sibling of `.helm/`) | The global package install dir (wherever the plugin manager put it) |
 | Skills symlink `src` (target) | `PACKAGE_ROOT/skills/dreamtime` → resolves into the vendored sibling | `PACKAGE_ROOT/skills/dreamtime` → resolves into the **installed package** dir |
-| Skills symlink `dest` | `<workspace>/.opencode/skills/dreamtime` | `<workspace>/.opencode/skills/dreamtime` |
+| Skills symlink `dest` | `<workspace>/.helm/skills/dreamtime` | `<workspace>/.helm/skills/dreamtime` |
 | Skills symlink outcome | Resolves to sibling — works | **Resolves to the installed package's `skills/` — works, does NOT dangle** (see §A1) |
 | Shipped assets (agents, commands, rules, `_template.md`) | Read from `PACKAGE_ROOT` (sibling) | Read from `PACKAGE_ROOT` (installed package) — same code path |
 
@@ -235,6 +262,12 @@ The only residual caveats are environmental, not layout-related:
 
 ## 5. The Bootstrap Contract
 
+> **RETIRED 2026-11-27.** `bootstrapProject()` lived in the deleted `src/index.ts`. The trees it
+> used to create are now created/owned by the DSH packages themselves (board, dream-archive,
+> hivemind, painpoints, evolution — each from its `directory: /workspace` cordis config); the
+> skills symlink is the one survivor on this machine (kept, see §3). Kept verbatim as a
+> fact-record of the deleted mechanism.
+
 `bootstrapProject(directory)` runs on **every** session start (and on
 `hive-setup`). It is idempotent — safe to run repeatedly. It **generates
 automatically** (so it need NOT pre-exist on a gift machine):
@@ -244,7 +277,7 @@ tier dirs, so the taxonomy exists and `workspace_map` can enumerate it on any
 machine; all are git-ignored, so empty dirs add zero tracked clutter):
 - `reference/repos/`, `reference/material/`, `scratch/`
 
-Under `<workspace>/.opencode/`:
+Under `<workspace>/.helm/`:
 - `agents/capabilities/` and `agents/dissolved/` (created if absent)
 - `agents/capabilities/_template.md` — copied from the plugin's
   `templates/_template.md` **only if not already present** (never overwrites a
@@ -266,12 +299,12 @@ What must **pre-exist** as the authored seed (NOT generated by bootstrap):
 - `opencode.json` (with the plugin registered — by package name on a gift machine)
 - `.gitignore` (the §3 discipline)
 - `AGENTS.md`
-- `.opencode/index.ts` (the boot plugin) and `.opencode/rules/no-update.md`
+- `.helm/index.ts` (the boot plugin) and `.helm/rules/no-update.md`
 
 **Minimal gift-machine seed, therefore:** install the published plugin, register it
 in `opencode.json` by name, drop in the design-shell files above, and start
 OpenCode. The tier folders (`reference/*`, `scratch/`) and everything under
-`.opencode/` materialize on first load. Note the folder contract is a *convention*:
+`.helm/` materialize on first load. Note the folder contract is a *convention*:
 it holds whether or not the workspace itself is under git — git-ignore rules only
 matter if you choose to version-control the workspace root.
 
@@ -326,7 +359,7 @@ doesn't inherit them. **Not fixed here.**
    desired.
 
 2. **`.gitignore` tracks the *live* capability roster (intentional — left as-is).**
-   The re-include rule `!/.opencode/agents/capabilities/` pulls in **every**
+   The re-include rule `!/.helm/agents/capabilities/` pulls in **every**
    capability prompt in that directory, so on the builder machine the workspace git
    would carry this machine's full live roster, not just `_template.md`. This is a
    known "leak" of machine-specific state into the workspace repo — but since the
@@ -357,6 +390,9 @@ is the register.
 
 ## Appendix A — Part A Investigation Findings (fact-per-code)
 
+> **RETIRED 2026-11-27** — describes code (`src/index.ts`, `src/hooks.ts`) that no longer
+> exists. Kept verbatim as the fact-record of the deleted mechanism; do not cite as current.
+
 Grounded in `src/index.ts` and `src/hooks.ts` as they exist at the time of writing.
 Behavior stated is what the code does, not what is assumed.
 
@@ -368,7 +404,7 @@ Behavior stated is what the code does, not what is assumed.
   `PACKAGE_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..")`.
   It is **computed from the plugin's own module location** — NOT hardcoded as a
   workspace-relative sibling path.
-- **Dest:** `path.join(directory, ".opencode/skills", entry)` — i.e. under the
+- **Dest:** `path.join(directory, ".helm/skills", entry)` — i.e. under the
   *workspace* root passed in by OpenCode.
 - **Symlink vs copy:** it **symlinks** (`fs.symlinkSync(src, dest)`). It does not
   copy. Before linking, if a `dest` already exists and is not already the correct
@@ -398,7 +434,7 @@ workspace-relative in a way that assumes the vendored layout.
 | `rules/delegation.md`, `rules/coordinator-dreams.md`, `rules/hivemind-capabilities.md` (`RULES_DIR`, injected via `ctx.rulesDir` in `system.transform` — the first two coordinator-only, the last capability-only) | `PACKAGE_ROOT/rules` | ✅ portable |
 | `skills/*` symlink source | `PACKAGE_ROOT/skills` | ✅ portable |
 | `package.json` (version read) | `PACKAGE_ROOT/package.json` | ✅ portable |
-| all `.opencode/…` runtime (dreams, hivemind, painpoints, board, capabilities, skills **dest**) | `directory` (workspace) | ✅ correct — always the workspace |
+| all `.helm/…` runtime (dreams, hivemind, painpoints, board, capabilities, skills **dest**) | `directory` (workspace) | ✅ correct — always the workspace |
 
 `readMdDir()` is existence-guarded (`if (!fs.existsSync(dirPath)) return []`), so a
 missing shipped-asset dir degrades to "no agents/commands registered" rather than
@@ -414,16 +450,16 @@ crashing. **No code path assumes the plugin lives at `projects/…`.**
     "./projects/opencode-discord-bridge/dist/index.js"
   ]
   ```
-  HIVE is registered by **relative src path** (vendored).
+  HELM is registered by **relative src path** (vendored).
 - **Published-install equivalent:** register by **package name**, e.g.
   `"evolutional-agent-structure"` in the `plugin` array (OpenCode resolves it from
   the installed plugin package).
-- **The boot plugin `.opencode/index.ts` is separate and unrelated to HIVE
+- **The boot plugin `.helm/index.ts` is separate and unrelated to HELM
   (confirmed).** It is a small independent plugin that maintains
-  `.opencode/restart.log` and registers a `/update` command (which runs
-  `opencode upgrade && kill 1`). It shares no code with HIVE and is registered as
+  `.helm/restart.log` and registers a `/update` command (which runs
+  `opencode upgrade && kill 1`). It shares no code with HELM and is registered as
   its own entry in the `plugin` array. On a gift machine it is part of the design
-  shell (tracked), but it is not the HIVE plugin.
+  shell (tracked), but it is not the HELM plugin.
 
 ### A4. Anything else that assumes the vendored layout
 

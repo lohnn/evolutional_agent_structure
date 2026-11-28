@@ -119,7 +119,7 @@ test("resolveSessionItem (v1.3): a LIVE in_progress bind outranks a settled done
 
 // ── route over the real store copy ───────────────────────────────────────────
 
-const REAL_STORE = "/workspace/.opencode/board"
+const REAL_STORE = "/workspace/.helm/board"
 // find a REAL in_progress owned item to pair with (the verify uses the real
 // store through a tmp COPY — never the live files).
 function findRealOwnedPairing() {
@@ -151,7 +151,7 @@ test("the session-item route serves the real owned item over a store copy", asyn
   new Tools(routeCtx, {})
 
   const storeCopy = fs.mkdtempSync(path.join(os.tmpdir(), "hvs-pair-"))
-  fs.cpSync(REAL_STORE, path.join(storeCopy, ".opencode/board"), { recursive: true })
+  fs.cpSync(REAL_STORE, path.join(storeCopy, ".helm/board"), { recursive: true })
 
   routeCtx.provide("webServer", fake)
   routeCtx.plugin(Board, { directory: storeCopy })

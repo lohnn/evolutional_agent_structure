@@ -6,7 +6,7 @@
  * → supersession-protection signal). Written server-side by tool
  * implementations as a side effect — no agent holds or needs this authority.
  *
- * Layout: .opencode/dreams/index/telemetry/<sessionID>.jsonl
+ * Layout: .helm/dreams/index/telemetry/<sessionID>.jsonl
  *   One file per session (per-writer separation, W-024 — concurrent sessions
  *   never share an append target). One JSON line per surfacing event.
  *   A future maintenance step compacts these into a summary via
@@ -35,7 +35,7 @@ const MAX_IDS_PER_EVENT = 50
 const MAX_QUERY_LEN = 300
 
 function telemetryDir(directory: string): string {
-  return path.join(directory, ".opencode/dreams/index/telemetry")
+  return path.join(directory, ".helm/dreams/index/telemetry")
 }
 
 /** Sanitise sessionID for use as a filename segment (same rule as dream-journal.ts). */

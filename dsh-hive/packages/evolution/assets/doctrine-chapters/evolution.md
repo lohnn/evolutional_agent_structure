@@ -1,4 +1,4 @@
-# HIVE Doctrine — Evolution (lifecycle operations + energy)
+# HELM Doctrine — Evolution (lifecycle operations + energy)
 
 The chapter for evolution analysis: run it via /evolve or whenever you
 propose lifecycle changes. It expands the standing core's lifecycle summary
@@ -17,8 +17,8 @@ from planning.
   ("[A] and [B] have merged into [C].")
 - **MUTATE** — struggle or drift. The capability self-modifies its method.
   ("[A] has mutated: [summary].")
-- **DISSOLVE** — no longer needed. Return to the void, archived.
-  ("[A] has returned to the void.")
+- **DISSOLVE** — no longer needed. Return to harbor, archived.
+  ("[A] has retired to harbor.")
 
 Detect the signals that trigger them: need (something no capability
 handles), overlap (several doing similar work), overload (energy above 90),

@@ -93,6 +93,35 @@ function collectHivemindPartition() {
   return new Set([...indexSrc.slice(start, end).matchAll(/"(hive_[a-z0-9_]+)"/g)].map((m) => m[1]))
 }
 
+// ── P2 dual-name alias cycle (helm-rebrand-design.md §2.5/§3) — the census
+// legs. The helm_* aliases are spread-copies registered beside each hive_*
+// definition (same schema/execute by reference; no defineTool({name:"helm_…"})
+// literal), so the source-truth for this half is the census MAP in evolution
+// plus each package's small literal registration table — no new collectors
+// over registration sites.
+function collectHelmAliasMap() {
+  const indexSrc = fs.readFileSync(path.join(PKG, "src", "index.ts"), "utf8")
+  const start = indexSrc.indexOf("export const HELM_TOOL_ALIASES")
+  assert.ok(start >= 0, "HELM_TOOL_ALIASES must exist in evolution src (P2 alias cycle census)")
+  const end = indexSrc.indexOf("} as const", start)
+  const block = indexSrc.slice(start, end)
+  return new Map([...block.matchAll(/(hive_[a-z0-9_]+)\s*:\s*"(helm_[a-z0-9_]+)"/g)].map((m) => [m[1], m[2]]))
+}
+
+function collectPackageAliasTables() {
+  const out = new Map()
+  // The four DEPENDENT packages carry their own literal tables next to their
+  // registration code (no new cross-package deps; W-044). evolution's own 4
+  // global pairs + the 10 summoned pairs live in the census map only.
+  for (const pkg of ["board", "tools", "hivemind", "painpoints"]) {
+    walkTs(path.join(MONOREPO, "packages", pkg, "src"), (file) => {
+      const text = fs.readFileSync(file, "utf8")
+      for (const m of text.matchAll(/(hive_[a-z0-9_]+)\s*:\s*"(helm_[a-z0-9_]+)"/g)) out.set(m[1], m[2])
+    })
+  }
+  return out
+}
+
 function collectBoardCohortTools() {
   const names = new Set()
   walkTs(path.join(MONOREPO, "packages", "board", "src"), (file) => {
@@ -250,5 +279,86 @@ test("hivemind partition == the 4 mailbox tools, ⊆ census, disjoint from dorma
   for (const core of ["hive_dispatch", "hive_send", "hive_children"]) {
     assert.ok(census.has(core), `${core} must exist in the census`)
     assert.ok(!dreamtime.has(core) && !hiv.has(core), `${core} must never be standing-restricted`)
+  }
+})
+
+
+// ── P2 dual-name alias cycle legs ─────────────────────────────────────────────
+
+test("p2: the helm alias census (HELM_TOOL_ALIASES) == the mechanical rule over all 40 names (30 global + 10 summoned)", () => {
+  const map = collectHelmAliasMap()
+  const global = collectGlobalHiveTools()
+  const summoned = new Set(collectLifecycleSummons())
+  assert.equal(map.size, 40, `census 40 pairs, got ${map.size}: ${[...map.keys()].join(", ")}`)
+  const keys = new Set(map.keys())
+  const missing = [...global].concat([...summoned]).filter((n) => !keys.has(n))
+  const phantom = [...keys].filter((n) => !global.has(n) && !summoned.has(n))
+  assert.deepEqual({ missing, phantom }, { missing: [], phantom: [] },
+    `alias census out of sync with registrations — missing: [${missing}], aliases without registrations: [${phantom}]`)
+  // The mechanical rule (§2.5): chart domain for board, crew domain for the
+  // capability-dispatch plane, bare helm_<verb> otherwise — EXCEPT hive_status,
+  // whose bare helm_status form is TAKEN by the top-level orchestration seam
+  // (@hive/dsh-helm registers it; ToolsService.register throws on duplicates
+  // in the shared global layer). DEVIATION FLAGGED FOR VALIDATION.
+  const rule = (name) => {
+    const rest = name.slice("hive_".length)
+    if (rest.startsWith("board_")) return `helm_chart_${rest.slice("board_".length)}`
+    if (["signal", "listen", "sent", "retire"].includes(rest)) return `helm_comms_${rest}`
+    if (["dispatch", "send", "children", "status"].includes(rest)) return `helm_crew_${rest}`
+    return `helm_${rest}`
+  }
+  const wrong = [...map].filter(([k, v]) => v !== rule(k))
+  assert.deepEqual(wrong, [], `alias names must follow the ratified pattern+deviation, offenders: ${JSON.stringify(wrong)}`)
+})
+
+test("p2: per-package alias tables == the 26 global pairs they register (parked pairs in evolution's map stay census-only)", () => {
+  const map = collectHelmAliasMap()
+  const tables = collectPackageAliasTables()
+  const summoned = new Set(collectLifecycleSummons())
+  const global = collectGlobalHiveTools()
+  // No per-package table may carry a summon: summoned aliases derive from the
+  // census map inside registerLifecycleTool (never global, never denied).
+  const summonedInTables = [...tables.keys()].filter((n) => summoned.has(n))
+  assert.deepEqual(summonedInTables, [], "summoned pairs must not appear in package alias tables")
+  // The tables must cover exactly the global pairs they own (total 26 of the
+  // 30 global registrations — evolution's own 4 live in the census map).
+  const tableKeys = new Set(tables.keys())
+  const expectedKeys = [...global].filter((n) => !(["hive_dispatch", "hive_send", "hive_children", "hive_doctrine"].includes(n)))
+  const missing = expectedKeys.filter((n) => !tableKeys.has(n))
+  const phantom = [...tableKeys].filter((n) => !global.has(n))
+  assert.deepEqual({ missing, phantom }, { missing: [], phantom: [] },
+    `package alias tables out of sync — missing: [${missing}], phantom: [${phantom}]`)
+  const wrong = [...tables].filter(([k, v]) => map.get(k) !== v)
+  assert.deepEqual(wrong, [], `package tables must agree with the census map, offenders: ${JSON.stringify(wrong)}`)
+})
+
+test("p2: the alias-aware seams are actually wired (source pins on the four filter sites + the summon)", () => {
+  const indexSrc = fs.readFileSync(path.join(PKG, "src", "index.ts"), "utf8")
+  // The dormant gate masks both spellings (deny base) while the open surface
+  // stays canonical with its aliases pairwise-twinning the twin's openness:
+  assert.ok(indexSrc.includes("const deny = TOOL_GATE_DENY_BASE.filter"), "the dormant gate must mask TOOL_GATE_DENY_BASE (both spellings)")
+  assert.ok(indexSrc.includes("expandWithAliases(HIVE_DORMANT_OPEN_TOOLS)"), "the dormant-open surface must carry its alias twins pairwise")
+  // The standing partitions (dreamtime + hivemind) mask both spellings:
+  assert.ok(indexSrc.includes("expandWithAliases(\n      this.hivemind === false") ||
+           /expandWithAliases\(\s*this\.hivemind === false/.test(indexSrc) ||
+           indexSrc.split("expandWithAliases(").length >= 4,
+    "the standing partitions must expand both spellings (gate + /dream toggle share the helper)")
+  // The dispatched-child filters (builtin deny + one-shot allow) expand at the
+  // single apply-site:
+  assert.ok(indexSrc.includes("expandToolFilter(\n        this.dispatchToolFilters.get(sessionId)") ||
+           /expandToolFilter\(\s*this\.dispatchToolFilters\.get/.test(indexSrc),
+    "dispatch filters must expand at the apply-site (old-name ledger records included)")
+  // The summoned lifecycle pairs ride ONE combined disposer:
+  assert.ok(indexSrc.includes("disposer = registerWithHelmAlias(\n      agentCtx.tools,") ||
+           /registerWithHelmAlias\(\s*agentCtx\.tools/.test(indexSrc),
+    "registerLifecycleTool must register the helm_* twin on the SAME definition")
+})
+
+test("p2: every standing-partition name has an alias twin (the expansion is total)", () => {
+  const map = collectHelmAliasMap()
+  const dreamtime = collectDreamtimePartition()
+  const hivemind = collectHivemindPartition()
+  for (const n of [...dreamtime, ...hivemind]) {
+    assert.ok(map.has(n), `${n} must have a helm_* twin in the census map — else the alias leaks past the standing partition`)
   }
 })

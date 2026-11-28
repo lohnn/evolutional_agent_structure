@@ -2,7 +2,7 @@
  * @hive/dsh-dream-archive — the dream archive as a dsh Service.
  *
  * Exposes `ctx.dreamArchive`: the complete read/write surface over the
- * handrolled-YAML dream archive at `<workspace>/.opencode/dreams` (artifacts,
+ * handrolled-YAML dream archive at `<workspace>/.helm/dreams` (artifacts,
  * DRM state files, residue journals, rank, telemetry).
  *
  * The lib modules under `./lib/` are VERBATIM ports of the OpenCode HIVE
@@ -90,7 +90,7 @@ import {
 
 export interface DreamArchiveConfig {
   /**
-   * Workspace root — the directory that CONTAINS `.opencode/`.
+   * Workspace root — the directory that CONTAINS `.helm/`.
    * Defaults to the process cwd (dsh runs pinned to the workspace).
    */
   directory?: string
@@ -109,7 +109,7 @@ declare module "@deepseek-ai/cordis" {
  */
 export class DreamArchive extends Service {
   static Config = z.object({
-    // Workspace root (the dir containing `.opencode/`). Default: process cwd.
+    // Workspace root (the dir containing `.helm/`). Default: process cwd.
     directory: z.string().default(process.cwd()),
   })
 

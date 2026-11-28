@@ -455,7 +455,7 @@ export function makeHiveStateDock(
           pillRef.current = n
         },
         onClick: () => setOpen((v: boolean) => !v),
-        title: "HIVE state of this session (WI-083, read-only)",
+        title: "HELM state of this session (WI-083, read-only)",
       },
       React.createElement("span", { className: "hvs-dot", "data-dot": stage.tone }),
       React.createElement("span", { className: "hvs-word" }, `hive · ${fetchFailed ? "route pending" : stage.stage}`),
@@ -510,7 +510,7 @@ function drawPanel(
   const title = String(parts.row?.displayTitle ?? parts.row?.title ?? parts.sessionId.slice(0, 12))
   const head = el("div", "hvs-head")
   const titleEl = el("div", "hvs-title")
-  titleEl.textContent = `HIVE state — ${title}`
+  titleEl.textContent = `HELM state — ${title}`
   head.appendChild(titleEl)
   const close = el("button", "hvs-close", "✕")
   close.addEventListener("click", () => parts.onClose())
@@ -551,7 +551,7 @@ function drawPanel(
     const cardItem = parts.itemCard.pairing.item
     const card = el("div", "hvs-card")
     card.setAttribute("role", "button")
-    card.setAttribute("title", `Open ${cardItem.id} in the HIVE Board tab`)
+    card.setAttribute("title", `Open ${cardItem.id} in the HELM Chart tab`)
     const top = el("div", "hvs-card-top")
     top.appendChild(el("span", "hvs-card-id", cardItem.id))
     top.appendChild(el("span", "hvs-card-status", cardItem.status))
@@ -580,7 +580,7 @@ function drawPanel(
       ),
     )
   } else if (hive?.isCoordinator) {
-    hiveLine.appendChild(el("span", "hvs-hive", "HIVE coordinator"))
+    hiveLine.appendChild(el("span", "hvs-hive", "the Helmsman"))
     hiveLine.appendChild(
       document.createTextNode(` — ${hive.agent ?? "unknown"} · awakened ${fmtTime(hive.awakenedAt)} (${relTime(hive.awakenedAt)})`),
     )

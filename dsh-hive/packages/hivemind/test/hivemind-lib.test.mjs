@@ -22,7 +22,7 @@ import {
 
 function mk() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hivemind-lib-"))
-  fs.mkdirSync(path.join(dir, ".opencode/agents/capabilities"), { recursive: true })
+  fs.mkdirSync(path.join(dir, ".helm/agents/capabilities"), { recursive: true })
   return dir
 }
 
@@ -84,13 +84,13 @@ test("markDelivered flips pending → delivered; markAllRead sweeps only shown",
 test("staleness: dissolved-sender is STRONG; age alone is WEAK and never excludes", () => {
   const dir = mk()
   // An active capability file exists for "live-sender".
-  fs.writeFileSync(path.join(dir, ".opencode/agents/capabilities/live-sender.md"), "---\nname: live-sender\n---\n")
+  fs.writeFileSync(path.join(dir, ".helm/agents/capabilities/live-sender.md"), "---\nname: live-sender\n---\n")
   const old = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000).toISOString() // 40d
   const f1 = sendMessage(dir, { sender: "live-sender", recipient: "b", type: "info", content: "old but live sender", groupId: "g" })
   const f2 = sendMessage(dir, { sender: "dissolved/ghost", recipient: "b", type: "info", content: "from the void", groupId: "g" })
   // Backdate timestamps by rewriting the envelopes.
   for (const f of [f1, f2]) {
-    const p = path.join(dir, ".opencode/hivemind/inbox", f1 === f ? "b" : "b", f)
+    const p = path.join(dir, ".helm/hivemind/inbox", f1 === f ? "b" : "b", f)
     const m = JSON.parse(fs.readFileSync(p, "utf8"))
     m.timestamp = old
     fs.writeFileSync(p, JSON.stringify(m, null, 2))
@@ -111,8 +111,8 @@ test("retireMessage moves the file + appends a v:1 audit entry; never deletes", 
   const f = sendMessage(dir, { sender: "dissolved/ghost", recipient: "b", type: "info", content: "moot", groupId: "g" })
   const rec = retireMessage(dir, "b", f, { signals: ["dissolved-sender"], retiredBy: "test", reason: "sender dissolved" })
   assert.equal(rec.ok, true)
-  assert.ok(fs.existsSync(path.join(dir, ".opencode/hivemind/retired/b", f)))
-  assert.ok(!fs.existsSync(path.join(dir, ".opencode/hivemind/inbox/b", f)))
+  assert.ok(fs.existsSync(path.join(dir, ".helm/hivemind/retired/b", f)))
+  assert.ok(!fs.existsSync(path.join(dir, ".helm/hivemind/inbox/b", f)))
   const log = readRetirementLog(dir)
   assert.equal(log.length, 1)
   assert.equal(log[0].v, 1)

@@ -882,7 +882,7 @@ test("dream-done escape-hatch item: a later real dream UPGRADES it (badge cleare
 })
 
 function writeDrmHistory(dir, drm, lines) {
-  const histDir = path.join(dir, ".opencode/dreams/history")
+  const histDir = path.join(dir, ".helm/dreams/history")
   fs.mkdirSync(histDir, { recursive: true })
   fs.writeFileSync(path.join(histDir, `${drm}.yaml`), lines.join("\n"), "utf8")
 }

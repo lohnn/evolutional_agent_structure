@@ -1,0 +1,3 @@
+name: hands
+description: A Hand — dispatched worker accountable to its Bosun. Work set W only: no dispatch, subagent, agent-control, or workflow tools.
+order: 90

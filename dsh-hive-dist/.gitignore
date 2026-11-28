@@ -3,7 +3,7 @@
 # dists (no bun/git-prepare wall), so `pnpm pack` outputs must be
 # regenerated and committed on every cohort release (W-085/W-088).
 # (No ignore rules left: the last stale-name entry —
-# dsh-berget-usage-0.2.1.tgz from an intermediate 2026 repack — became the
+# dsh-berget-usage-0.2.2.tgz from an intermediate 2026 repack — became the
 # LIVE shipping name in the 0.2.2-rc.1 corridor and was un-ignored.
 # Lesson: when rebake lands on a historically-ignored name, scrub the rule,
 # else `git add -A` silently drops the tarball and only CI sees it. PR #70.)

@@ -4,6 +4,11 @@ Read on demand. The trigger rule (bind `0.0.0.0`, serve from `/tmp/opencode/prot
 prototypes live on `4500`–`4504`) is in the root `AGENTS.md`; everything below is the detail
 behind it.
 
+> **Historical framing (2026-11-27):** the opencode engine and the standalone hive-board viewer
+> are retired; rows below marked RETIRED are kept for the record only. The `/tmp/opencode/proto/`
+> prototype convention and its opencode-lifetime notes predate the retirement and are kept as-is
+> — treat "opencode restart" wherever it appears as "container restart".
+
 This container is a Docker environment. A port is only reachable from the user's other
 devices (phone, laptop) if **both** are true:
 
@@ -19,9 +24,9 @@ that the server responds.
 | Port | Bind | Owner | Notes |
 |---|---|---|---|
 | `3000` | `0.0.0.0` | OpenChamber | published |
-| `3080` | `0.0.0.0` | dsh web (socat relay → 127.0.0.1:4501) | published; the HIVE-on-dsh workbench. Chain: Tailscale Serve (Mac 443) → Mac 127.0.0.1:3080 → compose publish `3080:3080` → this relay. Relay is svcwatch-managed (`.opencode/services/dsh-relay.toml`); dsh itself is `dsh-web.toml` (pinned version, boot log tee'd to `/tmp/dsh-web.log` for the rotating `?token=`). 2026-09-07: moved off 4500 so the prototype range stays prototypes. |
-| `4096` | `127.0.0.1` | opencode itself | internal — do not expose |
-| `4400` | `0.0.0.0` | hive-board viewer | published; see `projects/evolutional_agent_structure/docs/board-viewer/deploy/`. Ships inside the HIVE plugin package (`src/board-viewer/`) — the old `projects/hive-board/` repo is gone. Binds loopback by DEFAULT; this deployment overrides it with `--host 0.0.0.0` and the server prints an exposure warning, which is expected here. |
+| `3080` | `0.0.0.0` | dsh web (socat relay → 127.0.0.1:4501) | published; the HELM-on-dsh workbench. Chain: Tailscale Serve (Mac 443) → Mac 127.0.0.1:3080 → compose publish `3080:3080` → this relay. Relay is svcwatch-managed (`.helm/services/dsh-relay.toml`); dsh itself is `dsh-web.toml` (pinned version, boot log tee'd to `/tmp/dsh-web.log` for the rotating `?token=`). 2026-09-07: moved off 4500 so the prototype range stays prototypes. |
+| `4096` | `127.0.0.1` | opencode itself — **RETIRED 2026-11-27** | historical. The opencode engine was retired with the DSH-only move (helm-rebrand-design §5.5); nothing listens here anymore. |
+| `4400` | `0.0.0.0` | hive-board viewer — **RETIRED 2026-11-27** | historical. The standalone viewer was stopped by operator decision; the board tab now lives inside the dsh web profile (`dsh-hive/packages/board/`, board-tab-contract.md). Port freed. |
 | `4500`–`4504` | `0.0.0.0` | **reserved — throwaway prototypes** | see below. (dsh briefly squatted 4500 during migration; freed 2026-09-07.) |
 | `4501` | `127.0.0.1` | dsh web itself | internal — loopback only by dsh design (it refuses `--host 0.0.0.0`); always reached via the 3080 relay. |
 | `8096` | `0.0.0.0` | Jellyfin | published; JellyFetch plugin work |
@@ -48,7 +53,7 @@ other. Five slots is arbitrary but cheap.
   See *Lifetime* below — this is what makes a killed server cheap to recover.
 - **Never serve from `/workspace` or from `/tmp/opencode` directly.** `python3 -m http.server`
   publishes its entire working directory with no authentication. Rooted at the workspace that
-  exposes `.opencode/` — credentials, session state, the lot — to anything on the LAN.
+  exposes `.helm/` — credentials, session state, the lot — to anything on the LAN.
 - Bind `0.0.0.0`.
 - Prefer self-contained single-file HTML (inline CSS/JS, no external assets). It survives
   being copied to a device and opened as a `file://` URL, which sidesteps ports entirely for
@@ -144,7 +149,7 @@ Check `/proc/net/tcp6` the same way for IPv6 listeners.
 
 Leftover prototype servers accumulate — within a session they outlive the conversation that
 started them, and nothing reaps them. Check the range before assuming a port is free. (This
-does not contradict *Lifetime* above: they survive fine until opencode or the container
+does not contradict *Lifetime* above: they survive fine until the container
 restarts, at which point they all vanish at once. Both "still running, forgotten" and "gone
 without notice" are normal — which is why you always check rather than assume either.)
 

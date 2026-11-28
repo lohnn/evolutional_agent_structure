@@ -4,7 +4,7 @@
  * The overlay's item card answers ONE question from the LOCKED board store:
  * which in_progress work item does this session own? Resolution rides the
  * store's SHARED READ primitives (listItems — the single-writer store's own
- * face; the route never raw-reads .opencode/board files).
+ * face; the route never raw-reads .helm/board files).
  *
  * The bind contract (B-for-bind, board-tab contract): an in_progress bind is
  * strictly 1:1 session⟷item via `owner_session`; `group_id` MAY also carry a

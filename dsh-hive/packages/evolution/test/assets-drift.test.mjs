@@ -96,8 +96,10 @@ test("capability standing stays within its compact bounds (20-60 lines)", () => 
 test("capability standing carries the synapse rule and no D3-dead messaging", () => {
   const content = readAsset(STANDING_PATH)
   // The D3 replacement line is the load-bearing one: siblings never see
-  // each other's context; everything flows through the coordinator.
-  assert.match(content, /THROUGH THE COORDINATOR/)
+  // each other's context; everything flows through the Helmsman (the
+  // synapse). Pinned text updated 2026-11-25 by the HELM rebrand P1
+  // (F6 pair: THROUGH THE COORDINATOR → THROUGH THE HELMSMAN).
+  assert.match(content, /THROUGH THE HELMSMAN/)
   assert.match(content, /synapse/)
   // The messaging half (hive_signal/listen/sent/retire + mailbox) died with
   // D3 — it must not leak back into the shipped doctrine.

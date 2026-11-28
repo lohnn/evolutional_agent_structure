@@ -3,8 +3,8 @@
  * active/history lifecycle helpers.
  *
  * DRM files live at:
- *   .opencode/dreams/active/DRM-NNN.yaml    — DREAMING
- *   .opencode/dreams/history/DRM-NNN.yaml   — COMPLETE
+ *   .helm/dreams/active/DRM-NNN.yaml    — DREAMING
+ *   .helm/dreams/history/DRM-NNN.yaml   — COMPLETE
  *
  * Exact format (derived from real history/*.yaml files, DRM-013/014 as canon):
  *

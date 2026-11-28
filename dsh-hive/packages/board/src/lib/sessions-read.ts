@@ -1,6 +1,6 @@
 /**
  * sessions-read.ts — the board's MINIMAL read-only view of the awaken ledger
- * (B4/D5). The `.opencode/agents/hive-sessions.json` ledger is OWNED AND
+ * (B4/D5). The `.helm/agents/hive-sessions.json` ledger is OWNED AND
  * WRITTEN by @hive/dsh-evolution (its lib/sessions.ts is the only writer);
  * this module deliberately RE-READS the file instead: the board ships in
  * profiles where evolution's internals are not its dependency, and a writer
@@ -40,7 +40,7 @@ export interface HiveSessions {
 const EMPTY_SESSIONS: HiveSessions = { v: 1, coordinators: {} }
 
 export function sessionsPath(directory: string): string {
-  return path.join(directory, ".opencode/agents/hive-sessions.json")
+  return path.join(directory, ".helm/agents/hive-sessions.json")
 }
 
 function readAll(directory: string): HiveSessions {

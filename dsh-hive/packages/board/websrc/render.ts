@@ -272,10 +272,10 @@ function todoSubStateLane(sub: TodoSubState | undefined): string {
  * — so this reads the log and shows nothing else.
  *
  * ── Why the archived body is NOT fetchable from here (a deliberate decision) ─
- * The payloads under `.opencode/board/<id>/<hash>.md` are plain markdown on
+ * The payloads under `.helm/board/<id>/<hash>.md` are plain markdown on
  * disk, and this viewer serves an UNAUTHENTICATED HTTP surface. A route taking
  * an item id and a hash and handing back file contents is precisely the shape
- * that turns into a path-traversal read of the operator's `.opencode/`, and it
+ * that turns into a path-traversal read of the operator's `.helm/`, and it
  * would exist to re-serve files the reader can already open. So: no route. The
  * hash and its on-disk path are surfaced in the tooltip instead, which makes
  * the payload REACHABLE (by hand, or via `readRevision`) while adding no new
@@ -295,9 +295,9 @@ function specRevisionHtml(item: WorkItem): string {
       const who = r.session ? ` <span class="mono dim">${esc(shortSes(r.session))}</span>` : ""
       // Name the payload and where it lives — reachable without a fetch route.
       // Path is relative to the BOARD DIRECTORY (SCHEMA §1's own notation), not
-      // hardcoded to `.opencode/board/`: this renderer is browser-side and does
+      // hardcoded to `.helm/board/`: this renderer is browser-side and does
       // not know the configured board dir, and in fixture mode it is not
-      // `.opencode/` at all. A relative path is true in every mode.
+      // `.helm/` at all. A relative path is true in every mode.
       const where = `superseded body — board/${item.id}/${r.supersededHash}.md`
       return `<li><span class="mono dim">${esc(fmtTime(r.at))}</span> ${esc(r.by)}${who} <span class="mono dim" title="${esc(where)}">${esc(r.supersededHash)}</span></li>`
     })
@@ -679,7 +679,7 @@ const QUIET_ICON: IconState = { session: "quiet", dreaming: false, count: 0 }
 
 export function renderMessagePage(title: string, fragments: string[]): string {
   return `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>hive-board — ${esc(title)}</title>
+<html lang="en"><head><meta charset="utf-8"><title>HELM Chart — ${esc(title)}</title>
 ${headIconTags(QUIET_ICON)}
 <style>${CSS}</style></head>
 <body><h1>${headerMark(QUIET_ICON)}${esc(title)}</h1>${fragments.join("\n")}</body></html>`
@@ -706,7 +706,7 @@ function headerMark(icon: IconState): string {
     // richer drawing, not a hard floor — the floor is where the mesh muddies,
     // which is why the reduced mark exists for 16/32.
     size: 40,
-    title: `hive-board — ${iconLabel(icon)}`,
+    title: `HELM Chart — ${iconLabel(icon)}`,
   })}</span>`
 }
 
@@ -1118,7 +1118,7 @@ export function renderBoardBody(state: BoardState, notices: Notice[] = []): stri
   // do nothing but render. It now executes board transitions (create, start,
   // pause, demote, done) through hive-infra's shared module via POST
   // /transitions/*, so the old subtitle understated what a click here does.
-  return `<h1>${headerMark(deriveIconState(state))}hive-board <span class="phase">HIVE state · board transitions</span></h1>
+  return `<h1>${headerMark(deriveIconState(state))}HELM Chart <span class="phase">HELM state · leg transitions</span></h1>
 <div class="meta mono">workspace ${esc(state.workspaceRoot)} · generated ${esc(state.generatedAt)} · live refresh 15s · ${buildBadge(state.buildSha)}</div>
 
 <h2>Board <span class="count">(${state.items.length} items · ${state.board.sessionOnly.length} session-only)</span> <span id="filter-count" class="count" title="how many work items the current filter shows / total — updated live by the filter bar"></span></h2>
@@ -1157,7 +1157,7 @@ ${
 <tbody>${historyRows}</tbody>
 </table></div></details>
 
-<h2>HIVEmind message flow <span class="count">(${messages.length} pending/delivered)</span></h2>
+<h2>Comms message flow <span class="count">(${messages.length} pending/delivered)</span></h2>
 ${
   messages.length === 0
     ? '<div class="empty">no live messages — all inboxes clear</div>'

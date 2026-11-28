@@ -14,7 +14,7 @@ import {
 let dir
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), "painpoint-test-"))
-  fs.mkdirSync(path.join(dir, ".opencode/painpoints/raw"), { recursive: true })
+  fs.mkdirSync(path.join(dir, ".helm/painpoints/raw"), { recursive: true })
 })
 afterEach(() => {
   fs.rmSync(dir, { recursive: true, force: true })
@@ -24,7 +24,7 @@ describe("appendPainpoint", () => {
   it("writes per-session logs with worker attribution inside the entry", () => {
     appendPainpoint(dir, "hive-infra", "ses_1", "tool X is slow", "running Y, 3 cycles")
     appendPainpoint(dir, "coordinator", "ses_1", "second friction", "more context")
-    const f = path.join(dir, ".opencode/painpoints/raw/ses_1.md")
+    const f = path.join(dir, ".helm/painpoints/raw/ses_1.md")
     const content = fs.readFileSync(f, "utf8")
     assert.ok(content.includes("hive-infra (ses_1)"))
     assert.ok(content.includes("**Problem:** tool X is slow"))
@@ -36,7 +36,7 @@ describe("appendPainpoint", () => {
 
   it("sanitises path separators in the session id", () => {
     appendPainpoint(dir, "w", "a/b", "p", "c")
-    assert.ok(fs.existsSync(path.join(dir, ".opencode/painpoints/raw/a_b.md")))
+    assert.ok(fs.existsSync(path.join(dir, ".helm/painpoints/raw/a_b.md")))
   })
 })
 
@@ -62,13 +62,13 @@ describe("harvestPainpoints", () => {
     appendPainpoint(dir, "w", "ses_1", "p1", "c1")
     const peeked = harvestPainpoints(dir, false)
     assert.equal(peeked.length, 1)
-    assert.ok(fs.existsSync(path.join(dir, ".opencode/painpoints/raw/ses_1.md")))
+    assert.ok(fs.existsSync(path.join(dir, ".helm/painpoints/raw/ses_1.md")))
     const harvested = harvestPainpoints(dir, true)
     assert.equal(harvested.length, 1)
     assert.ok(harvested[0].content.includes("p1"))
-    const rawLeft = fs.readdirSync(path.join(dir, ".opencode/painpoints/raw")).filter((f) => f.endsWith(".md"))
+    const rawLeft = fs.readdirSync(path.join(dir, ".helm/painpoints/raw")).filter((f) => f.endsWith(".md"))
     assert.equal(rawLeft.length, 0)
-    assert.equal(fs.readdirSync(path.join(dir, ".opencode/painpoints/raw/.harvested")).length, 1)
+    assert.equal(fs.readdirSync(path.join(dir, ".helm/painpoints/raw/.harvested")).length, 1)
   })
 })
 

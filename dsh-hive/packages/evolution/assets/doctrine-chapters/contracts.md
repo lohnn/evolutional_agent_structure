@@ -1,4 +1,4 @@
-# HIVE Doctrine — Contracts (the synapse and parallel capability work)
+# HELM Doctrine — Contracts (the synapse and parallel capability work)
 
 The chapter for multi-capability dispatches — any moment two or more
 children must meet at a shared boundary. It expands the standing core's

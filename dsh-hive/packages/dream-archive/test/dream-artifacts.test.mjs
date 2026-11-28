@@ -21,13 +21,13 @@ import {
 // Real archive copy — the format's ground truth. Round-tripping every file
 // through parse→serialize must be byte-identical where the serializer owns
 // the whole file shape (no appended lifecycle fields).
-const REAL_ARCHIVE = "/workspace/.opencode/dreams"
+const REAL_ARCHIVE = "/workspace/.helm/dreams"
 
 let dir
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), "dream-artifacts-test-"))
   for (const sub of ["insights", "warnings", "songlines", "shadows"]) {
-    fs.mkdirSync(path.join(dir, ".opencode/dreams/artifacts", sub), { recursive: true })
+    fs.mkdirSync(path.join(dir, ".helm/dreams/artifacts", sub), { recursive: true })
   }
 })
 afterEach(() => {
@@ -83,7 +83,7 @@ describe("real-archive round-trip (byte identity)", () => {
 describe("nextArtifactId", () => {
   it("assigns max+1 zero-padded, per type, including multi-char prefixes", () => {
     assert.equal(nextArtifactId(dir, "insight"), "I-001")
-    fs.writeFileSync(path.join(dir, ".opencode/dreams/artifacts/insights/I-007.yaml"), "insight_id: I-007\n", "utf8")
+    fs.writeFileSync(path.join(dir, ".helm/dreams/artifacts/insights/I-007.yaml"), "insight_id: I-007\n", "utf8")
     assert.equal(nextArtifactId(dir, "insight"), "I-008")
     assert.equal(nextArtifactId(dir, "shadow"), "SHADOW-001")
   })
@@ -182,7 +182,7 @@ describe("idToType / pathForId", () => {
     assert.equal(idToType("SNG-001"), "songline")
     assert.equal(idToType("SHADOW-001"), "shadow")
     assert.equal(idToType("X-001"), null)
-    assert.equal(pathForId(dir, "W-003"), path.join(dir, ".opencode/dreams/artifacts/warnings/W-003.yaml"))
+    assert.equal(pathForId(dir, "W-003"), path.join(dir, ".helm/dreams/artifacts/warnings/W-003.yaml"))
   })
 })
 

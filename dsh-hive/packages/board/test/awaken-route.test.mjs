@@ -6,7 +6,7 @@
 //   2. The OPT-IN flag: awaken:true must register the route on a provided
 //      fake webServer (`exact`, POST); the default must NOT — while the
 //      read-only index/item routes still register (the flag isolates).
-// HARD RULE: the live store at /workspace/.opencode/board is NEVER written —
+// HARD RULE: the live store at /workspace/.helm/board is NEVER written —
 // handler tests use a synthetic empty directory; nothing here creates real
 // sessions (the gateway/agents/commands are fakes).
 import { Context } from "@deepseek-ai/cordis"

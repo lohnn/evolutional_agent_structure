@@ -3,7 +3,7 @@
  *
  * Exposes `ctx.board`: the locked, byte-compatible replacement for OpenCode
  * `src/lib/board-store.ts` + `board-invariants.ts` + `board-recency.ts`, over
- * `<directory>/.opencode/board/WI-*.md` — the SAME store the OpenCode plugin
+ * `<directory>/.helm/board/WI-*.md` — the SAME store the OpenCode plugin
  * reads/writes (dual-run preserved; every SCHEMA.md format rule intact).
  *
  * The three lib modules under `./lib/` are VERBATIM ports of the OpenCode
@@ -220,11 +220,11 @@ export type {
 
 /**
  * The hive-board Service. `directory` is the PROFILE-LEVEL fixed workspace
- * root (the directory that CONTAINS `.opencode/`) — the same constant every
+ * root (the directory that CONTAINS `.helm/`) — the same constant every
  * HIVE service pins; sessions JOIN the profile's HIVE, they do not each grow
  * one. Board reads and writes share the root with the awaken ledger
- * (`.opencode/agents/hive-sessions.json`) and the dream archive
- * (`.opencode/dreams/`) by construction.
+ * (`.helm/agents/hive-sessions.json`) and the dream archive
+ * (`.helm/dreams/`) by construction.
  */
 
 // ── B4: the 8 hive_board_* model-facing tools ─────────────────────────────────
@@ -289,10 +289,41 @@ const str = (description: string) => ({ type: "string", description } as const)
 const reqStr = (description: string) => ({ type: "string", required: true, description } as const)
 const num = (description: string) => ({ type: "number", description } as const)
 
+// ── P2 dual-name alias cycle (helm-rebrand-design.md §2.5/§3) ────────────────
+// Each hive_board_* tool ALSO registers its canonical helm_chart_* name on the
+// SAME definition: the alias is a spread of the built ToolDefinition with only
+// name + description replaced, so compiled parameter schema, output schema,
+// output.render, and the exact execute closure are shared BY REFERENCE — never
+// a behavior fork. Old names stay live and untouched until the P5 alias
+// retirement; alias descriptions carry the dual-name note. The board's
+// domain word is `chart` (the ratified display word for the board, §2.0.3).
+// No cross-package import for one data table: the monorepo-wide census lives
+// in @hive/dsh-evolution HELM_TOOL_ALIASES, and
+// evolution/test/tool-gate-sync.test.mjs asserts this table stays in step.
+const HELM_BOARD_ALIASES: Readonly<Record<string, string>> = {
+  hive_board_list: "helm_chart_list",
+  hive_board_search: "helm_chart_search",
+  hive_board_read: "helm_chart_read",
+  hive_board_bind: "helm_chart_bind",
+  hive_board_create: "helm_chart_create",
+  hive_board_respec: "helm_chart_respec",
+  hive_board_retitle: "helm_chart_retitle",
+  hive_board_tag: "helm_chart_tag",
+} as const
+
+const helmAliasNote = (legacy: string): string =>
+  ` [HELM dual-name cycle: legacy "${legacy}" stays live — both names run this same tool until the P5 alias retirement.]`
+
+const helmAlias = (def: import("@deepseek-ai/dsh-tools").ToolDefinition): import("@deepseek-ai/dsh-tools").ToolDefinition | undefined => {
+  const alias = HELM_BOARD_ALIASES[def.name]
+  if (alias === undefined) return undefined
+  return { ...def, name: alias, description: def.description + helmAliasNote(def.name) }
+}
+
 export class Board extends Service {
   static inject = ["tools"]
   static Config = z.object({
-    // Workspace root (the dir containing `.opencode/`). Default: process cwd.
+    // Workspace root (the dir containing `.helm/`). Default: process cwd.
     directory: z.string().default(process.cwd()),
     // WI-064 spike — the POST /api/hive-board/awaken route is OPT-IN (default
     // OFF). Plugin webServer routes carry NO token/cookie auth (board-tab
@@ -321,9 +352,9 @@ export class Board extends Service {
     super(ctx, "board")
     this.directory = config.directory
     this.awaken = config.awaken === true
-    this.ctx.logger?.info?.("[board] storage module active (8 hive_board_* tools registered)", {
+    this.ctx.logger?.info?.("[board] storage module active (8 hive_board_* tools + 8 helm_chart_* alias twins registered)", {
       directory: this.directory,
-      tools: 8,
+      tools: 16,
     })
 
     const directory = this.directory
@@ -434,7 +465,7 @@ parameters: {
       defineTool({
         name: "hive_board_bind",
         description:
-          "Bind the CURRENT session to a hive-board work item (.opencode/board/WI-*.md): stamps this session as owner_session (+ group_id), moves the item to in_progress, appends the transition. " +
+          "Bind the CURRENT session to a hive-board work item (.helm/board/WI-*.md): stamps this session as owner_session (+ group_id), moves the item to in_progress, appends the transition. " +
           "Session identity is resolved from the runtime — you do NOT pass a session id. " +
           "Enforced: the item must be un-owned, this session must not own another item (session⟷item is strictly 1:1), this session must be a HIVE-awakened top-level coordinator (an in_progress item with a non-coordinator owner is an illegal state), and this session must not be tombstoned in the item's released_sessions[].",
         parameters: {
@@ -634,7 +665,7 @@ parameters: {
           if (result.action === "respec-noop") return `${id}: body is byte-identical to the current spec — no revision recorded.`
           const revs = listRevisions(directory, id)
           return (
-            `Revised ${id}'s spec. Previous body archived at .opencode/board/${id}/ ` +
+            `Revised ${id}'s spec. Previous body archived at .helm/board/${id}/ ` +
             `(${revs.length} revision${revs.length === 1 ? "" : "s"} retained; recover with the superseded hash on the transition entry). ` +
             `spec_hash deliberately NOT re-stamped.`
           )
@@ -704,11 +735,11 @@ parameters: {
         },
       })
 
-    // Register all 8; each disposer is scoped to this service so the tools
-    // unwind together with it. The deny mask on @hive/dsh-evolution
-    // (HIVE_TOOL_NAMES) covers these names; see
-    // packages/evolution/test/tool-gate-sync.test.mjs + this package's
-    // board-tools.test.mjs for both halves of that sync guarantee.
+    // Register all 8 PLUS their helm_chart_* dual-name aliases (P2 cycle);
+    // each disposer is scoped to this service so the tools unwind together
+    // with it. The deny mask on @hive/dsh-evolution (HIVE_TOOL_NAMES) covers
+    // these names; see packages/evolution/test/tool-gate-sync.test.mjs + this
+    // package's board-tools.test.mjs for both halves of that sync guarantee.
     const registrations = [
       listTool(),
       searchTool(),
@@ -719,7 +750,10 @@ parameters: {
       retitleTool(),
       tagTool(),
     ]
-    const disposers = registrations.map((def) => ctx.tools.register(def))
+    const disposers = registrations.flatMap((def) => {
+      const alias = helmAlias(def)
+      return alias ? [ctx.tools.register(def), ctx.tools.register(alias)] : [ctx.tools.register(def)]
+    })
     // A cordis effect's body returns the Disposable (a () => void disposer)
     // that runs when the effect unwinds:
     ctx.effect(() => () => {
@@ -1028,7 +1062,7 @@ parameters: {
    *
    * Slice 3E — the count SPLITS into HIVE vs ambient: a running agent is HIVE
    * iff its session id is a member of HIVE's own live-session ledger
-   * (<workspace>/.opencode/agents/hive-sessions.json — the SAME registry the
+   * (<workspace>/.helm/agents/hive-sessions.json — the SAME registry the
    * awaken/bind tools stamp, so membership is authoritative; all its
    * id-keyed member maps are unioned, `coordinators` today). Candidate B
    * (dispatch-label prefixes) was EVALUATED and DROPPED: the public Agent
@@ -1107,7 +1141,7 @@ parameters: {
   private hiveSessionIds(): Set<string> {
     const ids = new Set<string>()
     try {
-      const raw = readFileSync(nodePath.join(this.directory, ".opencode", "agents", "hive-sessions.json"), "utf8")
+      const raw = readFileSync(nodePath.join(this.directory, ".helm", "agents", "hive-sessions.json"), "utf8")
       const ledger = JSON.parse(raw) as Record<string, unknown>
       this.ledgerSeen = true
       for (const value of Object.values(ledger ?? {})) {

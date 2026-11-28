@@ -73,7 +73,7 @@ function lifecycleFlags(text: string): string[] {
  * Resolve ids to verbatim artifact texts. Never throws: every failure is a
  * per-id error entry (the dispatch result reports it; the dispatch itself
  * proceeds). `archive` may be undefined (standalone install) — the direct
- * fallback probes `<directory>/.opencode/dreams/artifacts/<subdir>/<id>.yaml`
+ * fallback probes `<directory>/.helm/dreams/artifacts/<subdir>/<id>.yaml`
  * using the same prefix→subdir mapping the archive's own pathForId applies.
  */
 export function resolveDreamArtifacts(
@@ -95,7 +95,7 @@ export function resolveDreamArtifacts(
       const viaService = archive?.pathForId?.(normalized)
       const path =
         viaService ??
-        `${directory}/.opencode/dreams/artifacts/${dreamSubdir(normalized)}/${normalized}.yaml`
+        `${directory}/.helm/dreams/artifacts/${dreamSubdir(normalized)}/${normalized}.yaml`
       text = fs.readFileSync(path, "utf8")
     } catch (err) {
       out.push({ id, normalized, ok: false, detail: `not found in the archive${archive?.pathForId ? "" : " (dream archive service not mounted — direct probe)"}: ${String(err)}`.slice(0, 300) })

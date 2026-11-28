@@ -16,10 +16,10 @@ const check = (id, ok, detail) => {
 }
 
 const synth = fs.mkdtempSync(path.join(os.tmpdir(), "p4-hivemind-"))
-fs.mkdirSync(path.join(synth, ".opencode/agents/capabilities"), { recursive: true })
+fs.mkdirSync(path.join(synth, ".helm/agents/capabilities"), { recursive: true })
 // An active capability file so staleness does not flag it as dissolved.
-fs.writeFileSync(path.join(synth, ".opencode/agents/capabilities/worker-a.md"), "---\nname: worker-a\n---\n")
-fs.writeFileSync(path.join(synth, ".opencode/agents/capabilities/worker-b.md"), "---\nname: worker-b\n---\n")
+fs.writeFileSync(path.join(synth, ".helm/agents/capabilities/worker-a.md"), "---\nname: worker-a\n---\n")
+fs.writeFileSync(path.join(synth, ".helm/agents/capabilities/worker-b.md"), "---\nname: worker-b\n---\n")
 
 const ctx = new Context()
 const { createRequire } = await import("node:module")
@@ -60,7 +60,7 @@ const sendOut = await visible.get("hive_signal").execute(
 check("tool.signal", sendOut.includes("Message sent to `worker-b`"), "hive_signal sent")
 
 // File durability: the message file exists on disk immediately after send.
-const inboxDir = path.join(synth, ".opencode/hivemind/inbox/worker-b")
+const inboxDir = path.join(synth, ".helm/hivemind/inbox/worker-b")
 const files = fs.readdirSync(inboxDir).filter((f) => f.endsWith(".json"))
 check("durability.file-written", files.length === 1, `message file on disk (${files[0] ?? "none"})`)
 
@@ -97,15 +97,15 @@ check("tool.sent-count", (sentView.match(/→ `worker-b`/g) ?? []).length === 1,
 
 // ── hive_retire: dry-run, then retire with a reason ─────────────────────────
 // Plant a dissolved-sender message (strong staleness signal).
-fs.writeFileSync(path.join(synth, ".opencode/agents/dissolved"), "", { flag: "w" }) // ensure dir ops work below
-fs.rmSync(path.join(synth, ".opencode/agents/dissolved"), { force: true })
-fs.mkdirSync(path.join(synth, ".opencode/agents/dissolved"), { recursive: true })
+fs.writeFileSync(path.join(synth, ".helm/agents/dissolved"), "", { flag: "w" }) // ensure dir ops work below
+fs.rmSync(path.join(synth, ".helm/agents/dissolved"), { force: true })
+fs.mkdirSync(path.join(synth, ".helm/agents/dissolved"), { recursive: true })
 await visible.get("hive_signal").execute({ recipient: "worker-b", type: "info", content: "from a ghost" }, {
   signal: AbortSignal.timeout(5000), agent: { id: "dissolved/ghost", session: { id: "ses_g" } },
 })
 const dryRun = await visible.get("hive_retire").execute({}, execB)
 check("tool.retire-dryrun", dryRun.includes("Stale message candidates") && dryRun.includes("dissolved-sender"), "dry-run lists the dissolved-sender candidate")
-check("tool.retire-dryrun-noop", fs.existsSync(path.join(synth, ".opencode/hivemind/inbox/worker-b")), "dry-run changed nothing")
+check("tool.retire-dryrun-noop", fs.existsSync(path.join(synth, ".helm/hivemind/inbox/worker-b")), "dry-run changed nothing")
 
 // Retire without a reason is refused.
 const noReason = await visible.get("hive_retire").execute({ messages: ["worker-b/" + "nonexistent.json"] }, execB)
@@ -117,8 +117,8 @@ const ghostFile = fs.readdirSync(inboxDir).filter((f) => f.endsWith(".json"))
   .find(([, m]) => m.sender === "dissolved/ghost")?.[0]
 const retireOut = await visible.get("hive_retire").execute({ messages: [`worker-b/${ghostFile}`], reason: "sender dissolved, question moot" }, execB)
 check("tool.retire", retireOut.includes("✓") && retireOut.includes("worker-b/" + ghostFile), "retire moved the message")
-check("tool.retire-audit", fs.existsSync(path.join(synth, ".opencode/hivemind/retirement-log.jsonl")), "audit trail appended")
-const audit = fs.readFileSync(path.join(synth, ".opencode/hivemind/retirement-log.jsonl"), "utf8").trim().split("\n").map(JSON.parse)
+check("tool.retire-audit", fs.existsSync(path.join(synth, ".helm/hivemind/retirement-log.jsonl")), "audit trail appended")
+const audit = fs.readFileSync(path.join(synth, ".helm/hivemind/retirement-log.jsonl"), "utf8").trim().split("\n").map(JSON.parse)
 check("tool.retire-audit-shape", audit[0]?.v === 1 && audit[0]?.reason === "sender dissolved, question moot" && Array.isArray(audit[0]?.signals), "audit entry v:1 with signals + reason")
 
 disposeLive()

@@ -11,7 +11,7 @@ import fs from "fs"
  * for activation (the false-positive concern that killed the model-called
  * `hive_awaken` chokepoint).
  *
- * The file rides in `<directory>/.opencode/agents/hive-sessions.json` next to
+ * The file rides in `<directory>/.helm/agents/hive-sessions.json` next to
  * the other HIVE ledgers (hive-state.json, capabilities/). IO conventions
  * mirror `lib/energy.ts` EXACTLY: a path helper, a tolerant try/catch read
  * that falls back to the empty state, and a write that mkdir -p's the
@@ -38,7 +38,7 @@ export interface HiveSessions {
 const EMPTY_SESSIONS: HiveSessions = { v: 1, coordinators: {} }
 
 function getSessionsPath(directory: string): string {
-  return path.join(directory, ".opencode/agents/hive-sessions.json")
+  return path.join(directory, ".helm/agents/hive-sessions.json")
 }
 
 function readAll(directory: string): HiveSessions {

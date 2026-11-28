@@ -273,8 +273,7 @@ const path = process.argv[2]
 if (!fs.existsSync(path)) process.exit(0)
 const text = fs.readFileSync(path, "utf8")
 if (text.includes("@hive/dsh-board")) process.exit(0)
-const row = "    - id: board\n      name: '@hive/dsh-board'\n"
-if (!/\n- insert:\n/.test(text)) {
+const row = "    - id: board\n      name: '@hive/dsh-board'\n"if (!/\n- insert:\n/.test(text)) {
   fs.writeFileSync(path, `${text.replace(/\s*$/, "\n")}\n- insert:\n${row}`)
   console.log("[dsh-hive-update] patch: appended board insert block (tools' board service row)")
 } else {
@@ -294,6 +293,38 @@ if (!/\n- insert:\n/.test(text)) {
   lines.splice(end, 0, "    - id: board", "      name: '@hive/dsh-board'")
   fs.writeFileSync(path, lines.join("\n") + "\n")
   console.log("[dsh-hive-update] patch: inserted the board load row (tools' board service row)")
+}
+NODE
+
+# Repair profiles scaffolded before the HELM merge (2026-11-27 role-presets
+# + harbor move): the kit's patch rows gained the `helm` load row
+# (@hive/dsh-helm — the helm_* orchestration tools). Profiles scaffolded
+# pre-helm leave helm pending forever. Idempotent; same insert-region
+# discipline as the board repair (insert at END OF THE INSERT REGION, never
+# at EOF).
+node - "$PROFILE/cordis.patch.yml" <<'NODE'
+const fs = require("node:fs")
+const path = process.argv[2]
+if (!fs.existsSync(path)) process.exit(0)
+const text = fs.readFileSync(path, "utf8")
+if (text.includes("@hive/dsh-helm")) process.exit(0)
+const lines = text.replace(/\s*$/, "").split("\n")
+const ins = lines.indexOf("- insert:")
+if (ins < 0) {
+  const row = "    - id: helm\n      name: '@hive/dsh-helm'\n"
+  fs.writeFileSync(path, `${text.replace(/\s*$/, "\n")}\n- insert:\n${row}`)
+  console.log("[dsh-hive-update] patch: appended helm insert block (orchestration tools)")
+} else {
+  let end = ins + 1
+  let sawRow = false
+  for (let i = ins + 1; i < lines.length; i++) {
+    if (/^ {4}- id:/.test(lines[i])) { sawRow = true; continue }
+    if (sawRow && (lines[i].startsWith("- ") || lines[i].startsWith("#"))) { end = i; break }
+  }
+  if (!sawRow) end = lines.length
+  lines.splice(end, 0, "    - id: helm", "      name: '@hive/dsh-helm'")
+  fs.writeFileSync(path, lines.join("\n") + "\n")
+  console.log("[dsh-hive-update] patch: inserted the helm load row (orchestration tools)")
 }
 NODE
 
@@ -327,17 +358,17 @@ NODE
 # exact keys it prints (upstream, 11.24 verified) — the fallback targets
 # pnpm 10.x or >=12.0 only.
 KIT_TARBALLS=(
-  hive-dsh-agents-0.0.8.tgz
-  hive-dsh-board-0.1.11.tgz
-  hive-dsh-dream-archive-0.0.4.tgz
-  hive-dsh-evolution-0.0.11.tgz
-  hive-dsh-hivemind-0.0.5.tgz
-  hive-dsh-painpoints-0.0.5.tgz
-  hive-dsh-tools-0.0.6.tgz
-  dsh-berget-refresh-0.1.4.tgz
-  dsh-berget-usage-0.2.1.tgz
-  dsh-provider-usage-0.1.2.tgz
-  dsh-web-search-searxng-0.5.4.tgz
+  hive-dsh-agents-0.0.9.tgz
+  hive-dsh-board-0.1.12.tgz
+  hive-dsh-dream-archive-0.0.5.tgz
+  hive-dsh-evolution-0.0.12.tgz
+  hive-dsh-hivemind-0.0.6.tgz
+  hive-dsh-painpoints-0.0.6.tgz
+  hive-dsh-tools-0.0.7.tgz
+  dsh-berget-refresh-0.1.5.tgz
+  dsh-berget-usage-0.2.2.tgz
+  dsh-provider-usage-0.1.3.tgz
+  dsh-web-search-searxng-0.5.5.tgz
 )
 
 kit_has_all_tarballs() {
@@ -392,23 +423,23 @@ if [ "$HAS_KIT_TARBALLS" = "1" ] && [ "${DSH_HIVE_GIT_MODE:-0}" != "1" ]; then
   # Relative specs ONLY, and the add must run with the profile as the pnpm
   # cwd. Absolute file: args get re-anchored through the dsh plugin-manager
   # chain with the profile name injected as a phantom segment (observed:
-  # "…/profiles/web/web/hive-dsh-agents-0.0.8.tgz", and "hive/hive/…"
+  # "…/profiles/web/web/hive-dsh-agents-0.0.9.tgz", and "hive/hive/…"
   # before it) — relative "./x.tgz" args resolve against the manifest's own
   # dir and never travel through that code. The updater therefore `cd`s
   # into the profile (restoring cwd after) and the plugin-manager's own
   # rel-spec anchoring against the caller cwd is bypassed by the cd.
   SPECS=(
-    file:./hive-dsh-agents-0.0.8.tgz
-    file:./hive-dsh-board-0.1.11.tgz
-    file:./hive-dsh-dream-archive-0.0.4.tgz
-    file:./hive-dsh-evolution-0.0.11.tgz
-    file:./hive-dsh-hivemind-0.0.5.tgz
-    file:./hive-dsh-painpoints-0.0.5.tgz
-    file:./hive-dsh-tools-0.0.6.tgz
-    file:./dsh-berget-refresh-0.1.4.tgz
-    file:./dsh-berget-usage-0.2.1.tgz
-    file:./dsh-provider-usage-0.1.2.tgz
-    file:./dsh-web-search-searxng-0.5.4.tgz
+    file:./hive-dsh-agents-0.0.9.tgz
+    file:./hive-dsh-board-0.1.12.tgz
+    file:./hive-dsh-dream-archive-0.0.5.tgz
+    file:./hive-dsh-evolution-0.0.12.tgz
+    file:./hive-dsh-hivemind-0.0.6.tgz
+    file:./hive-dsh-painpoints-0.0.6.tgz
+    file:./hive-dsh-tools-0.0.7.tgz
+    file:./dsh-berget-refresh-0.1.5.tgz
+    file:./dsh-berget-usage-0.2.2.tgz
+    file:./dsh-provider-usage-0.1.3.tgz
+    file:./dsh-web-search-searxng-0.5.5.tgz
   )
   PACKAGES_NAMES=(
     @hive/dsh-agents @hive/dsh-board @hive/dsh-dream-archive @hive/dsh-evolution

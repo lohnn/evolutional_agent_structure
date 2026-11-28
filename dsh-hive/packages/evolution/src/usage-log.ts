@@ -3,7 +3,7 @@ import path from "path"
 
 /**
  * TOKEN-ECONOMY D10 — the usage-ledger skeleton. One append-only JSONL file
- * per workflow root (`.opencode/hive-usage.jsonl`); one line per dispatch
+ * per workflow root (`.helm/hive-usage.jsonl`); one line per dispatch
  * call, plus one settle line for one-shot consults (their cost arrives when
  * the tool call ends — the plugin can see it). Resident settles are NOT yet
  * observable from plugin code (the subagent run events are host-side); until
@@ -19,7 +19,7 @@ export class UsageLog {
   constructor(readonly directory: string) {}
 
   get file(): string {
-    return path.join(this.directory, ".opencode", "hive-usage.jsonl")
+    return path.join(this.directory, ".helm", "hive-usage.jsonl")
   }
 
   append(record: Record<string, unknown>): void {

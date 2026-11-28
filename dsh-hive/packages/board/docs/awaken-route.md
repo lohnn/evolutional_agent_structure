@@ -48,7 +48,7 @@ Guards (all decided 2026-10, user-ratified):
    edit hot-reloads the board row — usual `dsh` semantics apply. If the
    running host does not pick it up (or you are on an older host), bounce:
    touch the svcwatch definition to force a reload —
-   `touch /workspace/.opencode/services/dsh-web.toml` — or restart the
+   `touch /workspace/.helm/services/dsh-web.toml` — or restart the
    service the ordinary way. **A dsh-web restart tears down every session in
    the environment** (the coordinator planned restarts LAST for exactly that
    reason), so do this outside a working session.
@@ -78,8 +78,8 @@ Guards (all decided 2026-10, user-ratified):
    sidebar list; Open ⇢ switches the main panel to it (when the uiWorkspace
    flow is composed — it is, on the web profile).
 5. Ledger/board reality: the new session id appears in
-   `/workspace/.opencode/agents/hive-sessions.json` and the auto-registered
-   WI item on `/workspace/.opencode/board/`.
+   `/workspace/.helm/agents/hive-sessions.json` and the auto-registered
+   WI item on `/workspace/.helm/board/`.
 
 ## Rollback
 

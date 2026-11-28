@@ -1,0 +1,80 @@
+# The `hands` agent preset: dispatched worker for the HELM hierarchy.
+#
+# Source-material staging only (design role-presets-design.md §4.3): the
+# canonical executable declarations are the `@hive/dsh-agents` bundle patch
+# (`role-presets.patch.yml`, rows preset-helmsman / preset-bosun /
+# preset-hands) — no runtime mounts read this directory. It documents the
+# Hands composition other machines'/the coordinator's profile installs derive
+# from.
+#
+# A Hand is dispatched only, by a Bosun: work set W, no HELM or dispatch
+# plugins mounted at all. Production dispatch-only mounting additionally needs
+# the registry's `dispatchOnly` semantics (§4.4, service-owner leg) plus the
+# Host role gate (§2.3) to subtract Host-global dispatch cargo; until those
+# land, this staging documents the declaration work only.
+
+# ── identity ────────────────────────────────────────────────────────────────
+
+- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    prefix: |-
+      You are a Hand, a dispatched worker accountable to your Bosun. Perform only the assigned task with the available work tools. You have no dispatch, subagent, agent-control, or workflow tools and cannot create another agent.
+
+      Stay inside the brief and acceptance criteria. Make routine implementation judgments, but report a genuine boundary or missing dependency instead of silently crossing it. Inspect your final diff and run the smallest relevant verification. Return the outcome, files changed, exact test evidence, and any blockers to your Bosun. Do not claim unrun checks and do not modify role presets, dispatch policy, profiles, or services to widen your authority.
+
+# ── Standard work surface (work set W) — no helm row, no dispatch plugins ──
+
+- id: agent-instructions
+  name: '@deepseek-ai/dsh-agent-instructions'
+  config: { maxBytes: 65536 }
+
+- id: time-context
+  name: '@deepseek-ai/dsh-time-context'
+
+- id: tool-bash
+  name: '@deepseek-ai/dsh-tool-bash'
+  disabled: !!js process.platform === 'win32'
+
+- id: tool-pwsh
+  name: '@deepseek-ai/dsh-tool-pwsh'
+  disabled: !!js process.platform !== 'win32'
+
+- id: tool-fs
+  name: '@deepseek-ai/dsh-tool-fs'
+  config: { applyPatch: false }
+
+- id: tool-fs-search
+  name: '@deepseek-ai/dsh-tool-fs-search'
+  config: { sampleOverCapGlobResults: false }
+
+- id: tool-jobs
+  name: '@deepseek-ai/dsh-tool-jobs'
+
+- id: tool-todo
+  name: '@deepseek-ai/dsh-tool-todo'
+  config: { allowParallelInProgress: true }
+
+- id: tool-web
+  name: '@deepseek-ai/dsh-tool-web'
+  config: { fetch: true, searchTimeoutMs: 60000 }
+
+# ── compaction group (matching the standard preset's shape) ────────────────
+
+- id: compaction
+  name: cordis:group
+  group: true
+  isolate:
+    compaction: true
+    toolResultPruner: true
+  config:
+    - id: compaction-basic
+      name: '@deepseek-ai/dsh-compaction-basic'
+    - id: command-compact
+      name: '@deepseek-ai/dsh-command-compact'
+    - id: tool-result-pruner
+      name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+      config:
+        thresholdChars: 8192
+        headChars: 4096
+        tailChars: 1024

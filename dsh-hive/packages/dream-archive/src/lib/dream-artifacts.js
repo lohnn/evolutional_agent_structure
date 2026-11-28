@@ -3,7 +3,7 @@
  *
  * Handrolled — zero YAML dependencies, consistent with the plugin's philosophy.
  *
- * Artifact schemas (from actual files in .opencode/dreams/artifacts/):
+ * Artifact schemas (from actual files in .helm/dreams/artifacts/):
  *
  * INSIGHT   (.../insights/I-NNN.yaml)
  *   insight_id, source_dream, confidence, domain_tags (flow), content (quoted),
@@ -50,7 +50,7 @@ const TYPE_TO_PREFIX = {
     shadow: "SHADOW",
 };
 export function artifactsDir(directory) {
-    return path.join(directory, ".opencode/dreams/artifacts");
+    return path.join(directory, ".helm/dreams/artifacts");
 }
 export function artifactSubdir(directory, type) {
     return path.join(artifactsDir(directory), TYPE_TO_SUBDIR[type]);

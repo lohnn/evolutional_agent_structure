@@ -1,6 +1,6 @@
 {
   "name": "@hive/dsh-tools",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "private": true,
   "files": [
     "dist"
@@ -19,7 +19,7 @@
     "build": "tsc -p tsconfig.json",
     "prepare": "tsc -p ../dream-archive/tsconfig.json && tsc -p ../painpoints/tsconfig.json && tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "npm run build && node --test test/board-seam.test.mjs test/service-harness.mjs"
+    "test": "npm run build && node --test test/board-seam.test.mjs test/alias-cycle.test.mjs test/service-harness.mjs test/layout-probe.test.mjs"
   },
   "dependencies": {
     "@hive/dsh-dream-archive": "workspace:*",

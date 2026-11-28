@@ -18,11 +18,11 @@ const check = (id, ok, detail) => {
 
 const synth = fs.mkdtempSync(path.join(os.tmpdir(), "p2b-synth-"))
 for (const sub of ["insights", "warnings", "songlines", "shadows"]) {
-  fs.mkdirSync(path.join(synth, ".opencode/dreams/artifacts", sub), { recursive: true })
+  fs.mkdirSync(path.join(synth, ".helm/dreams/artifacts", sub), { recursive: true })
 }
-fs.mkdirSync(path.join(synth, ".opencode/dreams/active"), { recursive: true })
-fs.mkdirSync(path.join(synth, ".opencode/dreams/history"), { recursive: true })
-fs.mkdirSync(path.join(synth, ".opencode/dreams/raw"), { recursive: true })
+fs.mkdirSync(path.join(synth, ".helm/dreams/active"), { recursive: true })
+fs.mkdirSync(path.join(synth, ".helm/dreams/history"), { recursive: true })
+fs.mkdirSync(path.join(synth, ".helm/dreams/raw"), { recursive: true })
 
 const ctx = new Context()
 const { createRequire } = await import("node:module")
@@ -44,6 +44,12 @@ const expected = [
   "hive_dream_query", "hive_dream_rank", "hive_dream_begin",
   "hive_dream_complete", "hive_dream_list", "hive_dream_supersede",
   "hive_dream_mark_stale", "hive_dream_detect_duplicates",
+  // P2 dual-name alias cycle: the helm_* canonical twins ride the SAME
+  // definitions (tools/test/alias-cycle.test.mjs proves identity + parity).
+  "helm_dream_residue", "helm_dream_harvest", "helm_dream_artifact_create",
+  "helm_dream_query", "helm_dream_rank", "helm_dream_begin",
+  "helm_dream_complete", "helm_dream_list", "helm_dream_supersede",
+  "helm_dream_mark_stale", "helm_dream_detect_duplicates",
 ]
 const missing = expected.filter((n) => !visible.has(n))
 check("tools.registered", missing.length === 0, `${expected.length - missing.length}/${expected.length} hive_dream_* tools visible${missing.length ? " — missing: " + missing.join(",") : ""}`)
@@ -134,7 +140,7 @@ check("cycle.list-filter", out.includes("SHADOW-001") && !out.includes("I-001"),
 // ── supersede / mark_stale ──────────────────────────────────────────────────
 out = await run("hive_dream_supersede", { id: "I-001", superseded_by: "W-001", reason: "gate" })
 check("cycle.supersede", out.includes("I-001 marked superseded_by: W-001"), "supersede appended")
-const i1 = fs.readFileSync(path.join(synth, ".opencode/dreams/artifacts/insights/I-001.yaml"), "utf8")
+const i1 = fs.readFileSync(path.join(synth, ".helm/dreams/artifacts/insights/I-001.yaml"), "utf8")
 check("cycle.supersede-bytes", i1.includes('superseded_by: "W-001"') && i1.includes("gate insight"), "supersede preserved original bytes")
 
 out = await run("hive_dream_mark_stale", { id: "SNG-001" })
@@ -153,7 +159,7 @@ check("cycle.detect-dupes-band-guard", out.startsWith("Invalid band"), "inverted
 out = await run("hive_dream_complete", { artifact_ids: "I-001 W-001 SNG-001 SHADOW-001 I-404" })
 check("cycle.complete", out.includes("Dream DRM-001 completed") && out.includes("insights:1") && out.includes("Missing artifact files"), "complete linked 4 + warned on I-404")
 
-const hist = fs.readFileSync(path.join(synth, ".opencode/dreams/history/DRM-001.yaml"), "utf8")
+const hist = fs.readFileSync(path.join(synth, ".helm/dreams/history/DRM-001.yaml"), "utf8")
 check("cycle.complete-shape",
   hist.includes("status: COMPLETE") &&
   hist.includes("insights: [I-001]") &&
@@ -167,7 +173,7 @@ out = await run("hive_dream_complete", {})
 check("cycle.complete-no-active", out.startsWith("Error: no active dream found"), "second complete refused")
 
 // telemetry written as a side channel
-check("cycle.telemetry", fs.existsSync(path.join(synth, ".opencode/dreams/index/telemetry/ses_p2b.jsonl")), "telemetry jsonl written for rank/query events")
+check("cycle.telemetry", fs.existsSync(path.join(synth, ".helm/dreams/index/telemetry/ses_p2b.jsonl")), "telemetry jsonl written for rank/query events")
 
 fs.rmSync(synth, { recursive: true, force: true })
 const failed = results.filter((r) => !r.ok)

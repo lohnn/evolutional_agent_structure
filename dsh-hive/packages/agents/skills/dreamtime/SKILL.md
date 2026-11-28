@@ -51,7 +51,7 @@ If no signals are present, warn the user that dreaming may be premature and ask 
 
 Before setting intention, gather the firsthand learnings that capabilities recorded while they worked. Background-dispatched capabilities run in isolated contexts that are gone by the time you dream — their journals are the only durable trace of what they actually experienced.
 
-Call the `hive_dream_harvest` tool. It reads every per-capability residue journal under `.opencode/dreams/raw/`, returns the accumulated deltas attributed per capability, and atomically archives the journals so the next session starts clean. (Pass `peek: true` only if you want to inspect without clearing — e.g. a premature/aborted dream.)
+Call the `hive_dream_harvest` tool. It reads every per-capability residue journal under `.helm/dreams/raw/`, returns the accumulated deltas attributed per capability, and atomically archives the journals so the next session starts clean. (Pass `peek: true` only if you want to inspect without clearing — e.g. a premature/aborted dream.)
 
 Treat the harvested residue as **first-class feedstock alongside your own context**. It is raw and per-turn: it will contain duplication across re-awakenings, dead-ends that were later resolved, and half-formed signals. That is expected — resolving those into clean artifacts is exactly what the compression step (5) does. Do not skip the harvest because your own context feels sufficient; the richest warnings and shadows are usually the ones a capability hit firsthand and you only saw as a summary.
 

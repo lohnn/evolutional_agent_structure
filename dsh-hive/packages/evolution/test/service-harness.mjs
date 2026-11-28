@@ -24,7 +24,7 @@ const check = (id, ok, detail) => {
 }
 
 const synth = fs.mkdtempSync(path.join(os.tmpdir(), "p3-evo-"))
-fs.mkdirSync(path.join(synth, ".opencode/agents/capabilities"), { recursive: true })
+fs.mkdirSync(path.join(synth, ".helm/agents/capabilities"), { recursive: true })
 
 const ctx = new Context()
 const { createRequire } = await import("node:module")
@@ -57,7 +57,7 @@ check("boot.service", ctx.evolution?.directory === synth, "ctx.evolution registe
 // ── Roster injection ────────────────────────────────────────────────────────
 // Seed one capability (legacy md form) and confirm the roster section renders.
 fs.writeFileSync(
-  path.join(synth, ".opencode/agents/capabilities/alpha.md"),
+  path.join(synth, ".helm/agents/capabilities/alpha.md"),
   "---\nname: alpha\ndescription: the alpha capability\nenergy: 50\n---\n\n# alpha\n"
 )
 const roster = ctx.evolution.buildRoster()
@@ -79,7 +79,7 @@ if (assembly?.sections) {
 // ── Spawn → preset materialized ─────────────────────────────────────────────
 const dir = ctx.evolution.spawn("beta", "the beta capability")
 check("spawn.preset", fs.existsSync(path.join(dir, "preset.yml")) && fs.existsSync(path.join(dir, "agent.cordis.yml")), "spawn writes preset.yml + agent.cordis.yml")
-check("spawn.ledger", fs.readFileSync(path.join(synth, ".opencode/agents/capabilities/beta.md"), "utf8").includes("energy: 50"), "spawn seeds energy ledger at 50")
+check("spawn.ledger", fs.readFileSync(path.join(synth, ".helm/agents/capabilities/beta.md"), "utf8").includes("energy: 50"), "spawn seeds energy ledger at 50")
 // WI-107 regression guards — spawn materializes the PAIR (preset dir +
 // sibling energy ledger), and at this point the synth dir holds exactly one
 // ledger-only capability (alpha) plus one pair (beta). The pre-fix roster
@@ -166,9 +166,9 @@ fakeAgent.ctx = fakeCtx
 // The fake coordinator is AWAKENED for the summon tests: T2's D2 gate refuses
 // lifecycle commands for dormant sessions, so the harness records it in the
 // awaken ledger first (the /awaken flow itself gets its own test below).
-fs.mkdirSync(path.join(synth, ".opencode/agents"), { recursive: true })
+fs.mkdirSync(path.join(synth, ".helm/agents"), { recursive: true })
 fs.writeFileSync(
-  path.join(synth, ".opencode/agents/hive-sessions.json"),
+  path.join(synth, ".helm/agents/hive-sessions.json"),
   JSON.stringify({ v: 1, coordinators: { agent_fake: { agent: "gate", awakenedAt: new Date().toISOString(), lastAwakenInput: "" } } }, null, 2)
 )
 const spawnCmd = ctx.commands.find(undefined, "spawn")
@@ -188,7 +188,7 @@ if (spawnCmd) {
   if (scoped) {
     const result = await scoped.execute({}, { agent: fakeAgent, signal: AbortSignal.timeout(1000) })
     check("summon.fired", String(result).includes("gamma"), "the summoned hive_spawn executed (string result)")
-    check("summon.mutated", fs.existsSync(path.join(synth, ".opencode/agents/capabilities/gamma/preset.yml")), "the summoned tool (not the handler) materialized the capability")
+    check("summon.mutated", fs.existsSync(path.join(synth, ".helm/agents/capabilities/gamma/preset.yml")), "the summoned tool (not the handler) materialized the capability")
     check("summon.retracted", ctx.tools.get("hive_spawn", fakeAgent) === undefined, "hive_spawn retracted after firing (turn-scoped)")
   } else {
     check("summon.fired", false, "scoped tool not resolvable — cannot execute")
@@ -211,8 +211,8 @@ if (evolveCmd2) {
 
 // ── Dissolve → archived, removed from roster ────────────────────────────────
 ctx.evolution.dissolve("beta")
-check("dissolve.moved", fs.existsSync(path.join(synth, ".opencode/agents/dissolved/beta.md")) && !fs.existsSync(path.join(synth, ".opencode/agents/capabilities/beta.md")), "dissolve archives the ledger")
-check("dissolve.dir-moved", fs.existsSync(path.join(synth, ".opencode/agents/dissolved/beta/preset.yml")) && !fs.existsSync(path.join(synth, ".opencode/agents/capabilities/beta")), "dissolve archives the preset dir")
+check("dissolve.moved", fs.existsSync(path.join(synth, ".helm/agents/dissolved/beta.md")) && !fs.existsSync(path.join(synth, ".helm/agents/capabilities/beta.md")), "dissolve archives the ledger")
+check("dissolve.dir-moved", fs.existsSync(path.join(synth, ".helm/agents/dissolved/beta/preset.yml")) && !fs.existsSync(path.join(synth, ".helm/agents/capabilities/beta")), "dissolve archives the preset dir")
 check("dissolve.roster", !ctx.evolution.buildRoster().includes("beta"), "roster no longer lists the dissolved capability")
 // WI-107: post-dissolve the remaining listing is alpha + gamma, each once —
 // a pairing bug that hidden-listed (or over-deleted) would show here.
@@ -227,7 +227,7 @@ check("dissolve.roster-single", postDissolve.length === 2 && postDissolve.every(
   const spawnCmdDormant = ctx.commands.find(undefined, "spawn")
   const out = await spawnCmdDormant.handler({ rawInput: "nope — refused capability", agent: dormantAgent, commandId: "c_gate", attachments: [], signal: AbortSignal.timeout(1000) })
   check("gate.command-refused", out.kind === "error" && /\/awaken/.test(out.text ?? ""), "/spawn in a dormant session refuses with the awaken hint")
-  check("gate.command-no-mutation", !fs.existsSync(path.join(synth, ".opencode/agents/capabilities/nope")), "refused command materialized nothing")
+  check("gate.command-no-mutation", !fs.existsSync(path.join(synth, ".helm/agents/capabilities/nope")), "refused command materialized nothing")
   const tickOut = await ctx.commands.find(undefined, "tick").handler({ rawInput: "", agent: dormantAgent, commandId: "c_gate2", attachments: [], signal: AbortSignal.timeout(1000) })
   check("gate.tick-refused", tickOut.kind === "error" && /\/awaken/.test(tickOut.text ?? ""), "/tick refuses the same way")
 
@@ -245,7 +245,7 @@ check("dissolve.roster-single", postDissolve.length === 2 && postDissolve.every(
   check("gate.child-command-refused", linCmd.kind === "error" && /top-level sessions/.test(linCmd.text ?? "") && !/dormant/.test(linCmd.text ?? ""), "child /spawn refuses as lineage participant, not dormant")
   const linAwaken = await ctx.commands.find(undefined, "awaken").handler({ rawInput: "", agent: linChild, commandId: "c_lin2", attachments: [], signal: AbortSignal.timeout(1000) })
   check("awaken.child-refused", linAwaken.kind === "error" && /lineage|top-level/.test(linAwaken.text ?? ""), "child /awaken refused — no self-awaken")
-  const linLedger = JSON.parse(fs.readFileSync(path.join(synth, ".opencode/agents/hive-sessions.json"), "utf8"))
+  const linLedger = JSON.parse(fs.readFileSync(path.join(synth, ".helm/agents/hive-sessions.json"), "utf8"))
   check("awaken.child-no-registry", linLedger.coordinators.ses_lin_child === undefined, "child refusal wrote no registry entry")
 }
 
@@ -281,10 +281,10 @@ check("dissolve.roster-single", postDissolve.length === 2 && postDissolve.every(
 
   const out = await awakenCmd.handler({ rawInput: "port the awaken flow to dsh", agent: awakenAgent, commandId: "c_awaken", attachments: [], signal: AbortSignal.timeout(1000) })
   check("awaken.success", out.kind === "success", `/awaken handler succeeded (${out.text?.slice(0, 60)})`)
-  const ledger = JSON.parse(fs.readFileSync(path.join(synth, ".opencode/agents/hive-sessions.json"), "utf8"))
+  const ledger = JSON.parse(fs.readFileSync(path.join(synth, ".helm/agents/hive-sessions.json"), "utf8"))
   check("awaken.registry", ledger.coordinators.ses_awaken_1?.agent === "awaken" || (ledger.coordinators.ses_awaken_1 && ledger.coordinators.ses_awaken_1.lastAwakenInput === "port the awaken flow to dsh"), "registry records the flip with the raw input")
   check("awaken.lifted", ctx.tools.get("hive_dispatch", awakenAgent) !== undefined, "the held restriction was lifted — hive tools present after the flip")
-  check("awaken.brief", awakenFollowups.length === 1 && awakenFollowups[0].content[0].text.includes("hive_awaken_spawn") && awakenFollowups[0].content[0].text.includes("dreamcatcher") && awakenFollowups[0].content[0].text.includes("HIVE Ecosystem Dossier") && awakenFollowups[0].content[0].text.includes("port the awaken flow to dsh"), "brief carries summon name + mandatory dreamcatcher recall + dossier + raw input")
+  check("awaken.brief", awakenFollowups.length === 1 && awakenFollowups[0].content[0].text.includes("hive_awaken_spawn") && awakenFollowups[0].content[0].text.includes("dreamcatcher") && awakenFollowups[0].content[0].text.includes("HELM Ecosystem Dossier") && awakenFollowups[0].content[0].text.includes("port the awaken flow to dsh"), "brief carries summon name + mandatory dreamcatcher recall + dossier + raw input")
 
   // The summoned batch tool: structured persona manifests, invalid entries
   // refused line-by-line, tool retracts after firing.
@@ -309,16 +309,16 @@ check("dissolve.roster-single", postDissolve.length === 2 && postDissolve.every(
     check("awaken.batch-manifest", text.includes("Spawning delta") && text.includes("✓ manifested"), "batch tool manifests the valid entry")
     check("awaken.batch-refuses", text.includes("✗ refused"), "batch tool reports invalid entries line-by-line")
     check("awaken.batch-retracted", ctx.tools.get("hive_awaken_spawn", awakenAgent) === undefined, "batch tool retracts after the single call")
-    const yml = fs.readFileSync(path.join(synth, ".opencode/agents/capabilities/delta/agent.cordis.yml"), "utf8")
+    const yml = fs.readFileSync(path.join(synth, ".helm/agents/capabilities/delta/agent.cordis.yml"), "utf8")
     check("awaken.persona-sections", yml.includes("## What This Enables") && yml.includes("## Activation Triggers") && yml.includes("## Boundaries"), "persona renders as structured template sections")
-    check("awaken.ledger-seeded", fs.readFileSync(path.join(synth, ".opencode/agents/capabilities/delta.md"), "utf8").includes("energy: 50"), "persona spawn still seeds the energy ledger at 50")
+    check("awaken.ledger-seeded", fs.readFileSync(path.join(synth, ".helm/agents/capabilities/delta.md"), "utf8").includes("energy: 50"), "persona spawn still seeds the energy ledger at 50")
   }
 
   // Re-awaken variant: same session again → no registry flip, evolution brief.
-  const awakenBefore = JSON.parse(fs.readFileSync(path.join(synth, ".opencode/agents/hive-sessions.json"), "utf8")).coordinators.ses_awaken_1.awakenedAt
+  const awakenBefore = JSON.parse(fs.readFileSync(path.join(synth, ".helm/agents/hive-sessions.json"), "utf8")).coordinators.ses_awaken_1.awakenedAt
   const followupsBefore = awakenFollowups.length
   const out2 = await awakenCmd.handler({ rawInput: "analyze gaps again", agent: awakenAgent, commandId: "c_awaken2", attachments: [], signal: AbortSignal.timeout(1000) })
-  const ledgerAfter = JSON.parse(fs.readFileSync(path.join(synth, ".opencode/agents/hive-sessions.json"), "utf8"))
+  const ledgerAfter = JSON.parse(fs.readFileSync(path.join(synth, ".helm/agents/hive-sessions.json"), "utf8"))
   check("awaken.reawaken-no-flip", out2.kind === "success" && ledgerAfter.coordinators.ses_awaken_1.awakenedAt === awakenBefore, "re-awaken leaves the registry untouched")
   check("awaken.reawaken-evolve", awakenFollowups.length === followupsBefore + 1 && awakenFollowups.at(-1).content[0].text.includes("hive_evolve"), "re-awaken summons the evolution analysis instead")
 }
@@ -354,7 +354,7 @@ check("dissolve.roster-single", postDissolve.length === 2 && postDissolve.every(
     // move), not bare presence — and E4: nothing is asked of the user.
     check("wi074.refusal.armed-line", /re-call `hive_awaken_spawn` with the corrected payload/.test(refusedText), "(b) the still-armed line names the corrective move: re-call with the corrected payload")
     check("wi074.refusal.consent-fact", /no re-approval is needed/.test(refusedText) && !/ask the user/i.test(refusedText), "(E4) the refusal states consent survives and asks the user for nothing")
-    check("wi074.refusal.no-mutation", !fs.existsSync(path.join(synth, ".opencode/agents/capabilities/missing-desc")), "refused entries materialized nothing (mutation never ran)")
+    check("wi074.refusal.no-mutation", !fs.existsSync(path.join(synth, ".helm/agents/capabilities/missing-desc")), "refused entries materialized nothing (mutation never ran)")
 
     // (c) corrected retry manifests under the SAME approval…
     const correctedText = String(await batchRefuse.execute(
@@ -452,7 +452,7 @@ check("dissolve.roster-single", postDissolve.length === 2 && postDissolve.every(
       { persona: { enables: "enables theta work", triggers: "when theta work appears", protocol: "do theta things carefully" } },
       { agent: fakeAgent, signal: AbortSignal.timeout(1000) }
     )
-    const ymlT4 = fs.readFileSync(path.join(synth, ".opencode/agents/capabilities/theta/agent.cordis.yml"), "utf8")
+    const ymlT4 = fs.readFileSync(path.join(synth, ".helm/agents/capabilities/theta/agent.cordis.yml"), "utf8")
     check("t4.persona-rendered", ymlT4.includes("## What This Enables") && ymlT4.includes("## Operating Protocol"), "/spawn persona renders as template sections in the preset")
     check("t4.identityline-first", ymlT4.includes("You are the theta capability: the theta capability"), "identity line still leads the persona block")
   } else {
@@ -475,11 +475,11 @@ check("dissolve.roster-single", postDissolve.length === 2 && postDissolve.every(
     const refusedSp = String(await spTool.execute({ persona: { enables: "enables only — no triggers section" } }, { agent: fakeAgent, signal: AbortSignal.timeout(2000) }))
     check("wi074.spawn.refusal-still-armed", ctx.tools.get("hive_spawn", fakeAgent) !== undefined && refusedSp.includes("✗ refused (payload)"), "an invalid persona shape does NOT consume the /spawn summon")
     check("wi074.spawn.refusal-actionable", /re-call `hive_spawn`/.test(refusedSp), "the still-armed line names the corrective re-call")
-    check("wi074.spawn.no-mutation", !fs.existsSync(path.join(synth, ".opencode/agents/capabilities/sigma/preset.yml")), "the refused persona materialized nothing")
+    check("wi074.spawn.no-mutation", !fs.existsSync(path.join(synth, ".helm/agents/capabilities/sigma/preset.yml")), "the refused persona materialized nothing")
     const okSp = String(await spTool.execute({ persona: { enables: "enables sigma work", triggers: "when sigma work appears" } }, { agent: fakeAgent, signal: AbortSignal.timeout(2000) }))
     check("wi074.spawn.corrected-manifests", okSp.includes("Capability `sigma` manifested"), "the corrected persona manifests")
     check("wi074.spawn.retracted", ctx.tools.get("hive_spawn", fakeAgent) === undefined, "the summon retracts after the manifest (E5: one manifestation, no more)")
-    check("wi074.spawn.preset", fs.existsSync(path.join(synth, ".opencode/agents/capabilities/sigma/preset.yml")), "sigma materialized through the mutated tool call only (WI-036/037)")
+    check("wi074.spawn.preset", fs.existsSync(path.join(synth, ".helm/agents/capabilities/sigma/preset.yml")), "sigma materialized through the mutated tool call only (WI-036/037)")
   }
 }
 
@@ -507,7 +507,7 @@ check("dissolve.roster-single", postDissolve.length === 2 && postDissolve.every(
   const beforeStatus = followups.length
   const out = await statusCmd.handler({ rawInput: "", agent: fakeAgent, commandId: "c_t6_status2", attachments: [], signal: AbortSignal.timeout(1000) })
   check("status.summons", out.kind === "success" && followups.length === beforeStatus + 1, "/status summons hive_status and wakes the model")
-  check("status.wake-brief", followups.at(-1).content[0].text.includes("hive_status") && followups.at(-1).content[0].text.includes("relay the roster, the void, and the last tick"), "wake brief names the summoned tool + the relay instruction (no invented data)")
+  check("status.wake-brief", followups.at(-1).content[0].text.includes("hive_status") && followups.at(-1).content[0].text.includes("relay the crew manifest, the harbor, and the last tick"), "wake brief names the summoned tool + the relay instruction (no invented data)")
   const statusTool = ctx.tools.get("hive_status", fakeAgent)
   check("status.scoped", statusTool !== undefined, "hive_status scoped on the agent, invisible to the global layer")
   check("status.not-global", ctx.tools.get("hive_status") === undefined, "hive_status never touches the global tool layer")
@@ -515,11 +515,11 @@ check("dissolve.roster-single", postDissolve.length === 2 && postDissolve.every(
     const dossier = String(await statusTool.execute({}, { agent: fakeAgent, signal: AbortSignal.timeout(1000) }))
     check(
       "status.dossier",
-      dossier.includes("HIVE Ecosystem Dossier") &&
-        dossier.includes("### Roster (active capabilities)") &&
+      dossier.includes("HELM Ecosystem Dossier") &&
+        dossier.includes("### Crew Manifest (active capabilities)") &&
         /gamma — energy: \d+/.test(dossier) &&
-        dossier.includes("The Void (dissolved capabilities)"),
-      "hive_status returns the dossier: header + roster line + the void (dissolved beta lists there)"
+        dossier.includes("The Harbor (dissolved capabilities)"),
+      "hive_status returns the dossier: header + crew-manifest line + the harbor (dissolved beta lists there)"
     )
     // The reuse contract, byte-exact: the summoned tool's output IS the shared
     // composer's output (a status view drifting from /awaken's dossier would
@@ -552,7 +552,7 @@ check("dissolve.roster-single", postDissolve.length === 2 && postDissolve.every(
     directory: synth,
     recentPreCompactionDreams: (limit = 5) => fakeDreams.slice(0, limit),
   })
-  const ledgerPath = path.join(synth, ".opencode/agents/hive-sessions.json")
+  const ledgerPath = path.join(synth, ".helm/agents/hive-sessions.json")
   const mergeLedger = (sessionId) => {
     const ledger = JSON.parse(fs.readFileSync(ledgerPath, "utf8"))
     ledger.coordinators[sessionId] = { agent: "status", awakenedAt: new Date().toISOString(), lastAwakenInput: "" }
@@ -577,7 +577,7 @@ check("dissolve.roster-single", postDissolve.length === 2 && postDissolve.every(
   check("compact.section-after-doctrine", doctrineIdx >= 0 && doctrineIdx < compactIdx, "re-anchor renders after doctrine (55 < 56)")
   const sectionC = asmC.sections.find((s) => s.name === "hive:post-compaction")
   const textC = String(sectionC?.text ?? "")
-  check("compact.section-header", textC.includes("== [HIVE] context restored after compaction"), "block opens with the re-anchor header")
+  check("compact.section-header", textC.includes("== [HELM] context restored after compaction"), "block opens with the re-anchor header")
   check("compact.section-summary", textC.includes("Active capabilities:") && textC.includes("- alpha (energy:"), "block carries the getCapabilitiesSummary energy summary")
   check(
     "compact.section-pointers",
@@ -596,7 +596,7 @@ check("dissolve.roster-single", postDissolve.length === 2 && postDissolve.every(
   const s2Text = String((await ctx.systemPrompt.assemble({ scope: compactAgent2 })).sections.find((s) => s.name === "hive:post-compaction")?.text ?? "")
   check(
     "compact.fallback-no-archive",
-    s2Text.includes("== [HIVE] context restored after compaction") &&
+    s2Text.includes("== [HELM] context restored after compaction") &&
       s2Text.includes("dream archive is not mounted") &&
       !s2Text.includes("(pre-compaction, artifacts:"),
     "absent dreamArchive degrades the section to the fallback line, zero pointers"
@@ -676,8 +676,8 @@ check("dissolve.roster-single", postDissolve.length === 2 && postDissolve.every(
 
   // 4) BOARD-FAILURE INJECTION: replace the board DIR with a FILE — the next
   //    flip must still succeed, warn, and carry the non-fatal note (W-049).
-  const boardDirPath = path.join(synth, ".opencode", "board")
-  fs.renameSync(boardDirPath, path.join(synth, ".opencode", "board.bak"))
+  const boardDirPath = path.join(synth, ".helm", "board")
+  fs.renameSync(boardDirPath, path.join(synth, ".helm", "board.bak"))
   fs.writeFileSync(boardDirPath, "not a directory — injected failure", "utf8")
   const b5c = mkAgent("ses_b5_err")
   const outB5c = await cmdB5.handler({ rawInput: "B5 failure injection", agent: b5c, commandId: "c_b5c", attachments: [], signal: AbortSignal.timeout(2000) })
@@ -689,7 +689,7 @@ check("dissolve.roster-single", postDissolve.length === 2 && postDissolve.every(
   check("b5.fail-brief-note", briefC.includes("Board: auto-register could not run") && briefC.includes("hive_board_create"), "brief carries the non-fatal note with a next step (W-049)")
   check("b5.fail-no-dangling", !briefC.includes("{{"), "failure path still leaves no dangling placeholders")
   fs.rmSync(boardDirPath, { force: true })
-  fs.renameSync(path.join(synth, ".opencode", "board.bak"), boardDirPath)
+  fs.renameSync(path.join(synth, ".helm", "board.bak"), boardDirPath)
 
   // 5) STUB-GREP NEGATIVE: the old placeholder log must not survive anywhere.
   const srcPath = path.join(HERE, "..", "src", "index.ts") // HERE = this test's dir; the package root is one up
@@ -705,24 +705,24 @@ check("dissolve.roster-single", postDissolve.length === 2 && postDissolve.every(
   check("d1.spawn-tier-line", tYaml.includes("model_tier: mechanical"), "spawn() writes the declared tier into preset.yml")
   const tspec = readPresetModelSpec(path.join(tdir))
   check("d1.spec-roundtrip", tspec.tier === "mechanical" && tspec.pin === undefined, "readPresetModelSpec round-trips the spawn-written tier")
-  const noTierSpec = readPresetModelSpec(path.join(synth, ".opencode/agents/capabilities"))
+  const noTierSpec = readPresetModelSpec(path.join(synth, ".helm/agents/capabilities"))
   check("d1.spec-missing-file", JSON.stringify(noTierSpec) === "{}", "a preset-dir-less read degrades to {} (inherit)")
   const refusedTier = ctx.evolution.spawnBatch({ capabilities: [{ name: "tier-refused", description: "x", model_tier: "turbo-ultra" }] })
   check(
     "d1.batch-refuses-unknown-tier",
-    refusedTier.consumed === false && refusedTier.text.includes("unknown model_tier") && !fs.existsSync(path.join(synth, ".opencode/agents/capabilities/tier-refused")),
+    refusedTier.consumed === false && refusedTier.text.includes("unknown model_tier") && !fs.existsSync(path.join(synth, ".helm/agents/capabilities/tier-refused")),
     "spawnBatch refuses an unknown tier correctably: nothing manifested, summon stays armed"
   )
   const tiered = ctx.evolution.spawnBatch({ capabilities: [{ name: "tier-batched", description: "x", model_tier: "deep" }] })
   check(
     "d1.batch-threads-tier",
-    tiered.consumed === true && fs.readFileSync(path.join(synth, ".opencode/agents/capabilities/tier-batched/preset.yml"), "utf8").includes("model_tier: deep"),
+    tiered.consumed === true && fs.readFileSync(path.join(synth, ".helm/agents/capabilities/tier-batched/preset.yml"), "utf8").includes("model_tier: deep"),
     "spawnBatch threads the tier through spawn()"
   )
   const untired = ctx.evolution.spawnBatch({ capabilities: [{ name: "tier-absent", description: "x" }] })
   check(
     "d1.batch-omits-tier-line",
-    untired.consumed === true && !fs.readFileSync(path.join(synth, ".opencode/agents/capabilities/tier-absent/preset.yml"), "utf8").includes("model_tier"),
+    untired.consumed === true && !fs.readFileSync(path.join(synth, ".helm/agents/capabilities/tier-absent/preset.yml"), "utf8").includes("model_tier"),
     "an entry without model_tier writes no tier line (byte-compat with the pre-D1 spawn output)"
   )
 }
@@ -758,8 +758,8 @@ check("dissolve.roster-single", postDissolve.length === 2 && postDissolve.every(
       apply: ctx.tools.get("hive_evolve_apply", fakeAgent),
     }
   }
-  const gammaYml = path.join(synth, ".opencode/agents/capabilities/gamma/agent.cordis.yml")
-  const queueFile = path.join(synth, ".opencode/agents/hive-mutations.json")
+  const gammaYml = path.join(synth, ".helm/agents/capabilities/gamma/agent.cordis.yml")
+  const queueFile = path.join(synth, ".helm/agents/hive-mutations.json")
   const TEST_VERBATIM = "gamma charter grows for testing — the executor integrates this text VERBATIM and the roundtrip harness asserts it; (W-047) end-state read-back decides."
   const gammaPayload = {
     id: "gamma-charter-roundtrip",
@@ -778,7 +778,7 @@ check("dissolve.roster-single", postDissolve.length === 2 && postDissolve.every(
     const { analysis } = await summonEvolveApply()
     check("wi108.analysis.scoped", analysis !== undefined && ctx.tools.get("hive_evolve_apply", fakeAgent) !== undefined, "both WI-108 tools scoped on the coordinator")
     const view = String(await analysis.execute({}, { agent: fakeAgent, signal: AbortSignal.timeout(2000) }))
-    check("wi108.analysis.roster", view.includes("## Active Capabilities") && view.includes("gamma"), "the analysis still returns the live roster")
+    check("wi108.analysis.roster", view.includes("## Crew Manifest (active capabilities)") && view.includes("gamma"), "the analysis still returns the live crew manifest (roster view)")
     check("wi108.analysis.empty-queue", view.includes("## Mutation Queue") && view.includes("no mutation records"), "the empty queue renders an honest state line")
   }
 
@@ -857,9 +857,9 @@ check("dissolve.roster-single", postDissolve.length === 2 && postDissolve.every(
   // Non-canonical persona (hand-shaped agent.cordis.yml without the spawn-
   // rendered block): refused BEFORE any write, at body level.
   {
-    fs.mkdirSync(path.join(synth, ".opencode/agents/capabilities/wonky"), { recursive: true })
-    fs.writeFileSync(path.join(synth, ".opencode/agents/capabilities/wonky/preset.yml"), "name: wonky\ndescription: the wonky capability\norder: 10\nmodel_tier: standard\n")
-    fs.writeFileSync(path.join(synth, ".opencode/agents/capabilities/wonky/agent.cordis.yml"), "not: a canonical persona block\npersona: prose\n")
+    fs.mkdirSync(path.join(synth, ".helm/agents/capabilities/wonky"), { recursive: true })
+    fs.writeFileSync(path.join(synth, ".helm/agents/capabilities/wonky/preset.yml"), "name: wonky\ndescription: the wonky capability\norder: 10\nmodel_tier: standard\n")
+    fs.writeFileSync(path.join(synth, ".helm/agents/capabilities/wonky/agent.cordis.yml"), "not: a canonical persona block\npersona: prose\n")
     const queueBefore = fs.readFileSync(queueFile, "utf8")
     const wonky = ctx.evolution.evolveApply({
       id: "wonky-charter",

@@ -1,4 +1,4 @@
-# HIVE — Capability Standing Context
+# HELM — Capability Standing Context
 
 ## Scope Discipline
 
@@ -41,7 +41,7 @@ yours. A waiting capability wastes energy; a stalled one leaks it.
 
 ## The Synapse
 
-Cross-capability information flows THROUGH THE COORDINATOR — the synapse.
+Cross-capability information flows THROUGH THE HELMSMAN (the synapse).
 Never assume a sibling capability sees your context: everything a peer must
 know travels through the coordinator, in the dispatch or in your report.
 

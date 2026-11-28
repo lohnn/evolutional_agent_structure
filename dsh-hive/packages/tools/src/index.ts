@@ -65,6 +65,39 @@ const reqStr = (description: string) => ({ type: "string", required: true, descr
 const bool = (description: string) => ({ type: "boolean", description } as const)
 const num = (description: string) => ({ type: "number", description } as const)
 
+// ── P2 dual-name alias cycle (helm-rebrand-design.md §2.5/§3) ────────────────
+// Every hive_dream_* tool ALSO registers its canonical helm_* name on the
+// SAME definition: the alias is a spread of the built ToolDefinition with only
+// name + description replaced, so compiled parameter schema, output schema,
+// output.render, and the exact execute closure are shared BY REFERENCE — never
+// a behavior fork. The old names stay live and untouched until the P5 alias
+// retirement; the alias descriptions carry the dual-name note. No cross-
+// package import for one data table (W-044 discipline): the monorepo-wide
+// census lives in @hive/dsh-evolution HELM_TOOL_ALIASES, and
+// evolution/test/tool-gate-sync.test.mjs asserts THIS table stays in step.
+const HELM_DREAM_ALIASES: Readonly<Record<string, string>> = {
+  hive_dream_residue: "helm_dream_residue",
+  hive_dream_harvest: "helm_dream_harvest",
+  hive_dream_artifact_create: "helm_dream_artifact_create",
+  hive_dream_query: "helm_dream_query",
+  hive_dream_rank: "helm_dream_rank",
+  hive_dream_begin: "helm_dream_begin",
+  hive_dream_complete: "helm_dream_complete",
+  hive_dream_list: "helm_dream_list",
+  hive_dream_supersede: "helm_dream_supersede",
+  hive_dream_mark_stale: "helm_dream_mark_stale",
+  hive_dream_detect_duplicates: "helm_dream_detect_duplicates",
+} as const
+
+const helmAliasNote = (legacy: string): string =>
+  ` [HELM dual-name cycle: legacy "${legacy}" stays live — both names run this same tool until the P5 alias retirement.]`
+
+const helmAlias = (def: import("@deepseek-ai/dsh-tools").ToolDefinition): import("@deepseek-ai/dsh-tools").ToolDefinition | undefined => {
+  const alias = HELM_DREAM_ALIASES[def.name]
+  if (alias === undefined) return undefined
+  return { ...def, name: alias, description: def.description + helmAliasNote(def.name) }
+}
+
 export function apply(ctx: DreamToolsCtx) {
   const arc = () => ctx.dreamArchive
   const log = (level: "info" | "warn" | "error", msg: string, extra?: Record<string, unknown>) =>
@@ -764,8 +797,12 @@ export function apply(ctx: DreamToolsCtx) {
     }),
   ]
 
-  // Register all 9 tools; the disposer removes them together.
-  const disposers = registrations.map((def) => ctx.tools.register(def))
+  // Register all 11 tools PLUS their helm_* dual-name aliases (P2 cycle);
+  // the disposer removes the whole set together.
+  const disposers = registrations.flatMap((def) => {
+    const alias = helmAlias(def)
+    return alias ? [ctx.tools.register(def), ctx.tools.register(alias)] : [ctx.tools.register(def)]
+  })
   return () => { for (const d of disposers) d() }
 }
 
