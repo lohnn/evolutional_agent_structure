@@ -70,6 +70,47 @@ Only if the machine still runs opencode-era pieces. Ordered, each step reversibl
 
 The 2026-09-19 "hive-board viewer KEPT on 4400" decision remains each deployment's own call; the removal is a signed operator act, never an inference.
 
+## 2.1 REQUIRED when restarting after pulling this PR — entrypoint svcwatch relocation
+
+The retirement **deleted the repo's `src/svcwatch/svcwatch.py`**. Any deployment whose container
+entrypoint resolves its supervisor from that repo path (source-checkout deployments — this
+includes an in-place `docker compose restart`, which re-executes the entrypoint in the same
+filesystem) will boot with **no supervision at all**: both the `[ -f <path> ]` guard AND the
+assignment must be repointed, not just one of them (the guard is the one that silently fails
+first — the resolved path still exists in some line but never gets selected).
+
+**The failing signature** (after the repo pull):
+
+```sh
+# entrypoint still testing a path the retirement deleted:
+if [ -f "$WORKSPACE/projects/evolutional_agent_structure/src/svcwatch/svcwatch.py" ]; then
+  SVCWATCH="$WORKSPACE/projects/evolutional_agent_structure/src/svcwatch/svcwatch.py"
+```
+
+**The fix** (promote the preserved copy to the persistent toolbox volume, then point BOTH the
+guard and the assignment at it):
+
+```sh
+cp -r <repo>/svcwatch-preserved /opt/toolbox/svcwatch   # python + svcwatchctl + examples
+```
+
+```sh
+SVCWATCH=""
+if [ -f /opt/toolbox/svcwatch/svcwatch.py ]; then
+  SVCWATCH=/opt/toolbox/svcwatch/svcwatch.py
+fi
+```
+
+Plus a guard-failure log line (`svcwatch.py not found at /opt/toolbox/svcwatch —`) so the next
+failure names the path.
+
+**Recreate note (host/Mac side):** the entrypoint file is **baked into the image** — an in-place
+edit survives `docker compose restart`, but a `--force-recreate`/image rebuild resets it. Copy
+the same change into your compose/Dockerfile entrypoint source when you next touch the image,
+or the trap returns on recreate only.
+
+---
+
 ## 3. What does NOT change
 
 - Package scope stays `@hive/dsh-*`; tarball names stay `hive-dsh-*.tgz`.
